@@ -1,0 +1,35 @@
+plugins {
+    id 'java'
+}
+
+group 'com.github.tth05'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'io.github.classgraph:classgraph:4.8.123'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+//    testImplementation fileTree(dir: 'C:\\Users\\Tim\\AppData\\Roaming\\gdlauncher_next\\instances\\ATM3-Neu\\mods', include: ['*.jar'])
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+task copyNativeLibrary {
+    exec {
+        workingDir "${projectDir}/jindex-rs"
+        commandLine "cargo", "build", "--release"
+    }
+    copy {
+        from "${projectDir}/jindex-rs/target/release"
+        into "${projectDir}/src/main/resources"
+        include "jindex_rs.dll"
+    }
+}
+
+build.dependsOn copyNativeLibrary
