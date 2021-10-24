@@ -1,3 +1,4 @@
+use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
 use ascii::AsciiStr;
 use std::cmp::min;
@@ -5,6 +6,7 @@ use std::cmp::min;
 pub struct ClassIndexConstantPool {
     string_data: Vec<u8>,  //Holds Ascii Strings prefixed with their length
     method_data: Vec<u32>, //Holds string_data indexes for method names
+    indexed_packages: Vec<IndexedPackage>, //An unordered list of all packages
 }
 
 impl ClassIndexConstantPool {
@@ -12,6 +14,66 @@ impl ClassIndexConstantPool {
         Self {
             string_data: Vec::with_capacity(capacity as usize),
             method_data: Vec::new(),
+            indexed_packages: vec![IndexedPackage::new(0, 0, 0)],
+        }
+    }
+
+    pub fn get_or_add_package(&mut self, name: &AsciiStr) -> Result<&IndexedPackage> {
+        self.get_or_add_package0(0, name)
+    }
+
+    /// This may be the most disgusting method I've ever written
+    fn get_or_add_package0(
+        &mut self,
+        indexed_package_index: u32,
+        name: &AsciiStr,
+    ) -> Result<&IndexedPackage> {
+        let dot_index_or_none = name.chars().position(|c| c == '.');
+        let sub_name = match dot_index_or_none {
+            Some(dot_index) => &name[..dot_index],
+            None => name,
+        };
+
+        let possible_index = self
+            .indexed_packages
+            .get(indexed_package_index as usize)
+            .unwrap()
+            .sub_packages_indexes()
+            .iter()
+            .enumerate()
+            .find(|p| {
+                self.indexed_packages
+                    .get(*p.1 as usize)
+                    .unwrap()
+                    .package_name(self)
+                    .eq(sub_name)
+            })
+            .map(|p| *p.1);
+
+        if let Some(index) = possible_index {
+            if dot_index_or_none.is_some() {
+                self.get_or_add_package0(index, &name[index as usize + 1..])
+            } else {
+                Ok(self.indexed_packages.get(index as usize).unwrap())
+            }
+        } else {
+            let name_index = self.add_string(sub_name.as_bytes()).unwrap();
+            let new_index = self.indexed_packages.len();
+            self.indexed_packages.push(IndexedPackage::new(
+                new_index as u32,
+                name_index,
+                indexed_package_index,
+            ));
+            self.indexed_packages
+                .get_mut(indexed_package_index as usize)
+                .unwrap()
+                .add_sub_package(new_index as u32);
+
+            if let Some(index) = dot_index_or_none {
+                self.get_or_add_package0(new_index as u32, &name[index + 1..])
+            } else {
+                Ok(self.indexed_packages.last().unwrap())
+            }
         }
     }
 

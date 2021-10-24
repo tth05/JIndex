@@ -81,7 +81,6 @@ impl ClassIndexBuilder {
         let mut method_prefix_tree: PrefixTree<u32> = PrefixTree::new(2);
         let mut constant_pool_map: HashMap<&AsciiStr, u32> = HashMap::new();
 
-        let mut indexed_classes = Vec::new();
         for c in vec.into_iter() {
             let class_name_index = if let Some(i) = constant_pool_map.get(c.class_name) {
                 *i
@@ -104,34 +103,23 @@ impl ClassIndexBuilder {
                 };
 
                 method_indexes.push(method_name_index);
+
+                method_prefix_tree.put(
+                    &constant_pool,
+                    constant_pool.string_view_at(method_name_index),
+                    method_name_index,
+                );
             }
 
             let method_data_index = constant_pool.add_methods(&method_indexes);
-            indexed_classes.push(IndexedClass::new(
-                class_name_index,
-                method_data_index,
-                method_count,
-            ));
-            drop(c);
-        }
-
-        for indexed_class in indexed_classes.into_iter() {
-            for cp_method_index in constant_pool
-                .get_methods_at(indexed_class.method_data_index, indexed_class.method_count)
-                .into_iter()
-            {
-                method_prefix_tree.put(
-                    &constant_pool,
-                    constant_pool.string_view_at(*cp_method_index),
-                    *cp_method_index,
-                );
-            }
+            let indexed_class =
+                IndexedClass::new(class_name_index, method_data_index, method_count);
 
             class_prefix_tree.put(
                 &constant_pool,
                 constant_pool.string_view_at(indexed_class.class_name_index),
                 indexed_class,
-            );
+            )
         }
 
         ClassIndex {
@@ -169,13 +157,57 @@ impl IndexedClass {
         }
     }
 
-    pub fn class_name_index(&self) -> u32 {
-        self.class_name_index
+    pub fn class_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+        constant_pool
+            .string_view_at(self.class_name_index)
+            .to_ascii_string(constant_pool)
     }
-    pub fn method_data_index(&self) -> u32 {
-        self.method_data_index
+
+    pub fn method_indexes<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a [u32] {
+        constant_pool.get_methods_at(self.method_data_index, self.method_count)
     }
+
     pub fn method_count(&self) -> u16 {
         self.method_count
+    }
+}
+
+pub struct IndexedPackage {
+    index: u32,
+    package_name_index: u32,
+    sub_packages_indexes: Vec<u32>,
+    previous_package_index: u32,
+}
+
+impl IndexedPackage {
+    pub fn new(index: u32, package_name_index: u32, previous_package_index: u32) -> Self {
+        Self {
+            index,
+            package_name_index,
+            sub_packages_indexes: Vec::new(),
+            previous_package_index,
+        }
+    }
+
+    pub fn package_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+        constant_pool
+            .string_view_at(self.package_name_index)
+            .to_ascii_string(constant_pool)
+    }
+
+    pub fn add_sub_package(&mut self, index: u32) {
+        self.sub_packages_indexes.push(index);
+    }
+
+    pub fn sub_packages_indexes(&self) -> &[u32] {
+        &self.sub_packages_indexes[..]
+    }
+
+    pub fn previous_package_index(&self) -> u32 {
+        self.previous_package_index
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
     }
 }

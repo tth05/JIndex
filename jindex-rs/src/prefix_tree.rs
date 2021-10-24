@@ -175,8 +175,6 @@ impl<T> Tail<T> {
         results: &mut Vec<&'a T>,
         limit: &mut u32,
     ) -> anyhow::Result<()> {
-        println!("Hi");
-
         for (key, value) in &self.values {
             if *limit == 0 {
                 return Ok(());

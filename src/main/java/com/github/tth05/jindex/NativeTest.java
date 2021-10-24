@@ -33,7 +33,7 @@ public class NativeTest {
         System.out.println((System.nanoTime() - t) / 1_000_000d);
 
         t = System.nanoTime();
-        FindClassesResult[] results = findClasses(classIndex, "Ab", 50);
+        FindClassesResult[] results = findClasses(classIndex, "Abso", 50);
         t = (System.nanoTime() - t) / 1_000_000d;
         System.out.println(Arrays.toString(results));
         System.out.println(results.length + " - " + t);

@@ -1,6 +1,6 @@
 use crate::class_index::{ClassIndex, ClassIndexBuilder, ClassInfo};
 use ascii::AsAsciiStr;
-use jni::objects::{JClass, JString};
+use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jint, jlong, jobjectArray};
 use jni::JNIEnv;
 use std::time::Instant;
@@ -12,9 +12,21 @@ mod prefix_tree;
 #[cfg(test)]
 mod tests {
     use crate::class_index::{ClassIndexBuilder, ClassInfo};
+    use crate::constant_pool::ClassIndexConstantPool;
     use ascii::{AsAsciiStr, AsciiStr};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn package_test() {
+        let mut pool = ClassIndexConstantPool::new(69);
+        {
+            let package = pool
+                .get_or_add_package("net.minecraft.item".as_ascii_str().unwrap())
+                .unwrap();
+        }
+        println!("{:?}", pool.string_view_at(4 + 10).to_ascii_string(&pool));
+    }
 
     #[test]
     fn test_it() -> anyhow::Result<()> {
@@ -59,13 +71,8 @@ mod tests {
             .into_iter()
             .map(|i| {
                 (
-                    class_index
-                        .get_constant_pool()
-                        .string_view_at(i.class_name_index())
-                        .to_ascii_string(class_index.get_constant_pool()),
-                    class_index
-                        .get_constant_pool()
-                        .get_methods_at(i.method_data_index(), i.method_count())
+                    i.class_name(class_index.get_constant_pool()),
+                    i.method_indexes(class_index.get_constant_pool())
                         .iter()
                         .map(|m| {
                             class_index
@@ -111,6 +118,7 @@ pub extern "system" fn Java_com_github_tth05_jindex_NativeTest_createClassIndex(
     _env: JNIEnv,
     _class: JClass,
 ) -> jlong {
+    let t = Instant::now();
     let data = std::fs::read_to_string("./classes1.txt").expect("Read file failed");
     let entries: Vec<ClassInfo> = data
         .lines()
@@ -138,6 +146,7 @@ pub extern "system" fn Java_com_github_tth05_jindex_NativeTest_createClassIndex(
         .with_expected_method_count(method_count)
         .build(entries);
 
+    println!("{}", t.elapsed().as_millis());
     Box::into_raw(Box::new(class_index)) as jlong
 }
 
@@ -156,6 +165,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_NativeTest_findClasse
         .expect("Couldn't get java string!")
         .into();
 
+    let string_class = env
+        .find_class("java/lang/String")
+        .expect("String class not found");
+    let result_class = env
+        .find_class("com/github/tth05/jindex/FindClassesResult")
+        .expect("Result class not found");
+
     let class_index = &mut *(class_index_pointer as *mut ClassIndex);
 
     let classes: Vec<_> = class_index
@@ -163,69 +179,50 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_NativeTest_findClasse
         .expect("Find classes failed")
         .into_iter()
         .map(|i| {
-            (
-                env.new_string(
-                    class_index
-                        .get_constant_pool()
-                        .string_view_at(i.class_name_index())
-                        .to_ascii_string(class_index.get_constant_pool()),
+            let method_name_array = env
+                .new_object_array(i.method_count() as i32, string_class, JObject::null())
+                .unwrap();
+            for (i, method_index) in i
+                .method_indexes(class_index.get_constant_pool())
+                .iter()
+                .enumerate()
+            {
+                env.set_object_array_element(
+                    method_name_array,
+                    i as i32,
+                    env.new_string(
+                        class_index
+                            .get_constant_pool()
+                            .string_view_at(*method_index)
+                            .to_ascii_string(class_index.get_constant_pool()),
+                    )
+                    .unwrap(),
                 )
-                .unwrap(),
-                class_index
-                    .get_constant_pool()
-                    .get_methods_at(i.method_data_index(), i.method_count())
-                    .iter()
-                    .map(|m| {
-                        env.new_string(
-                            class_index
-                                .get_constant_pool()
-                                .string_view_at(*m)
-                                .to_ascii_string(class_index.get_constant_pool()),
-                        )
-                        .unwrap()
-                    })
-                    .collect(),
-            ) as (JString, Vec<JString>)
+                .expect("Failed to set element in method name array");
+            }
+
+            (
+                env.new_string(i.class_name(class_index.get_constant_pool()))
+                    .unwrap(),
+                method_name_array,
+            )
         })
         .collect();
 
-    // Finally, extract the raw pointer to return.
-    let result_class = env
-        .find_class("com/github/tth05/jindex/FindClassesResult")
-        .expect("Class not found");
-    let string_class = env.find_class("java/lang/String").expect("Class not found");
-    let array = env
-        .new_object_array(
-            classes.len() as i32,
-            result_class,
-            env.new_object(env.find_class("java/lang/Object").unwrap(), "()V", &[])
-                .unwrap(),
-        )
-        .expect("Thingy failed");
+    let result_array = env
+        .new_object_array(classes.len() as i32, result_class, JObject::null())
+        .expect("Failed to create result array");
     for (i, pair) in classes.into_iter().enumerate() {
-        let method_name_array = env
-            .new_object_array(
-                pair.1.len() as i32,
-                string_class,
-                env.new_string("").expect("String"),
-            )
-            .unwrap();
-        for (i, str) in pair.1.into_iter().enumerate() {
-            env.set_object_array_element(method_name_array, i as i32, str)
-                .expect("Array set failed");
-        }
-
-        let args = [pair.0.into(), method_name_array.into()];
-        // println!("{:?}", args);
         let object = env
             .new_object(
                 result_class,
                 "(Ljava/lang/String;[Ljava/lang/String;)V",
-                &args,
+                &[pair.0.into(), pair.1.into()],
             )
             .expect("Failed to create result object");
-        env.set_object_array_element(array, i as i32, object)
-            .expect("Array set failed");
+        env.set_object_array_element(result_array, i as i32, object)
+            .expect("Failed to set element into result array");
     }
-    array
+
+    result_array
 }
