@@ -18,6 +18,10 @@ impl ClassIndexConstantPool {
         }
     }
 
+    pub fn package_at(&self, index: u32) -> &IndexedPackage {
+        self.indexed_packages.get(index as usize).unwrap()
+    }
+
     pub fn get_or_add_package(&mut self, name: &AsciiStr) -> Result<&IndexedPackage> {
         self.get_or_add_package0(0, name)
     }
@@ -28,7 +32,7 @@ impl ClassIndexConstantPool {
         indexed_package_index: u32,
         name: &AsciiStr,
     ) -> Result<&IndexedPackage> {
-        let dot_index_or_none = name.chars().position(|c| c == '.');
+        let dot_index_or_none = name.chars().position(|char| char == '.');
         let sub_name = match dot_index_or_none {
             Some(dot_index) => &name[..dot_index],
             None => name,
@@ -51,8 +55,8 @@ impl ClassIndexConstantPool {
             .map(|p| *p.1);
 
         if let Some(index) = possible_index {
-            if dot_index_or_none.is_some() {
-                self.get_or_add_package0(index, &name[index as usize + 1..])
+            if let Some(dot_index) = dot_index_or_none {
+                self.get_or_add_package0(index, &name[dot_index + 1..])
             } else {
                 Ok(self.indexed_packages.get(index as usize).unwrap())
             }
@@ -74,6 +78,12 @@ impl ClassIndexConstantPool {
             } else {
                 Ok(self.indexed_packages.last().unwrap())
             }
+        }
+    }
+
+    pub(crate) fn clear_sub_packages(&mut self) {
+        for p in self.indexed_packages.iter_mut() {
+            p.clear_sub_packages();
         }
     }
 
@@ -171,5 +181,9 @@ impl ConstantPoolStringView {
         }
 
         true
+    }
+
+    pub fn len(&self) -> u8 {
+        self.end - self.start
     }
 }

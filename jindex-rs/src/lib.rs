@@ -1,159 +1,57 @@
 use crate::class_index::{ClassIndex, ClassIndexBuilder, ClassInfo};
-use ascii::AsAsciiStr;
+use ascii::{AsAsciiStr, IntoAsciiString};
+use cafebabe::parse_class;
 use jni::objects::{JClass, JObject, JString};
-use jni::sys::{jint, jlong, jobjectArray};
+use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
-use std::time::Instant;
 
 pub mod class_index;
 pub mod constant_pool;
 mod prefix_tree;
 
-#[cfg(test)]
-mod tests {
-    use crate::class_index::{ClassIndexBuilder, ClassInfo};
-    use crate::constant_pool::ClassIndexConstantPool;
-    use ascii::{AsAsciiStr, AsciiStr};
-    use std::thread::sleep;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn package_test() {
-        let mut pool = ClassIndexConstantPool::new(69);
-        {
-            let package = pool
-                .get_or_add_package("net.minecraft.item".as_ascii_str().unwrap())
-                .unwrap();
-        }
-        println!("{:?}", pool.string_view_at(4 + 10).to_ascii_string(&pool));
-    }
-
-    #[test]
-    fn test_it() -> anyhow::Result<()> {
-        //Read test data
-        let time = Instant::now();
-
-        let data = std::fs::read_to_string("../classes1.txt")?;
-        let entries: Vec<ClassInfo> = data
-            .lines()
-            .map(|part| {
-                let parts: Vec<_> = part.split_terminator(';').collect();
-                ClassInfo {
-                    package_name: parts[0][0..parts[0].rfind(".").unwrap_or(0)]
-                        .as_ascii_str()
-                        .unwrap(),
-                    class_name: parts[0][parts[0].rfind(".").unwrap_or(0) + 1..]
-                        .as_ascii_str()
-                        .unwrap(),
-                    methods: parts
-                        .into_iter()
-                        .skip(1)
-                        .map(|str| str.as_ascii_str().unwrap())
-                        .collect(),
-                }
-            })
-            .collect();
-
-        println!("Other took {}ms", time.elapsed().as_millis(),);
-
-        let method_count = entries.iter().map(|e| e.methods.len() as u32).sum();
-
-        let time = Instant::now();
-        let mut class_index = ClassIndexBuilder::default()
-            .with_expected_method_count(method_count)
-            .build(entries);
-
-        println!("Full build method took {}ms", time.elapsed().as_millis());
-
-        let time = Instant::now();
-        let classes: Vec<_> = class_index
-            .find_classes("ClassIndex".as_ascii_str().unwrap(), u32::MAX)?
-            .into_iter()
-            .map(|i| {
-                (
-                    i.class_name(class_index.get_constant_pool()),
-                    i.method_indexes(class_index.get_constant_pool())
-                        .iter()
-                        .map(|m| {
-                            class_index
-                                .get_constant_pool()
-                                .string_view_at(*m)
-                                .to_ascii_string(class_index.get_constant_pool())
-                        })
-                        .collect(),
-                ) as (&AsciiStr, Vec<&AsciiStr>)
-            })
-            .collect();
-        println!(
-            "Found classes in {}ms - {:?}",
-            time.elapsed().as_nanos() as f64 / 1_000_000f64,
-            classes
-        );
-
-        let time = Instant::now();
-        let methods: Vec<_> = class_index
-            .find_methods("findClass".as_ascii_str().unwrap(), 2)?
-            .iter()
-            .map(|i| {
-                class_index
-                    .get_constant_pool()
-                    .string_view_at(*i)
-                    .to_ascii_string(class_index.get_constant_pool())
-            })
-            .collect();
-        println!(
-            "Found methods in {}ms - {:?}",
-            time.elapsed().as_nanos() as f64 / 1_000_000f64,
-            methods
-        );
-
-        drop(data);
-        // sleep(Duration::from_millis(10000));
-        Ok(())
-    }
-}
-
 #[no_mangle]
-pub extern "system" fn Java_com_github_tth05_jindex_NativeTest_createClassIndex(
-    _env: JNIEnv,
+pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
+    env: JNIEnv,
     _class: JClass,
+    byte_array_list: jobject,
 ) -> jlong {
-    let t = Instant::now();
-    let data = std::fs::read_to_string("./classes1.txt").expect("Read file failed");
-    let entries: Vec<ClassInfo> = data
-        .lines()
-        .map(|part| {
-            let parts: Vec<_> = part.split_terminator(';').collect();
-            ClassInfo {
-                package_name: parts[0][0..parts[0].rfind('.').unwrap_or(0)]
-                    .as_ascii_str()
-                    .unwrap(),
-                class_name: parts[0][parts[0].rfind('.').unwrap_or(0) + 1..]
-                    .as_ascii_str()
-                    .unwrap(),
-                methods: parts
-                    .into_iter()
-                    .skip(1)
-                    .map(|str| str.as_ascii_str().unwrap())
-                    .collect(),
-            }
-        })
-        .collect();
+    let mut class_info_list: Vec<ClassInfo> = Vec::new();
+    let list = env.get_list(byte_array_list.into()).unwrap();
+    for byte_array in list.iter().unwrap() {
+        let bytes = env.convert_byte_array(byte_array.cast()).unwrap();
+        if let Ok(class) = parse_class(&bytes[..]) {
+            //TODO: This unwrap will fail for classes without a package
+            let full_class_name = class.this_class.to_string();
+            let split_pair = full_class_name.rsplit_once("/").unwrap();
+            let package_name = split_pair.0.replace("/", ".").into_ascii_string().unwrap();
+            let class_name = split_pair.1.into_ascii_string().unwrap();
 
-    let method_count = entries.iter().map(|e| e.methods.len() as u32).sum();
+            class_info_list.push(ClassInfo {
+                package_name,
+                class_name,
+                methods: class
+                    .methods
+                    .iter()
+                    .map(|m| m.name.to_string().into_ascii_string().unwrap())
+                    .filter(|name| name[0] != 60) // Filter <init>, <clinit>
+                    .collect(),
+            })
+        }
+    }
+
+    let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
 
     let class_index = ClassIndexBuilder::default()
         .with_expected_method_count(method_count)
-        .build(entries);
+        .build(class_info_list);
 
-    println!("{}", t.elapsed().as_millis());
     Box::into_raw(Box::new(class_index)) as jlong
 }
 
 #[no_mangle]
 /// # Safety
 /// The given pointer has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_NativeTest_findClasses(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasses(
     env: JNIEnv,
     _class: JClass,
     class_index_pointer: jlong,
@@ -202,7 +100,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_NativeTest_findClasse
             }
 
             (
-                env.new_string(i.class_name(class_index.get_constant_pool()))
+                env.new_string(i.class_name_with_package(class_index.get_constant_pool()))
                     .unwrap(),
                 method_name_array,
             )

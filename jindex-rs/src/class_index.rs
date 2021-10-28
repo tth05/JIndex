@@ -1,6 +1,6 @@
 use crate::constant_pool::ClassIndexConstantPool;
 use crate::prefix_tree::PrefixTree;
-use ascii::AsciiStr;
+use ascii::{AsAsciiStr, AsciiStr, AsciiString};
 use std::collections::HashMap;
 
 pub struct ClassIndex {
@@ -81,19 +81,20 @@ impl ClassIndexBuilder {
         let mut method_prefix_tree: PrefixTree<u32> = PrefixTree::new(2);
         let mut constant_pool_map: HashMap<&AsciiStr, u32> = HashMap::new();
 
-        for c in vec.into_iter() {
-            let class_name_index = if let Some(i) = constant_pool_map.get(c.class_name) {
+        for c in vec.iter() {
+            let class_name = c.class_name.as_ascii_str().unwrap();
+            let class_name_index = if let Some(i) = constant_pool_map.get(class_name) {
                 *i
             } else {
                 let index = constant_pool.add_string(c.class_name.as_bytes()).unwrap();
-                constant_pool_map.insert(c.class_name, index);
+                constant_pool_map.insert(class_name, index);
                 index
             };
 
             let mut method_indexes = Vec::new();
             let method_count = c.methods.len() as u16;
 
-            for method_name in c.methods.iter() {
+            for method_name in c.methods.iter().map(|s| s.as_ascii_str().unwrap()) {
                 let method_name_index = if let Some(i) = constant_pool_map.get(method_name) {
                     *i
                 } else {
@@ -112,8 +113,15 @@ impl ClassIndexBuilder {
             }
 
             let method_data_index = constant_pool.add_methods(&method_indexes);
-            let indexed_class =
-                IndexedClass::new(class_name_index, method_data_index, method_count);
+            let indexed_class = IndexedClass::new(
+                class_name_index,
+                method_data_index,
+                method_count,
+                constant_pool
+                    .get_or_add_package(c.package_name.as_ascii_str().unwrap())
+                    .unwrap()
+                    .index(),
+            );
 
             class_prefix_tree.put(
                 &constant_pool,
@@ -121,6 +129,8 @@ impl ClassIndexBuilder {
                 indexed_class,
             )
         }
+
+        constant_pool.clear_sub_packages();
 
         ClassIndex {
             constant_pool,
@@ -136,24 +146,31 @@ impl Default for ClassIndexBuilder {
     }
 }
 
-pub struct ClassInfo<'a> {
-    pub package_name: &'a AsciiStr,
-    pub class_name: &'a AsciiStr,
-    pub methods: Vec<&'a AsciiStr>,
+pub struct ClassInfo {
+    pub package_name: AsciiString,
+    pub class_name: AsciiString,
+    pub methods: Vec<AsciiString>,
 }
 
 pub struct IndexedClass {
     class_name_index: u32,
     method_data_index: u32,
     method_count: u16,
+    package_index: u32,
 }
 
 impl IndexedClass {
-    fn new(class_name_index: u32, method_data_index: u32, method_count: u16) -> Self {
+    fn new(
+        class_name_index: u32,
+        method_data_index: u32,
+        method_count: u16,
+        package_index: u32,
+    ) -> Self {
         Self {
             class_name_index,
             method_data_index,
             method_count,
+            package_index,
         }
     }
 
@@ -161,6 +178,19 @@ impl IndexedClass {
         constant_pool
             .string_view_at(self.class_name_index)
             .to_ascii_string(constant_pool)
+    }
+
+    pub fn class_name_with_package<'a>(
+        &self,
+        constant_pool: &'a ClassIndexConstantPool,
+    ) -> AsciiString {
+        let package_name = constant_pool
+            .package_at(self.package_index)
+            .package_name_with_parents(constant_pool);
+        let class_name = constant_pool
+            .string_view_at(self.class_name_index)
+            .to_ascii_string(constant_pool);
+        package_name.to_owned() + ".".as_ascii_str().unwrap() + class_name
     }
 
     pub fn method_indexes<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a [u32] {
@@ -189,10 +219,33 @@ impl IndexedPackage {
         }
     }
 
+    pub(crate) fn clear_sub_packages(&mut self) {
+        self.sub_packages_indexes.clear();
+        self.sub_packages_indexes.truncate(0);
+    }
+
     pub fn package_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
         constant_pool
             .string_view_at(self.package_name_index)
             .to_ascii_string(constant_pool)
+    }
+
+    pub fn package_name_with_parents(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
+        let mut base = constant_pool
+            .string_view_at(self.package_name_index)
+            .to_ascii_string(constant_pool)
+            .to_owned();
+
+        let mut parent_index = self.previous_package_index;
+        while parent_index != 0 {
+            let parent_package = constant_pool.package_at(parent_index);
+            base = parent_package.package_name(constant_pool).to_owned()
+                + ".".as_ascii_str().unwrap()
+                + &base;
+            parent_index = parent_package.previous_package_index;
+        }
+
+        base
     }
 
     pub fn add_sub_package(&mut self, index: u32) {

@@ -154,7 +154,7 @@ impl<T> Normal<T> {
         } else if byte == 95 {
             26 * 2 + 10 + 1
         } else {
-            panic!("Invalid byte");
+            panic!("Invalid byte {}", byte);
         }
     }
 }
@@ -180,7 +180,7 @@ impl<T> Tail<T> {
                 return Ok(());
             }
 
-            if key.starts_with(constant_pool, sequence) {
+            if sequence.len() <= key.len() as usize && key.starts_with(constant_pool, sequence) {
                 results.push(value);
                 *limit -= 1;
             }
