@@ -10,6 +10,7 @@ ascii = "1.0.0"
 anyhow = "1.0.44"
 jni = "0.19.0"
 cafebabe = "0.5.0"
+speedy = "0.8.0"
 
 [lib]
 crate_type = ["cdylib"]

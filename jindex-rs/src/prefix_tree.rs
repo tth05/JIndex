@@ -1,13 +1,16 @@
 use crate::constant_pool::{ClassIndexConstantPool, ConstantPoolStringView};
 use anyhow::anyhow;
 use ascii::{AsAsciiStr, AsciiStr};
+use speedy::{Context, Readable, Reader, Writable, Writer};
 
+#[derive(Readable, Writable)]
 enum Node<T> {
     Normal(Normal<T>),
     Tail(Tail<T>),
 }
 
 struct Normal<T> {
+    //TODO: Change to [u8]
     mask: u64,
     depth: u8,
     children: Vec<Node<T>>,
@@ -228,5 +231,114 @@ impl<T> PrefixTree<T> {
         }
 
         Ok(results)
+    }
+}
+
+/*
+Serialization
+*/
+
+impl<'a, C, Q> Readable<'a, C> for PrefixTree<Q>
+where
+    C: Context,
+    Q: Readable<'a, C>,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        Ok(PrefixTree {
+            root_node: Node::read_from(reader)?,
+        })
+    }
+}
+
+impl<C, Q> Writable<C> for PrefixTree<Q>
+where
+    C: Context,
+    Q: Writable<C>,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        self.root_node.write_to(writer)?;
+        Ok(())
+    }
+}
+
+impl<'a, C, Q> Readable<'a, C> for Tail<Q>
+where
+    C: Context,
+    Q: Readable<'a, C>,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let length = reader.read_u32()?;
+        let mut values = Vec::with_capacity(length as usize);
+
+        for i in 0..length {
+            values.push((
+                ConstantPoolStringView::new(
+                    reader.read_u32()?,
+                    reader.read_u8()?,
+                    reader.read_u8()?,
+                ),
+                reader.read_value()?,
+            ));
+        }
+        Ok(Tail { values })
+    }
+}
+
+impl<C, Q> Writable<C> for Tail<Q>
+where
+    C: Context,
+    Q: Writable<C>,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        writer.write_u32(self.values.len() as u32)?;
+        for (view, value) in &self.values {
+            writer.write_u32(view.index())?;
+            writer.write_u8(view.start())?;
+            writer.write_u8(view.end())?;
+            writer.write_value(value)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a, C, Q> Readable<'a, C> for Normal<Q>
+where
+    C: Context,
+    Q: Readable<'a, C>,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mask = reader.read_u64()?;
+        let depth = reader.read_u8()?;
+
+        let length = reader.read_u32()? as usize;
+        let children: Vec<Node<Q>> = reader.read_vec(length)?;
+
+        let length = reader.read_u32()? as usize;
+        let values: Vec<Q> = reader.read_vec(length)?;
+
+        Ok(Normal {
+            mask,
+            depth,
+            children,
+            values,
+        })
+    }
+}
+
+impl<C, Q> Writable<C> for Normal<Q>
+where
+    C: Context,
+    Q: Writable<C>,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        writer.write_u64(self.mask)?;
+        writer.write_u8(self.depth)?;
+
+        writer.write_u32(self.children.len() as u32)?;
+        writer.write_collection(&self.children)?;
+
+        writer.write_u32(self.values.len() as u32)?;
+        writer.write_collection(&self.values)?;
+        Ok(())
     }
 }

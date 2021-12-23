@@ -1,8 +1,10 @@
 use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
 use ascii::AsciiStr;
+use speedy::{LittleEndian, Readable, Writable};
 use std::cmp::min;
 
+#[derive(Readable, Writable)]
 pub struct ClassIndexConstantPool {
     string_data: Vec<u8>,  //Holds Ascii Strings prefixed with their length
     method_data: Vec<u32>, //Holds string_data indexes for method names
@@ -26,7 +28,7 @@ impl ClassIndexConstantPool {
         self.get_or_add_package0(0, name)
     }
 
-    /// This may be the most disgusting method I've ever written
+    /// This may be the most disgusting method I've ever written, but I suck at Rust too much to fix it
     fn get_or_add_package0(
         &mut self,
         indexed_package_index: u32,
@@ -81,7 +83,7 @@ impl ClassIndexConstantPool {
         }
     }
 
-    pub(crate) fn clear_sub_packages(&mut self) {
+    pub fn clear_sub_packages(&mut self) {
         for p in self.indexed_packages.iter_mut() {
             p.clear_sub_packages();
         }
@@ -138,6 +140,10 @@ impl PartialEq for ConstantPoolStringView {
 impl Eq for ConstantPoolStringView {}
 
 impl ConstantPoolStringView {
+    pub fn new(index: u32, start: u8, end: u8) -> Self {
+        Self { index, start, end }
+    }
+
     pub fn to_ascii_string(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
         AsciiStr::from_ascii(
             &constant_pool.string_data[(self.index + self.start as u32) as usize
@@ -185,5 +191,15 @@ impl ConstantPoolStringView {
 
     pub fn len(&self) -> u8 {
         self.end - self.start
+    }
+
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+    pub fn start(&self) -> u8 {
+        self.start
+    }
+    pub fn end(&self) -> u8 {
+        self.end
     }
 }

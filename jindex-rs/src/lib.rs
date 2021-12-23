@@ -7,7 +7,8 @@ use jni::JNIEnv;
 
 pub mod class_index;
 pub mod constant_pool;
-mod prefix_tree;
+pub mod io;
+pub mod prefix_tree;
 
 #[no_mangle]
 pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(

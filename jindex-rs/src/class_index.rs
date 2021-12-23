@@ -1,8 +1,10 @@
 use crate::constant_pool::ClassIndexConstantPool;
 use crate::prefix_tree::PrefixTree;
 use ascii::{AsAsciiStr, AsciiStr, AsciiString};
+use speedy::{Readable, Writable};
 use std::collections::HashMap;
 
+#[derive(Readable, Writable)]
 pub struct ClassIndex {
     pub constant_pool: ClassIndexConstantPool,
     pub class_prefix_tree: PrefixTree<IndexedClass>,
@@ -160,7 +162,7 @@ pub struct IndexedClass {
 }
 
 impl IndexedClass {
-    fn new(
+    pub fn new(
         class_name_index: u32,
         method_data_index: u32,
         method_count: u16,
@@ -180,10 +182,7 @@ impl IndexedClass {
             .to_ascii_string(constant_pool)
     }
 
-    pub fn class_name_with_package<'a>(
-        &self,
-        constant_pool: &'a ClassIndexConstantPool,
-    ) -> AsciiString {
+    pub fn class_name_with_package(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
         let package_name = constant_pool
             .package_at(self.package_index)
             .package_name_with_parents(constant_pool);
@@ -197,8 +196,20 @@ impl IndexedClass {
         constant_pool.get_methods_at(self.method_data_index, self.method_count)
     }
 
+    pub fn class_name_index(&self) -> u32 {
+        self.class_name_index
+    }
+
+    pub fn method_data_index(&self) -> u32 {
+        self.method_data_index
+    }
+
     pub fn method_count(&self) -> u16 {
         self.method_count
+    }
+
+    pub fn package_index(&self) -> u32 {
+        self.package_index
     }
 }
 
@@ -219,7 +230,7 @@ impl IndexedPackage {
         }
     }
 
-    pub(crate) fn clear_sub_packages(&mut self) {
+    pub fn clear_sub_packages(&mut self) {
         self.sub_packages_indexes.clear();
         self.sub_packages_indexes.truncate(0);
     }
@@ -262,5 +273,9 @@ impl IndexedPackage {
 
     pub fn index(&self) -> u32 {
         self.index
+    }
+
+    pub fn package_name_index(&self) -> u32 {
+        self.package_name_index
     }
 }
