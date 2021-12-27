@@ -270,7 +270,7 @@ where
         let length = reader.read_u32()?;
         let mut values = Vec::with_capacity(length as usize);
 
-        for i in 0..length {
+        for _ in 0..length {
             values.push((
                 ConstantPoolStringView::new(
                     reader.read_u32()?,

@@ -1,21 +1,19 @@
 use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
 use ascii::AsciiStr;
-use speedy::{LittleEndian, Readable, Writable};
-use std::cmp::min;
+use speedy::{Readable, Writable};
+use std::cmp::{min, Ordering};
 
 #[derive(Readable, Writable)]
 pub struct ClassIndexConstantPool {
-    string_data: Vec<u8>,  //Holds Ascii Strings prefixed with their length
-    method_data: Vec<u32>, //Holds string_data indexes for method names
-    indexed_packages: Vec<IndexedPackage>, //An unordered list of all packages
+    string_data: Vec<u8>, //Holds Ascii Strings prefixed with their length
+    indexed_packages: Vec<IndexedPackage>,
 }
 
 impl ClassIndexConstantPool {
     pub fn new(capacity: u32) -> Self {
         Self {
             string_data: Vec::with_capacity(capacity as usize),
-            method_data: Vec::new(),
             indexed_packages: vec![IndexedPackage::new(0, 0, 0)],
         }
     }
@@ -84,6 +82,7 @@ impl ClassIndexConstantPool {
     }
 
     pub fn clear_sub_packages(&mut self) {
+        println!("package count: {}", self.indexed_packages.len());
         for p in self.indexed_packages.iter_mut() {
             p.clear_sub_packages();
         }
@@ -100,6 +99,7 @@ impl ClassIndexConstantPool {
             ));
         }
 
+        self.string_data.try_reserve(1 + str.len())?;
         self.string_data.push(length as u8);
         self.string_data.extend_from_slice(str);
 
@@ -113,18 +113,9 @@ impl ClassIndexConstantPool {
             end: 1 + /* Add the length */ self.string_data.get(index as usize).unwrap(),
         }
     }
-
-    pub fn add_methods(&mut self, method_indexes: &[u32]) -> u32 {
-        let index = self.method_data.len();
-        self.method_data.extend(method_indexes.iter());
-        index as u32
-    }
-
-    pub fn get_methods_at(&self, index: u32, length: u16) -> &[u32] {
-        &self.method_data[index as usize..(index + length as u32) as usize]
-    }
 }
 
+#[derive(Debug)]
 pub struct ConstantPoolStringView {
     index: u32,
     start: u8,
@@ -180,7 +171,11 @@ impl ConstantPoolStringView {
     }
 
     pub fn starts_with(&self, constant_pool: &ClassIndexConstantPool, other: &AsciiStr) -> bool {
-        for i in 0..min(self.end - self.start, other.len() as u8) {
+        if other.len() > self.len() as usize {
+            return false;
+        }
+
+        for i in 0..min(self.len(), other.len() as u8) {
             if self.byte_at(constant_pool, i) != other[i as usize] {
                 return false;
             }

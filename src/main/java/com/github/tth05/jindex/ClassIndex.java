@@ -9,28 +9,6 @@ import java.util.List;
 public class ClassIndex {
 
     static {
-        loadNativeLibrary();
-    }
-
-    private final long pointer;
-
-    public ClassIndex(List<byte[]> classes) {
-        this.pointer = createClassIndex(classes);
-    }
-
-    public FindClassesResult[] findClasses(String query, int limit) {
-        return findClasses(this.pointer, query, limit);
-    }
-
-    public List<String> findMethods(String query) {
-        throw new UnsupportedOperationException();
-    }
-
-    private static native FindClassesResult[] findClasses(long classIndexPointer, String query, int limit);
-
-    public static native long createClassIndex(List<byte[]> classes);
-
-    static void loadNativeLibrary() {
         try {
             Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir"), "jindex_lib.dll");
             Path inputPath = Paths.get(ClassIndex.class.getResource("/jindex_rs.dll").toURI());
@@ -44,4 +22,26 @@ public class ClassIndex {
             throw new RuntimeException("Unable to load native library", e);
         }
     }
+
+    private long pointer;
+
+    public ClassIndex(String filePath) {
+        loadClassIndexFromFile(filePath);
+    }
+
+    public ClassIndex(List<byte[]> classes) {
+        createClassIndex(classes);
+    }
+
+    public native IndexedClass[] findClasses(String query, int limit);
+
+    public List<String> findMethods(String query, int limit) {
+        throw new UnsupportedOperationException();
+    }
+
+    public native void saveToFile(String filePath);
+
+    private native long createClassIndex(List<byte[]> classes);
+
+    private native long loadClassIndexFromFile(String filePath);
 }
