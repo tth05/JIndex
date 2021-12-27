@@ -10,7 +10,7 @@ public class ClassIndex {
 
     static {
         try {
-            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir"), "jindex_lib.dll");
+            Path tempFilePath = Files.createTempFile("jindex_lib", ".dll");
             Path inputPath = Paths.get(ClassIndex.class.getResource("/jindex_rs.dll").toURI());
 
             OutputStream outputStream = Files.newOutputStream(tempFilePath);
