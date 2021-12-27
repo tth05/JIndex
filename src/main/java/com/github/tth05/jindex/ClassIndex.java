@@ -1,9 +1,8 @@
 package com.github.tth05.jindex;
 
-import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
 
 public class ClassIndex {
@@ -11,12 +10,7 @@ public class ClassIndex {
     static {
         try {
             Path tempFilePath = Files.createTempFile("jindex_lib", ".dll");
-            Path inputPath = Paths.get(ClassIndex.class.getResource("/jindex_rs.dll").toURI());
-
-            OutputStream outputStream = Files.newOutputStream(tempFilePath);
-            outputStream.write(Files.readAllBytes(inputPath));
-            outputStream.close();
-
+            Files.copy(ClassIndex.class.getResourceAsStream("/jindex_rs.dll"), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
             System.load(tempFilePath.toAbsolutePath().toString());
         } catch (Exception e) {
             throw new RuntimeException("Unable to load native library", e);
