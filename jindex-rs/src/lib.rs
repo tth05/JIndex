@@ -29,7 +29,7 @@ mod test {
             },
         ]);
         let found: Vec<AsciiString> = boi
-            .find_classes("Yeet".as_ascii_str().unwrap(), 56)
+            .find_classes("yeet".as_ascii_str().unwrap(), 56)
             .unwrap()
             .iter()
             .map(|c| c.class_name_with_package(boi.constant_pool()))

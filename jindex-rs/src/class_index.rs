@@ -3,6 +3,7 @@ use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use speedy::{Readable, Writable};
 use std::collections::HashMap;
 use std::ops::Range;
+use std::slice::Iter;
 use std::time::Instant;
 
 #[derive(Readable, Writable)]
@@ -53,22 +54,20 @@ impl ClassIndex {
         name: &AsciiStr,
         limit: usize,
     ) -> anyhow::Result<Vec<&IndexedClass>> {
-        let range = self
-            .class_prefix_range_map
-            .get(&name.get_ascii(0).unwrap().as_byte());
+        let lower_case_iter =
+            self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte());
+        let upper_case_iter =
+            self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_uppercase().as_byte());
 
-        let res = match range {
-            Some(range) => self.classes[range.start as usize..range.end as usize]
-                .iter()
-                .filter(|class| {
-                    self.constant_pool
-                        .string_view_at(class.name_index)
-                        .starts_with(&self.constant_pool, name)
-                })
-                .take(limit)
-                .collect(),
-            None => Vec::new(),
-        };
+        let res = lower_case_iter
+            .chain(upper_case_iter)
+            .filter(|class| {
+                self.constant_pool
+                    .string_view_at(class.name_index)
+                    .starts_with(&self.constant_pool, name, true)
+            })
+            .take(limit)
+            .collect();
 
         Ok(res)
     }
@@ -85,7 +84,7 @@ impl ClassIndex {
             .filter(|method| {
                 self.constant_pool
                     .string_view_at(method.name_index)
-                    .starts_with(&self.constant_pool, name)
+                    .starts_with(&self.constant_pool, name, false)
             })
             .take(limit)
             .collect();
@@ -94,6 +93,13 @@ impl ClassIndex {
 
     pub fn constant_pool(&self) -> &ClassIndexConstantPool {
         &self.constant_pool
+    }
+
+    fn class_iter_for_char(&self, char: u8) -> Iter<IndexedClass> {
+        self.class_prefix_range_map.get(&char).map_or_else(
+            || self.classes[0..0].iter(),
+            |r| self.classes[r.start as usize..r.end as usize].iter(),
+        )
     }
 }
 

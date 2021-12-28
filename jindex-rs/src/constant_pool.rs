@@ -1,6 +1,6 @@
 use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
-use ascii::AsciiStr;
+use ascii::{AsciiChar, AsciiStr};
 use speedy::{Readable, Writable};
 use std::cmp::{min, Ordering};
 
@@ -170,13 +170,22 @@ impl ConstantPoolStringView {
             .unwrap()
     }
 
-    pub fn starts_with(&self, constant_pool: &ClassIndexConstantPool, other: &AsciiStr) -> bool {
+    pub fn starts_with(
+        &self,
+        constant_pool: &ClassIndexConstantPool,
+        other: &AsciiStr,
+        ignore_case: bool,
+    ) -> bool {
         if other.len() > self.len() as usize {
             return false;
         }
 
         for i in 0..min(self.len(), other.len() as u8) {
-            if self.byte_at(constant_pool, i) != other[i as usize] {
+            let current_byte = self.byte_at(constant_pool, i);
+            let current_char = other[i as usize];
+            if current_byte != current_char
+                && (!ignore_case || current_byte != switch_ascii_char_case(current_char))
+            {
                 return false;
             }
         }
@@ -196,5 +205,13 @@ impl ConstantPoolStringView {
     }
     pub fn end(&self) -> u8 {
         self.end
+    }
+}
+
+fn switch_ascii_char_case(char: AsciiChar) -> AsciiChar {
+    if char.is_uppercase() {
+        char.to_ascii_lowercase()
+    } else {
+        char.to_ascii_uppercase()
     }
 }

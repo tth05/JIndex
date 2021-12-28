@@ -183,7 +183,9 @@ impl<T> Tail<T> {
                 return Ok(());
             }
 
-            if sequence.len() <= key.len() as usize && key.starts_with(constant_pool, sequence) {
+            if sequence.len() <= key.len() as usize
+                && key.starts_with(constant_pool, sequence, false)
+            {
                 results.push(value);
                 *limit -= 1;
             }
