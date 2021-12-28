@@ -35,7 +35,7 @@ public class ClassIndex {
 
     public native void saveToFile(String filePath);
 
-    private native long createClassIndex(List<byte[]> classes);
+    private native void createClassIndex(List<byte[]> classes);
 
-    private native long loadClassIndexFromFile(String filePath);
+    private native void loadClassIndexFromFile(String filePath);
 }
