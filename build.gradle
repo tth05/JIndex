@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'maven-publish'
 }
 
 group 'com.github.tth05'
@@ -28,6 +29,23 @@ task copyNativeLibrary {
         from "${projectDir}/jindex-rs/target/release"
         into "${projectDir}/src/main/resources"
         include "jindex_rs.dll"
+    }
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+    repositories {
+        maven {
+            url "https://packagecloud.io/tth05/repo/java/maven2/"
+            credentials {
+                username = System.getenv("PACKAGECLOUD_TOKEN")
+                password = ""
+            }
+        }
     }
 }
 
