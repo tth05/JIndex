@@ -8,6 +8,20 @@ use crate::class_index::{ClassIndex, ClassIndexBuilder, ClassInfo, IndexedClass}
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 
 #[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
+    env: JNIEnv,
+    this: jobject,
+) {
+    let _class_index =
+        Box::from_raw(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex);
+
+    env.set_field(this, "pointer", "J", JValue::from(0 as jlong))
+        .expect("Unable to set field");
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
     env: JNIEnv,
     this: jobject,

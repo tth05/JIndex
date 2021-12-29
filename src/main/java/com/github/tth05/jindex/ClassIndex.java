@@ -38,4 +38,11 @@ public class ClassIndex {
     private native void createClassIndex(List<byte[]> classes);
 
     private native void loadClassIndexFromFile(String filePath);
+
+    private native void destroy();
+
+    @Override
+    protected void finalize() {
+        destroy();
+    }
 }
