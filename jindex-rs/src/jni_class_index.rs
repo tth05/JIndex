@@ -1,10 +1,10 @@
 use ascii::{AsAsciiStr, IntoAsciiString};
-use cafebabe::parse_class;
+use cafebabe::{parse_class, MethodAccessFlags};
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
 
-use crate::class_index::{ClassIndex, ClassIndexBuilder, ClassInfo, IndexedClass};
+use crate::class_index::{ClassIndex, ClassIndexBuilder, ClassInfo, IndexedClass, MethodInfo};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 
 #[no_mangle]
@@ -17,7 +17,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
     let _class_index =
         Box::from_raw(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex);
 
-    env.set_field(this, "pointer", "J", JValue::from(0 as jlong))
+    env.set_field(this, "pointer", "J", JValue::from(0))
         .expect("Unable to set field");
 }
 
@@ -43,11 +43,21 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
             class_info_list.push(ClassInfo {
                 package_name,
                 class_name,
+                access_flags: class.access_flags,
                 methods: class
                     .methods
                     .iter()
-                    .filter_map(|m| m.name.to_string().into_ascii_string().ok())
-                    .filter(|name| name[0] != 60) // Filter <init>, <clinit>
+                    .filter_map(|m| {
+                        let name = m.name.to_string().into_ascii_string();
+                        if name.is_err() {
+                            return None;
+                        }
+
+                        Some(MethodInfo {
+                            method_name: name.unwrap(),
+                            access_flags: m.access_flags,
+                        })
+                    })
                     .collect(),
             })
         }

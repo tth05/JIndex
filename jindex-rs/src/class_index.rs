@@ -1,10 +1,10 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiStr, AsciiString};
+use cafebabe::{ClassAccessFlags, MethodAccessFlags};
 use speedy::{Readable, Writable};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::slice::Iter;
-use std::time::Instant;
 
 #[derive(Readable, Writable)]
 pub struct ClassIndex {
@@ -146,30 +146,36 @@ impl ClassIndexBuilder {
         let mut constant_pool_map: HashMap<&AsciiStr, u32> =
             HashMap::with_capacity(vec.len() + self.expected_method_count as usize);
 
-        for c in vec.iter() {
-            let class_name = c.class_name.as_ascii_str().unwrap();
+        for class_info in vec.iter() {
+            let class_name = class_info.class_name.as_ascii_str().unwrap();
             let class_name_index =
                 self.get_index_from_pool(class_name, &mut constant_pool_map, &mut constant_pool);
 
             let mut indexed_methods = Vec::new();
 
-            for method_name in c.methods.iter().map(|s| s.as_ascii_str().unwrap()) {
+            for method_info in class_info.methods.iter() {
+                let method_name = method_info.method_name.as_ascii_str().unwrap();
+
                 let method_name_index = self.get_index_from_pool(
                     method_name,
                     &mut constant_pool_map,
                     &mut constant_pool,
                 );
 
-                indexed_methods.push(IndexedMethod::new(method_name_index));
+                indexed_methods.push(IndexedMethod::new(
+                    method_name_index,
+                    method_info.access_flags.bits(),
+                ));
             }
 
             let indexed_class = IndexedClass::new(
-                class_name_index,
-                indexed_methods,
                 constant_pool
-                    .get_or_add_package(&c.package_name)
+                    .get_or_add_package(&class_info.package_name)
                     .unwrap()
                     .index(),
+                class_name_index,
+                class_info.access_flags.bits(),
+                indexed_methods,
             );
 
             classes.push(indexed_class);
@@ -203,22 +209,35 @@ impl Default for ClassIndexBuilder {
 pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
-    pub methods: Vec<AsciiString>,
+    pub access_flags: ClassAccessFlags,
+    pub methods: Vec<MethodInfo>,
+}
+
+pub struct MethodInfo {
+    pub method_name: AsciiString,
+    pub access_flags: MethodAccessFlags,
 }
 
 #[derive(Readable, Writable)]
 pub struct IndexedClass {
-    name_index: u32,
-    methods: Vec<IndexedMethod>,
     package_index: u32,
+    name_index: u32,
+    access_flags: u16,
+    methods: Vec<IndexedMethod>,
 }
 
 impl IndexedClass {
-    pub fn new(class_name_index: u32, methods: Vec<IndexedMethod>, package_index: u32) -> Self {
+    pub fn new(
+        package_index: u32,
+        class_name_index: u32,
+        access_flags: u16,
+        methods: Vec<IndexedMethod>,
+    ) -> Self {
         Self {
-            name_index: class_name_index,
-            methods,
             package_index,
+            name_index: class_name_index,
+            access_flags,
+            methods,
         }
     }
 
@@ -259,11 +278,15 @@ impl IndexedClass {
 #[derive(Readable, Writable)]
 pub struct IndexedMethod {
     name_index: u32,
+    access_flags: u16,
 }
 
 impl IndexedMethod {
-    pub fn new(name_index: u32) -> Self {
-        Self { name_index }
+    pub fn new(name_index: u32, access_flags: u16) -> Self {
+        Self {
+            name_index,
+            access_flags,
+        }
     }
 
     pub fn method_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
