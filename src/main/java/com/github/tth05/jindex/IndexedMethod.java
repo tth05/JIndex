@@ -12,6 +12,8 @@ public class IndexedMethod {
 
     public native String getName();
 
+    public native short getAccessFlags();
+
     @Override
     public String toString() {
         return getName();

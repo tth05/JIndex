@@ -18,6 +18,8 @@ public class IndexedClass {
 
     public native IndexedMethod[] getMethods();
 
+    public native short getAccessFlags();
+
     @Override
     public String toString() {
         return "FindClassesResult{" +

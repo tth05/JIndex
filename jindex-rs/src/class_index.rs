@@ -273,6 +273,10 @@ impl IndexedClass {
     pub fn methods(&self) -> &Vec<IndexedMethod> {
         &self.methods
     }
+
+    pub fn access_flags(&self) -> u16 {
+        self.access_flags
+    }
 }
 
 #[derive(Readable, Writable)]
@@ -293,6 +297,10 @@ impl IndexedMethod {
         constant_pool
             .string_view_at(self.name_index)
             .to_ascii_string(constant_pool)
+    }
+
+    pub fn access_flags(&self) -> u16 {
+        self.access_flags
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::class_index::IndexedMethod;
 use crate::ClassIndex;
-use jni::sys::{jobject, jstring};
+use jni::sys::{jobject, jshort, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -21,4 +21,17 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
     env.new_string(indexed_method.method_name(class_index.constant_pool()))
         .unwrap()
         .into_inner()
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAccessFlags(
+    env: JNIEnv,
+    this: jobject,
+) -> jshort {
+    let indexed_class =
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+
+    indexed_class.access_flags() as jshort
 }
