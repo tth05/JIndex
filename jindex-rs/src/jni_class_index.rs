@@ -17,7 +17,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
     let _class_index =
         Box::from_raw(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex);
 
-    env.set_field(this, "pointer", "J", JValue::from(0))
+    env.set_field(this, "pointer", "J", JValue::from(0i64))
         .expect("Unable to set field");
 }
 
