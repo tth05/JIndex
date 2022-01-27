@@ -21,6 +21,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
 
     env.set_field(this, "pointer", "J", JValue::Long(0i64))
         .expect("Unable to set field");
+    env.set_field(this, "destroyed", "Z", JValue::Bool(1))
+        .expect("Unable to set field");
 }
 
 #[no_mangle]

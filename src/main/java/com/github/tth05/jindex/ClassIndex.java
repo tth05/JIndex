@@ -18,6 +18,7 @@ public class ClassIndex {
     }
 
     private long pointer;
+    private boolean destroyed;
 
     public ClassIndex(String filePath) {
         loadClassIndexFromFile(filePath);
@@ -35,14 +36,17 @@ public class ClassIndex {
 
     public native void saveToFile(String filePath);
 
+    public native void destroy();
+
     private native void createClassIndex(List<byte[]> classes);
 
     private native void loadClassIndexFromFile(String filePath);
 
-    private native void destroy();
-
     @Override
     protected void finalize() {
+        if (this.destroyed)
+            return;
+
         destroy();
     }
 }
