@@ -1,10 +1,12 @@
 use ascii::{AsAsciiStr, IntoAsciiString};
-use cafebabe::{parse_class, MethodAccessFlags};
+use cafebabe::parse_class;
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
 
-use crate::class_index::{ClassIndex, ClassIndexBuilder, ClassInfo, IndexedClass, MethodInfo};
+use crate::class_index::{
+    ClassIndex, ClassIndexBuilder, ClassInfo, FieldInfo, IndexedClass, MethodInfo,
+};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 
 #[no_mangle]
@@ -17,7 +19,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
     let _class_index =
         Box::from_raw(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex);
 
-    env.set_field(this, "pointer", "J", JValue::from(0i64))
+    env.set_field(this, "pointer", "J", JValue::Long(0i64))
         .expect("Unable to set field");
 }
 
@@ -44,6 +46,21 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
                 package_name,
                 class_name,
                 access_flags: class.access_flags,
+                fields: class
+                    .fields
+                    .iter()
+                    .filter_map(|m| {
+                        let name = m.name.to_string().into_ascii_string();
+                        if name.is_err() {
+                            return None;
+                        }
+
+                        Some(FieldInfo {
+                            field_name: name.unwrap(),
+                            access_flags: m.access_flags,
+                        })
+                    })
+                    .collect(),
                 methods: class
                     .methods
                     .iter()
@@ -73,7 +90,7 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
         this,
         "pointer",
         "J",
-        JValue::from(Box::into_raw(Box::new(class_index)) as jlong),
+        JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
     .expect("Unable to set field");
 }
@@ -109,7 +126,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
         this,
         "pointer",
         "J",
-        JValue::from(Box::into_raw(Box::new(class_index)) as jlong),
+        JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
     .expect("Unable to set field");
 }
@@ -128,9 +145,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
         .expect("Couldn't get java string!")
         .into();
 
-    let string_class = env
-        .find_class("java/lang/String")
-        .expect("String class not found");
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");

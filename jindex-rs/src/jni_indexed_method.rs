@@ -30,8 +30,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAcce
     env: JNIEnv,
     this: jobject,
 ) -> jshort {
-    let indexed_class =
+    let indexed_method =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
 
-    indexed_class.access_flags() as jshort
+    indexed_method.access_flags() as jshort
 }

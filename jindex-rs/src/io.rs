@@ -4,7 +4,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use flate2::bufread::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use speedy::{Readable, Reader, Writable, Writer};
+use speedy::{Readable, Writable};
 
 use crate::ClassIndex;
 

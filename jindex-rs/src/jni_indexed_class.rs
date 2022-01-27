@@ -1,4 +1,4 @@
-use crate::class_index::{IndexedClass, IndexedMethod};
+use crate::class_index::{IndexedClass, IndexedField, IndexedMethod};
 use crate::ClassIndex;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jlong, jobject, jobjectArray, jshort, jstring};
@@ -55,6 +55,52 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAcces
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
 
     indexed_class.access_flags() as jshort
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getFields(
+    env: JNIEnv,
+    this: jobject,
+) -> jobjectArray {
+    let class_index_pointer = env
+        .get_field(this, "classIndexPointer", "J")
+        .unwrap()
+        .j()
+        .unwrap() as *mut ClassIndex;
+
+    let indexed_class =
+        &mut *(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedField")
+        .expect("Result class not found");
+
+    let result_array = env
+        .new_object_array(
+            indexed_class.field_count() as i32,
+            result_class,
+            JObject::null(),
+        )
+        .expect("Failed to create result array");
+
+    for (index, field) in indexed_class.fields().iter().enumerate() {
+        let object = env
+            .new_object(
+                result_class,
+                "(JJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from((field as *const IndexedField) as jlong),
+                ],
+            )
+            .expect("Failed to create result object");
+        env.set_object_array_element(result_array, index as i32, object)
+            .expect("Failed to set element into result array");
+    }
+
+    result_array
 }
 
 #[no_mangle]

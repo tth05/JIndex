@@ -82,7 +82,6 @@ impl ClassIndexConstantPool {
     }
 
     pub fn clear_sub_packages(&mut self) {
-        println!("package count: {}", self.indexed_packages.len());
         for p in self.indexed_packages.iter_mut() {
             p.clear_sub_packages();
         }

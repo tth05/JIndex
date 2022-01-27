@@ -1,6 +1,6 @@
 use crate::constant_pool::ClassIndexConstantPool;
 use ascii::{AsAsciiStr, AsciiStr, AsciiString};
-use cafebabe::{ClassAccessFlags, MethodAccessFlags};
+use cafebabe::{ClassAccessFlags, FieldAccessFlags, MethodAccessFlags};
 use speedy::{Readable, Writable};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -151,7 +151,24 @@ impl ClassIndexBuilder {
             let class_name_index =
                 self.get_index_from_pool(class_name, &mut constant_pool_map, &mut constant_pool);
 
-            let mut indexed_methods = Vec::new();
+            let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
+
+            for field_info in class_info.fields.iter() {
+                let field_name = field_info.field_name.as_ascii_str().unwrap();
+
+                let field_name_index = self.get_index_from_pool(
+                    field_name,
+                    &mut constant_pool_map,
+                    &mut constant_pool,
+                );
+
+                indexed_fields.push(IndexedField::new(
+                    field_name_index,
+                    field_info.access_flags.bits(),
+                ));
+            }
+
+            let mut indexed_methods = Vec::with_capacity(class_info.methods.len());
 
             for method_info in class_info.methods.iter() {
                 let method_name = method_info.method_name.as_ascii_str().unwrap();
@@ -175,6 +192,7 @@ impl ClassIndexBuilder {
                     .index(),
                 class_name_index,
                 class_info.access_flags.bits(),
+                indexed_fields,
                 indexed_methods,
             );
 
@@ -210,7 +228,13 @@ pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
     pub access_flags: ClassAccessFlags,
+    pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
+}
+
+pub struct FieldInfo {
+    pub field_name: AsciiString,
+    pub access_flags: FieldAccessFlags,
 }
 
 pub struct MethodInfo {
@@ -223,6 +247,7 @@ pub struct IndexedClass {
     package_index: u32,
     name_index: u32,
     access_flags: u16,
+    fields: Vec<IndexedField>,
     methods: Vec<IndexedMethod>,
 }
 
@@ -231,12 +256,14 @@ impl IndexedClass {
         package_index: u32,
         class_name_index: u32,
         access_flags: u16,
+        fields: Vec<IndexedField>,
         methods: Vec<IndexedMethod>,
     ) -> Self {
         Self {
             package_index,
             name_index: class_name_index,
             access_flags,
+            fields,
             methods,
         }
     }
@@ -262,6 +289,10 @@ impl IndexedClass {
         self.name_index
     }
 
+    pub fn field_count(&self) -> u16 {
+        self.fields.len() as u16
+    }
+    
     pub fn method_count(&self) -> u16 {
         self.methods.len() as u16
     }
@@ -270,8 +301,37 @@ impl IndexedClass {
         self.package_index
     }
 
+    pub fn fields(&self) -> &Vec<IndexedField> {
+        &self.fields
+    }
+    
     pub fn methods(&self) -> &Vec<IndexedMethod> {
         &self.methods
+    }
+
+    pub fn access_flags(&self) -> u16 {
+        self.access_flags
+    }
+}
+
+#[derive(Readable, Writable)]
+pub struct IndexedField {
+    name_index: u32,
+    access_flags: u16,
+}
+
+impl IndexedField {
+    pub fn new(name_index: u32, access_flags: u16) -> Self {
+        Self {
+            name_index,
+            access_flags,
+        }
+    }
+
+    pub fn field_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+        constant_pool
+            .string_view_at(self.name_index)
+            .to_ascii_string(constant_pool)
     }
 
     pub fn access_flags(&self) -> u16 {

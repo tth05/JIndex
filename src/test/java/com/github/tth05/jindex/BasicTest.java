@@ -26,11 +26,15 @@ public class BasicTest {
         IndexedClass[] results = index.findClasses("ClassIndex", 500);
 
         assertEquals(1, results.length);
-        assertEquals(10, results[0].getMethods().length);
-        assertEquals("com.github.tth05.jindex.ClassIndex", results[0].getNameWithPackage());
-        assertEquals("findClasses", results[0].getMethods()[2].getName());
-        assertTrue(Modifier.isPublic(results[0].getAccessFlags()));
-        assertTrue(Modifier.isNative(results[0].getMethods()[2].getAccessFlags()));
-        assertTrue(Modifier.isPublic(results[0].getMethods()[2].getAccessFlags()));
+        IndexedClass resultClass = results[0];
+        assertEquals(1, resultClass.getFields().length);
+        assertEquals(10, resultClass.getMethods().length);
+        assertEquals("com.github.tth05.jindex.ClassIndex", resultClass.getNameWithPackage());
+        assertEquals("pointer", resultClass.getFields()[0].getName());
+        assertTrue(Modifier.isPrivate(resultClass.getFields()[0].getAccessFlags()));
+        assertEquals("findClasses", resultClass.getMethods()[2].getName());
+        assertTrue(Modifier.isPublic(resultClass.getAccessFlags()));
+        assertTrue(Modifier.isNative(resultClass.getMethods()[2].getAccessFlags()));
+        assertTrue(Modifier.isPublic(resultClass.getMethods()[2].getAccessFlags()));
     }
 }

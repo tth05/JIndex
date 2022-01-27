@@ -16,6 +16,8 @@ public class IndexedClass {
 
     public native String getNameWithPackage();
 
+    public native IndexedField[] getFields();
+
     public native IndexedMethod[] getMethods();
 
     public native short getAccessFlags();
