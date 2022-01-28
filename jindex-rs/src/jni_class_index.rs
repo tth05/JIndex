@@ -179,3 +179,62 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
 
     result_array
 }
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
+    env: JNIEnv,
+    this: jobject,
+    i_package_name: JString,
+    i_class_name: JString,
+    limit: jint,
+) -> jobject {
+    let class_name: String = env
+        .get_string(i_class_name)
+        .expect("Couldn't get java string!")
+        .into();
+    let package_name: String = env
+        .get_string(i_package_name)
+        .expect("Couldn't get java string!")
+        .into();
+
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedClass")
+        .expect("Result class not found");
+
+    let class_index_pointer =
+        env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex;
+    let class_index = &*(class_index_pointer);
+
+    let classes: Vec<_> = class_index
+        .find_classes(class_name.as_ascii_str().unwrap(), limit as usize)
+        .expect("Find classes failed");
+
+    for class in classes.into_iter() {
+        if !class_index
+            .constant_pool()
+            .package_at(class.package_index())
+            .package_name_with_parents_equals(
+                class_index.constant_pool(),
+                package_name.as_ascii_str().unwrap(),
+            )
+        {
+            continue;
+        }
+
+        return env
+            .new_object(
+                result_class,
+                "(JJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from((class as *const IndexedClass) as jlong),
+                ],
+            )
+            .expect("Failed to create result object")
+            .into_inner();
+    }
+
+    JObject::null().into_inner()
+}

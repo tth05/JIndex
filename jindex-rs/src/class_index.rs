@@ -292,7 +292,7 @@ impl IndexedClass {
     pub fn field_count(&self) -> u16 {
         self.fields.len() as u16
     }
-    
+
     pub fn method_count(&self) -> u16 {
         self.methods.len() as u16
     }
@@ -304,7 +304,7 @@ impl IndexedClass {
     pub fn fields(&self) -> &Vec<IndexedField> {
         &self.fields
     }
-    
+
     pub fn methods(&self) -> &Vec<IndexedMethod> {
         &self.methods
     }
@@ -391,6 +391,44 @@ impl IndexedPackage {
         constant_pool
             .string_view_at(self.package_name_index)
             .to_ascii_string(constant_pool)
+    }
+
+    pub fn package_name_with_parents_equals(
+        &self,
+        constant_pool: &ClassIndexConstantPool,
+        str: &AsciiStr,
+    ) -> bool {
+        let mut index = str.len() - 1;
+
+        let mut current_package = self;
+        loop {
+            let current_part = constant_pool.string_view_at(current_package.package_name_index);
+            for i in (0..current_part.len()).rev() {
+                if current_part.byte_at(constant_pool, i) != str[index] {
+                    return false;
+                }
+
+                if index == 0 {
+                    return true;
+                }
+                index -= 1;
+            }
+
+            //If we do not end a dot, the package names don't match
+            if str[index] != '.' {
+                return false;
+            } else {
+                index -= 1;
+            }
+
+            if current_package.previous_package_index == 0 {
+                break;
+            }
+
+            current_package = constant_pool.package_at(current_package.previous_package_index)
+        }
+
+        false
     }
 
     pub fn package_name_with_parents(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {

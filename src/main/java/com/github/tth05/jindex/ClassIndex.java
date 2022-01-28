@@ -30,6 +30,8 @@ public class ClassIndex {
 
     public native IndexedClass[] findClasses(String query, int limit);
 
+    public native IndexedClass findClass(String packageName, String className);
+
     public List<String> findMethods(String query, int limit) {
         throw new UnsupportedOperationException();
     }

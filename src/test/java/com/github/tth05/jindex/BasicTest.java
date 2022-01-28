@@ -1,40 +1,49 @@
 package com.github.tth05.jindex;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.lang.reflect.Modifier;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.List;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BasicTest {
 
-    private List<byte[]> readTestClasses() {
-        return assertDoesNotThrow(() ->
-                Files.walk(Paths.get("./src/test/resources/"), 1)
-                        .skip(1)
-                        .map(p -> assertDoesNotThrow(() -> Files.readAllBytes(p))).collect(Collectors.toList())
-        );
+    private ClassIndex index;
+
+    @BeforeAll
+    public void init() {
+        List<byte[]> classes = SampleClassesHelper.loadSampleClasses();
+        index = new ClassIndex(classes);
     }
 
     @Test
-    public void test() {
-        ClassIndex index = new ClassIndex(readTestClasses());
-        IndexedClass[] results = index.findClasses("ClassIndex", 500);
+    public void testFindClass() {
+        IndexedClass singleClass = index.findClass("com.sun.org.apache.xpath.internal.operations", "String");
+        assertNotNull(singleClass);
+        assertEquals("com.sun.org.apache.xpath.internal.operations.String", singleClass.getNameWithPackage());
+    }
 
-        assertEquals(1, results.length);
+    @Test
+    public void testFindClasses() {
+        IndexedClass[] results = index.findClasses("String", 500);
+
+        assertEquals(62, results.length);
+
         IndexedClass resultClass = results[0];
         assertEquals(1, resultClass.getFields().length);
-        assertEquals(10, resultClass.getMethods().length);
-        assertEquals("com.github.tth05.jindex.ClassIndex", resultClass.getNameWithPackage());
-        assertEquals("pointer", resultClass.getFields()[0].getName());
-        assertTrue(Modifier.isPrivate(resultClass.getFields()[0].getAccessFlags()));
-        assertEquals("findClasses", resultClass.getMethods()[2].getName());
+        assertEquals(2, resultClass.getMethods().length);
+        assertEquals("com.sun.org.apache.xpath.internal.operations.String", resultClass.getNameWithPackage());
         assertTrue(Modifier.isPublic(resultClass.getAccessFlags()));
-        assertTrue(Modifier.isNative(resultClass.getMethods()[2].getAccessFlags()));
-        assertTrue(Modifier.isPublic(resultClass.getMethods()[2].getAccessFlags()));
+
+        assertEquals("serialVersionUID", resultClass.getFields()[0].getName());
+        assertTrue(Modifier.isStatic(resultClass.getFields()[0].getAccessFlags()));
+        assertTrue(Modifier.isFinal(resultClass.getFields()[0].getAccessFlags()));
+
+        assertEquals("operate", resultClass.getMethods()[1].getName());
+        assertTrue(Modifier.isPublic(resultClass.getMethods()[1].getAccessFlags()));
     }
 }
