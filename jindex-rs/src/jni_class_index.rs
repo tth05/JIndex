@@ -1,5 +1,5 @@
 use ascii::{AsAsciiStr, IntoAsciiString};
-use cafebabe::parse_class;
+use cafebabe::{parse_class_with_options, ParseOptions};
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
@@ -35,7 +35,10 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
     let list = env.get_list(byte_array_list.into()).unwrap();
     for byte_array in list.iter().unwrap() {
         let bytes = env.convert_byte_array(byte_array.cast()).unwrap();
-        if let Ok(class) = parse_class(&bytes[..]) {
+
+        if let Ok(class) =
+            parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false))
+        {
             let full_class_name = class.this_class.to_string();
             let split_pair = full_class_name
                 .rsplit_once("/")
