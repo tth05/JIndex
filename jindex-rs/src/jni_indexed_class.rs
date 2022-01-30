@@ -19,7 +19,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
 
-    env.new_string(indexed_class.class_name(class_index.constant_pool()))
+    env.new_string(indexed_class.class_name(&class_index.constant_pool()))
         .unwrap()
         .into_inner()
 }
@@ -39,7 +39,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
 
-    env.new_string(indexed_class.class_name_with_package(class_index.constant_pool()))
+    env.new_string(indexed_class.class_name_with_package(&class_index.constant_pool()))
         .unwrap()
         .into_inner()
 }

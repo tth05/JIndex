@@ -2,7 +2,7 @@ use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
 use ascii::{AsciiChar, AsciiStr};
 use speedy::{Readable, Writable};
-use std::cmp::{min, Ordering};
+use std::cmp::min;
 
 #[derive(Readable, Writable)]
 pub struct ClassIndexConstantPool {

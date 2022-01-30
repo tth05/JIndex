@@ -1,11 +1,13 @@
 use std::fs::OpenOptions;
 use std::io::{BufReader, BufWriter, Read, Write};
 
+use crate::class_index::IndexedClass;
 use flate2::bufread::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use speedy::{Readable, Writable};
+use speedy::{Context, Readable, Reader, Writable, Writer};
 
+use crate::constant_pool::ClassIndexConstantPool;
 use crate::ClassIndex;
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
@@ -42,4 +44,56 @@ pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) {
     writer
         .write_all(&encoder.finish().unwrap())
         .expect("Write to file failed");
+}
+
+impl<'a, C> Readable<'a, C> for ClassIndex
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        Ok(ClassIndex::new(
+            ClassIndexConstantPool::read_from(reader)?,
+            Vec::read_from(reader)?,
+        ))
+    }
+}
+
+impl<C> Writable<C> for ClassIndex
+where
+    C: Context,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        self.constant_pool().write_to(writer)?;
+        self.classes().write_to(writer)?;
+        Ok(())
+    }
+}
+
+impl<'a, C> Readable<'a, C> for IndexedClass
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        Ok(IndexedClass::new(
+            reader.read_u32()?,
+            reader.read_u32()?,
+            reader.read_u16()?,
+            Vec::read_from(reader)?,
+            Vec::read_from(reader)?,
+        ))
+    }
+}
+
+impl<C> Writable<C> for IndexedClass
+where
+    C: Context,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        self.package_index().write_to(writer)?;
+        self.class_name_index().write_to(writer)?;
+        self.access_flags().write_to(writer)?;
+        self.fields().write_to(writer)?;
+        self.methods().write_to(writer)?;
+        Ok(())
+    }
 }

@@ -1,8 +1,12 @@
 use ascii::{AsAsciiStr, IntoAsciiString};
 use cafebabe::{parse_class_with_options, ParseOptions};
 use jni::objects::{JObject, JString, JValue};
+use jni::signature::JavaType;
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
+use std::ops::Div;
+use std::str::FromStr;
+use std::time::Instant;
 
 use crate::class_index::{
     ClassIndex, ClassIndexBuilder, ClassInfo, FieldInfo, IndexedClass, MethodInfo,
@@ -31,14 +35,20 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
     this: jobject,
     byte_array_list: jobject,
 ) {
+    let mut now = Instant::now();
+    let mut total = 0;
+
     let mut class_info_list: Vec<ClassInfo> = Vec::new();
     let list = env.get_list(byte_array_list.into()).unwrap();
+
     for byte_array in list.iter().unwrap() {
         let bytes = env.convert_byte_array(byte_array.cast()).unwrap();
 
-        if let Ok(class) =
-            parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false))
-        {
+        let now2 = Instant::now();
+        let thing =
+            parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
+        total += now2.elapsed().as_nanos();
+        if let Ok(class) = thing {
             let full_class_name = class.this_class.to_string();
             let split_pair = full_class_name
                 .rsplit_once("/")
@@ -62,6 +72,8 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
 
                         Some(FieldInfo {
                             field_name: name.unwrap(),
+                            descriptor: JavaType::from_str(&m.descriptor)
+                                .expect("Invalid field signature"),
                             access_flags: m.access_flags,
                         })
                     })
@@ -77,6 +89,12 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
 
                         Some(MethodInfo {
                             method_name: name.unwrap(),
+                            signature: match JavaType::from_str(&m.descriptor)
+                                .expect("Invalid type signature")
+                            {
+                                JavaType::Method(type_sig) => type_sig,
+                                _ => panic!("Method descriptor was not a method signature"),
+                            },
                             access_flags: m.access_flags,
                         })
                     })
@@ -85,11 +103,20 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
         }
     }
 
+    println!("Just parsing took {:?}", total.div(1_000_000));
+    println!("Reading took {:?}", now.elapsed().as_nanos().div(1_000_000));
+    now = Instant::now();
+
     let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
 
     let class_index = ClassIndexBuilder::default()
         .with_expected_method_count(method_count)
         .build(class_info_list);
+
+    println!(
+        "Building took {:?}",
+        now.elapsed().as_nanos().div(1_000_000)
+    );
 
     env.set_field(
         this,
@@ -165,7 +192,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     let result_array = env
         .new_object_array(classes.len() as i32, result_class, JObject::null())
         .expect("Failed to create result array");
-    for (index, class) in classes.into_iter().enumerate() {
+    for (index, (_, class)) in classes.into_iter().enumerate() {
         let object = env
             .new_object(
                 result_class,
@@ -191,7 +218,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
     this: jobject,
     i_package_name: JString,
     i_class_name: JString,
-    limit: jint,
 ) -> jobject {
     let class_name: String = env
         .get_string(i_class_name)
@@ -210,34 +236,21 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
         env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex;
     let class_index = &*(class_index_pointer);
 
-    let classes: Vec<_> = class_index
-        .find_classes(class_name.as_ascii_str().unwrap(), limit as usize)
-        .expect("Find classes failed");
-
-    for class in classes.into_iter() {
-        if !class_index
-            .constant_pool()
-            .package_at(class.package_index())
-            .package_name_with_parents_equals(
-                class_index.constant_pool(),
-                package_name.as_ascii_str().unwrap(),
-            )
-        {
-            continue;
-        }
-
-        return env
-            .new_object(
-                result_class,
-                "(JJ)V",
-                &[
-                    JValue::from(class_index_pointer as jlong),
-                    JValue::from((class as *const IndexedClass) as jlong),
-                ],
-            )
-            .expect("Failed to create result object")
-            .into_inner();
+    if let Some((_, class)) = class_index.find_class(
+        package_name.as_ascii_str().unwrap(),
+        class_name.as_ascii_str().unwrap(),
+    ) {
+        env.new_object(
+            result_class,
+            "(JJ)V",
+            &[
+                JValue::from(class_index_pointer as jlong),
+                JValue::from((class as *const IndexedClass) as jlong),
+            ],
+        )
+        .expect("Failed to create result object")
+        .into_inner()
+    } else {
+        JObject::null().into_inner()
     }
-
-    JObject::null().into_inner()
 }

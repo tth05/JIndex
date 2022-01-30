@@ -14,6 +14,8 @@ public class IndexedField {
 
     public native short getAccessFlags();
 
+    public native String getType();
+
     @Override
     public String toString() {
         return getName();

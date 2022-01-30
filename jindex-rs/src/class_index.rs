@@ -1,14 +1,16 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use ascii::{AsAsciiStr, AsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::{ClassAccessFlags, FieldAccessFlags, MethodAccessFlags};
+use jni::signature::{JavaType, TypeSignature};
 use speedy::{Readable, Writable};
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::ops::Range;
+use std::ops::{Div, Range};
 use std::slice::Iter;
+use std::time::Instant;
 
-#[derive(Readable, Writable)]
 pub struct ClassIndex {
-    constant_pool: ClassIndexConstantPool,
+    constant_pool: RefCell<ClassIndexConstantPool>,
     class_prefix_range_map: HashMap<u8, Range<u32>>,
     classes: Vec<IndexedClass>,
 }
@@ -43,7 +45,7 @@ impl ClassIndex {
         }
 
         Self {
-            constant_pool,
+            constant_pool: RefCell::new(constant_pool),
             classes,
             class_prefix_range_map: range_map,
         }
@@ -53,52 +55,126 @@ impl ClassIndex {
         &self,
         name: &AsciiStr,
         limit: usize,
-    ) -> anyhow::Result<Vec<&IndexedClass>> {
+    ) -> anyhow::Result<Vec<(u32, &IndexedClass)>> {
         let lower_case_iter =
             self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte());
         let upper_case_iter =
             self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_uppercase().as_byte());
 
-        let res = lower_case_iter
-            .chain(upper_case_iter)
-            .filter(|class| {
-                self.constant_pool
+        let mut index = 0;
+        let mut res: Vec<(u32, &IndexedClass)> = lower_case_iter
+            .1
+            .filter_map(|class| {
+                let mut result = None;
+                if self
+                    .constant_pool()
                     .string_view_at(class.name_index)
-                    .starts_with(&self.constant_pool, name, true)
+                    .starts_with(&self.constant_pool(), name, true)
+                {
+                    result = Some((lower_case_iter.0.start + index, class))
+                }
+
+                index += 1;
+                result
             })
             .take(limit)
             .collect();
 
+        index = 0;
+        //TODO: Duplicated code
+        upper_case_iter
+            .1
+            .filter_map(|class| {
+                let mut result = None;
+                if self
+                    .constant_pool()
+                    .string_view_at(class.name_index)
+                    .starts_with(&self.constant_pool(), name, true)
+                {
+                    result = Some((upper_case_iter.0.start + index, class))
+                }
+
+                index += 1;
+                result
+            })
+            .take(limit.saturating_sub(res.len()))
+            .for_each(|el| res.push(el));
+
         Ok(res)
+    }
+
+    pub fn find_class(
+        &self,
+        package_name: &AsciiStr,
+        class_name: &AsciiStr,
+    ) -> Option<(u32, &IndexedClass)> {
+        let classes: Vec<_> = self
+            .find_classes(class_name.as_ascii_str().unwrap(), usize::MAX)
+            .expect("Find classes failed");
+
+        for class in classes.into_iter() {
+            if !self
+                .constant_pool()
+                .package_at(class.1.package_index())
+                .package_name_with_parents_equals(
+                    &self.constant_pool(),
+                    package_name.as_ascii_str().unwrap(),
+                )
+            {
+                continue;
+            }
+
+            return Some(class);
+        }
+
+        None
+    }
+
+    pub fn class_at_index(&self, index: u32) -> &IndexedClass {
+        self.classes().get(index as usize).unwrap()
     }
 
     pub fn find_methods(
-        &mut self,
+        &self,
         name: &AsciiStr,
         limit: usize,
     ) -> anyhow::Result<Vec<&IndexedMethod>> {
-        let res = self
-            .classes
-            .iter()
-            .flat_map(|class| class.methods())
-            .filter(|method| {
-                self.constant_pool
-                    .string_view_at(method.name_index)
-                    .starts_with(&self.constant_pool, name, false)
-            })
-            .take(limit)
-            .collect();
-        Ok(res)
+        /*let res = self
+        .classes
+        .iter()
+        .flat_map(|class| *class.methods())
+        .filter(|method| {
+            self.constant_pool()
+                .string_view_at(method.name_index)
+                .starts_with(&self.constant_pool(), name, false)
+        })
+        .take(limit)
+        .collect();*/
+        //TODO: Fix :(
+        Ok(Vec::new())
     }
 
-    pub fn constant_pool(&self) -> &ClassIndexConstantPool {
-        &self.constant_pool
+    pub fn classes(&self) -> &Vec<IndexedClass> {
+        &self.classes
     }
 
-    fn class_iter_for_char(&self, char: u8) -> Iter<IndexedClass> {
+    pub fn constant_pool(&self) -> Ref<ClassIndexConstantPool> {
+        self.constant_pool.borrow()
+    }
+
+    pub fn constant_pool_mut(&self) -> RefMut<ClassIndexConstantPool> {
+        self.constant_pool.borrow_mut()
+    }
+
+    fn class_iter_for_char(&self, char: u8) -> (Range<u32>, Iter<IndexedClass>) {
         self.class_prefix_range_map.get(&char).map_or_else(
-            || self.classes[0..0].iter(),
-            |r| self.classes[r.start as usize..r.end as usize].iter(),
+            || (0..0, self.classes[0..0].iter()),
+            |r| {
+                (
+                    r.clone(),
+                    self.classes[r.start as usize..r.end as usize].iter(),
+                )
+            },
         )
     }
 }
@@ -151,39 +227,8 @@ impl ClassIndexBuilder {
             let class_name_index =
                 self.get_index_from_pool(class_name, &mut constant_pool_map, &mut constant_pool);
 
-            let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
-
-            for field_info in class_info.fields.iter() {
-                let field_name = field_info.field_name.as_ascii_str().unwrap();
-
-                let field_name_index = self.get_index_from_pool(
-                    field_name,
-                    &mut constant_pool_map,
-                    &mut constant_pool,
-                );
-
-                indexed_fields.push(IndexedField::new(
-                    field_name_index,
-                    field_info.access_flags.bits(),
-                ));
-            }
-
-            let mut indexed_methods = Vec::with_capacity(class_info.methods.len());
-
-            for method_info in class_info.methods.iter() {
-                let method_name = method_info.method_name.as_ascii_str().unwrap();
-
-                let method_name_index = self.get_index_from_pool(
-                    method_name,
-                    &mut constant_pool_map,
-                    &mut constant_pool,
-                );
-
-                indexed_methods.push(IndexedMethod::new(
-                    method_name_index,
-                    method_info.access_flags.bits(),
-                ));
-            }
+            let indexed_fields = Vec::with_capacity(class_info.fields.len());
+            let indexed_methods = Vec::with_capacity(class_info.methods.len());
 
             let indexed_class = IndexedClass::new(
                 constant_pool
@@ -199,7 +244,81 @@ impl ClassIndexBuilder {
             classes.push(indexed_class);
         }
 
-        ClassIndex::new(constant_pool, classes)
+        let class_index = ClassIndex::new(constant_pool, classes);
+
+        let mut time = 0;
+        for class_info in vec.iter() {
+            let indexed_class = class_index
+                .find_class(&class_info.package_name, &class_info.class_name)
+                .unwrap()
+                .1;
+            let mut indexed_fields = indexed_class.fields_mut();
+
+            for field_info in class_info.fields.iter() {
+                let field_name = field_info.field_name.as_ascii_str().unwrap();
+
+                let field_name_index = self.get_index_from_pool(
+                    field_name,
+                    &mut constant_pool_map,
+                    &mut class_index.constant_pool_mut(),
+                );
+
+                indexed_fields.push(IndexedField::new(
+                    field_name_index,
+                    match &field_info.descriptor {
+                        JavaType::Object(full_class_name) => {
+                            let split_pair = full_class_name
+                                .rsplit_once("/")
+                                .unwrap_or(("", full_class_name));
+
+                            let package_name =
+                                split_pair.0.replace("/", ".").into_ascii_string().unwrap();
+                            let class_name = split_pair.1.into_ascii_string().unwrap();
+
+                            let t = Instant::now();
+                            let option = class_index.find_class(&package_name, &class_name);
+                            time += t.elapsed().as_nanos();
+                            if option.is_none() {
+                                -4
+                            } else {
+                                option
+                                    .unwrap_or_else(|| {
+                                        panic!(
+                                            "Field type not found {:?}, {:?}",
+                                            &package_name, class_name
+                                        )
+                                    })
+                                    .0 as i32
+                            }
+                        }
+                        JavaType::Primitive(p) => -1,
+                        _ => -2,
+                    },
+                    field_info.access_flags.bits(),
+                ));
+            }
+
+            let mut indexed_methods = indexed_class.methods_mut();
+
+            for method_info in class_info.methods.iter() {
+                let method_name = method_info.method_name.as_ascii_str().unwrap();
+
+                let method_name_index = self.get_index_from_pool(
+                    method_name,
+                    &mut constant_pool_map,
+                    &mut class_index.constant_pool_mut(),
+                );
+
+                indexed_methods.push(IndexedMethod::new(
+                    method_name_index,
+                    method_info.access_flags.bits(),
+                ));
+            }
+        }
+
+        println!("Time spent in findClass {:?}", time.div(1_000_000));
+
+        class_index
     }
 
     fn get_index_from_pool<'a>(
@@ -234,21 +353,23 @@ pub struct ClassInfo {
 
 pub struct FieldInfo {
     pub field_name: AsciiString,
+    pub descriptor: JavaType,
     pub access_flags: FieldAccessFlags,
 }
 
 pub struct MethodInfo {
     pub method_name: AsciiString,
+    pub signature: Box<TypeSignature>,
     pub access_flags: MethodAccessFlags,
 }
 
-#[derive(Readable, Writable)]
+// #[derive(Readable, Writable)]
 pub struct IndexedClass {
     package_index: u32,
     name_index: u32,
     access_flags: u16,
-    fields: Vec<IndexedField>,
-    methods: Vec<IndexedMethod>,
+    fields: RefCell<Vec<IndexedField>>,
+    methods: RefCell<Vec<IndexedMethod>>,
 }
 
 impl IndexedClass {
@@ -263,8 +384,8 @@ impl IndexedClass {
             package_index,
             name_index: class_name_index,
             access_flags,
-            fields,
-            methods,
+            fields: RefCell::new(fields),
+            methods: RefCell::new(methods),
         }
     }
 
@@ -290,23 +411,31 @@ impl IndexedClass {
     }
 
     pub fn field_count(&self) -> u16 {
-        self.fields.len() as u16
+        self.fields.borrow().len() as u16
     }
 
     pub fn method_count(&self) -> u16 {
-        self.methods.len() as u16
+        self.methods.borrow().len() as u16
     }
 
     pub fn package_index(&self) -> u32 {
         self.package_index
     }
 
-    pub fn fields(&self) -> &Vec<IndexedField> {
-        &self.fields
+    pub fn fields(&self) -> Ref<Vec<IndexedField>> {
+        self.fields.borrow()
     }
 
-    pub fn methods(&self) -> &Vec<IndexedMethod> {
-        &self.methods
+    pub fn fields_mut(&self) -> RefMut<Vec<IndexedField>> {
+        self.fields.borrow_mut()
+    }
+
+    pub fn methods(&self) -> Ref<Vec<IndexedMethod>> {
+        self.methods.borrow()
+    }
+
+    pub fn methods_mut(&self) -> RefMut<Vec<IndexedMethod>> {
+        self.methods.borrow_mut()
     }
 
     pub fn access_flags(&self) -> u16 {
@@ -317,13 +446,15 @@ impl IndexedClass {
 #[derive(Readable, Writable)]
 pub struct IndexedField {
     name_index: u32,
+    type_class_index: i32,
     access_flags: u16,
 }
 
 impl IndexedField {
-    pub fn new(name_index: u32, access_flags: u16) -> Self {
+    pub fn new(name_index: u32, type_class_index: i32, access_flags: u16) -> Self {
         Self {
             name_index,
+            type_class_index,
             access_flags,
         }
     }
@@ -336,6 +467,10 @@ impl IndexedField {
 
     pub fn access_flags(&self) -> u16 {
         self.access_flags
+    }
+
+    pub fn type_class_index(&self) -> i32 {
+        self.type_class_index
     }
 }
 

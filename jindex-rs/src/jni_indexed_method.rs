@@ -18,7 +18,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
     let indexed_method =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
 
-    env.new_string(indexed_method.method_name(class_index.constant_pool()))
+    env.new_string(indexed_method.method_name(&class_index.constant_pool()))
         .unwrap()
         .into_inner()
 }
