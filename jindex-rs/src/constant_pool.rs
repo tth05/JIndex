@@ -32,8 +32,8 @@ impl ClassIndexConstantPool {
         indexed_package_index: u32,
         name: &AsciiStr,
     ) -> Result<&IndexedPackage> {
-        let dot_index_or_none = name.chars().position(|char| char == '.');
-        let sub_name = match dot_index_or_none {
+        let slash_index_or_none = name.chars().position(|char| char == '/');
+        let sub_name = match slash_index_or_none {
             Some(dot_index) => &name[..dot_index],
             None => name,
         };
@@ -55,7 +55,7 @@ impl ClassIndexConstantPool {
             .map(|p| *p.1);
 
         if let Some(index) = possible_index {
-            if let Some(dot_index) = dot_index_or_none {
+            if let Some(dot_index) = slash_index_or_none {
                 self.get_or_add_package0(index, &name[dot_index + 1..])
             } else {
                 Ok(self.indexed_packages.get(index as usize).unwrap())
@@ -73,7 +73,7 @@ impl ClassIndexConstantPool {
                 .unwrap()
                 .add_sub_package(new_index as u32);
 
-            if let Some(index) = dot_index_or_none {
+            if let Some(index) = slash_index_or_none {
                 self.get_or_add_package0(new_index as u32, &name[index + 1..])
             } else {
                 Ok(self.indexed_packages.last().unwrap())

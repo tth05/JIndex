@@ -54,7 +54,7 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
                 .rsplit_once("/")
                 .unwrap_or(("", &full_class_name));
 
-            let package_name = split_pair.0.replace("/", ".").into_ascii_string().unwrap();
+            let package_name = split_pair.0.into_ascii_string().unwrap();
             let class_name = split_pair.1.into_ascii_string().unwrap();
 
             class_info_list.push(ClassInfo {
@@ -237,7 +237,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
     let class_index = &*(class_index_pointer);
 
     if let Some((_, class)) = class_index.find_class(
-        package_name.as_ascii_str().unwrap(),
+        package_name.replace(".", "/").as_ascii_str().unwrap(),
         class_name.as_ascii_str().unwrap(),
     ) {
         env.new_object(

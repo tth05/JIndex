@@ -271,8 +271,7 @@ impl ClassIndexBuilder {
                                 .rsplit_once("/")
                                 .unwrap_or(("", full_class_name));
 
-                            let package_name =
-                                split_pair.0.replace("/", ".").into_ascii_string().unwrap();
+                            let package_name = split_pair.0.into_ascii_string().unwrap();
                             let class_name = split_pair.1.into_ascii_string().unwrap();
 
                             let t = Instant::now();
@@ -549,8 +548,8 @@ impl IndexedPackage {
                 index -= 1;
             }
 
-            //If we do not end a dot, the package names don't match
-            if str[index] != '.' {
+            //If we do not end a slash, the package names don't match
+            if str[index] != '/' {
                 return false;
             } else {
                 index -= 1;
