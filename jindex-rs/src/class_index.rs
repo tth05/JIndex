@@ -5,7 +5,7 @@ use jni::signature::{JavaType, TypeSignature};
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::ops::{Div, Range};
+use std::ops::{Div, Index, Range};
 use std::slice::Iter;
 use std::time::Instant;
 
@@ -138,7 +138,25 @@ impl ClassIndex {
         &self,
         name: &AsciiStr,
         limit: usize,
-    ) -> anyhow::Result<Vec<&IndexedMethod>> {
+    ) -> anyhow::Result<Vec<IndexedMethod>> {
+        let mut res = Vec::new();
+        'outer: for c in self.classes.iter() {
+            for method in c.methods().iter() {
+                if res.len() > limit {
+                    break 'outer;
+                }
+
+                if !self
+                    .constant_pool()
+                    .string_view_at(method.name_index)
+                    .starts_with(&self.constant_pool(), name, false)
+                {
+                    continue;
+                }
+                //TODO: Somehow make this work without clone?
+                res.push(method.clone());
+            }
+        }
         /*let res = self
         .classes
         .iter()
@@ -150,8 +168,7 @@ impl ClassIndex {
         })
         .take(limit)
         .collect();*/
-        //TODO: Fix :(
-        Ok(Vec::new())
+        Ok(res)
     }
 
     pub fn classes(&self) -> &Vec<IndexedClass> {
@@ -495,6 +512,12 @@ impl IndexedMethod {
 
     pub fn access_flags(&self) -> u16 {
         self.access_flags
+    }
+}
+
+impl Clone for IndexedMethod {
+    fn clone(&self) -> Self {
+        IndexedMethod::new(self.name_index, self.access_flags)
     }
 }
 
