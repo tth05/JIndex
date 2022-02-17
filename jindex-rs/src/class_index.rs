@@ -1,13 +1,22 @@
 use crate::constant_pool::ClassIndexConstantPool;
 use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString};
-use cafebabe::{ClassAccessFlags, FieldAccessFlags, MethodAccessFlags};
+use cafebabe::{
+    parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
+};
 use jni::signature::{JavaType, TypeSignature};
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
+use std::cmp::min;
 use std::collections::HashMap;
-use std::ops::{Div, Index, Range};
+use std::fs::File;
+use std::io::Read;
+use std::ops::{Div, Range};
+use std::path::Path;
 use std::slice::Iter;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use zip::ZipArchive;
 
 pub struct ClassIndex {
     constant_pool: RefCell<ClassIndexConstantPool>,
@@ -555,6 +564,8 @@ impl IndexedPackage {
         constant_pool: &ClassIndexConstantPool,
         str: &AsciiStr,
     ) -> bool {
+        //TODO: Support empty str parameter
+
         let mut index = str.len() - 1;
 
         let mut current_package = self;
@@ -625,4 +636,156 @@ impl IndexedPackage {
     pub fn package_name_index(&self) -> u32 {
         self.package_name_index
     }
+}
+
+pub fn create_class_index_from_jars(jar_names: Vec<String>) -> ClassIndex {
+    let mut threads = Vec::with_capacity(min(jar_names.len(), num_cpus::get()));
+    let arc = Arc::new(Mutex::new(jar_names));
+
+    let now = Instant::now();
+    for i in 0..threads.capacity() {
+        threads.push(
+            std::thread::Builder::new()
+                .name(format!("JIndex Thread {}", i))
+                .spawn({
+                    let queue = Arc::clone(&arc);
+                    move || {
+                        let mut output = Vec::new();
+                        loop {
+                            let mut vec = queue.lock().unwrap();
+                            if vec.is_empty() {
+                                break;
+                            }
+
+                            let file_name = vec.remove(0);
+                            drop(vec); //Release lock
+
+                            let file_path = Path::new(&file_name);
+                            if !file_path.exists() {
+                                continue;
+                            }
+
+                            let mut archive =
+                                ZipArchive::new(File::open(file_path).unwrap()).unwrap();
+
+                            for i in 0..archive.len() {
+                                let mut entry = archive.by_index(i).unwrap();
+                                if entry.is_dir() || !entry.name().ends_with(".class") {
+                                    continue;
+                                }
+
+                                let mut data = Vec::with_capacity(entry.size() as usize);
+                                entry.read_to_end(&mut data).expect("Unable to read entry");
+                                output.push(data);
+                            }
+                        }
+
+                        output
+                    }
+                })
+                .unwrap(),
+        )
+    }
+
+    let class_bytes = threads
+        .into_iter()
+        .map(|t| t.join().unwrap())
+        .reduce(|mut v1, v2| {
+            v1.extend(v2);
+            v1
+        })
+        .unwrap();
+
+    println!(
+        "read {} classes into ram in {}ms",
+        class_bytes.len(),
+        now.elapsed().as_millis()
+    );
+
+    create_class_index(class_bytes)
+}
+
+pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
+    let mut now = Instant::now();
+    let mut total = 0;
+
+    let mut class_info_list: Vec<ClassInfo> = Vec::new();
+
+    for bytes in class_bytes.iter() {
+        let now2 = Instant::now();
+        let thing =
+            parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
+        total += now2.elapsed().as_nanos();
+
+        if let Ok(class) = thing {
+            let full_class_name = class.this_class.to_string();
+            let split_pair = full_class_name
+                .rsplit_once("/")
+                .unwrap_or(("", &full_class_name));
+
+            let package_name = split_pair.0.into_ascii_string().unwrap();
+            let class_name = split_pair.1.into_ascii_string().unwrap();
+
+            class_info_list.push(ClassInfo {
+                package_name,
+                class_name,
+                access_flags: class.access_flags,
+                fields: class
+                    .fields
+                    .iter()
+                    .filter_map(|m| {
+                        let name = m.name.to_string().into_ascii_string();
+                        if name.is_err() {
+                            return None;
+                        }
+
+                        Some(FieldInfo {
+                            field_name: name.unwrap(),
+                            descriptor: JavaType::from_str(&m.descriptor)
+                                .expect("Invalid field signature"),
+                            access_flags: m.access_flags,
+                        })
+                    })
+                    .collect(),
+                methods: class
+                    .methods
+                    .iter()
+                    .filter_map(|m| {
+                        let name = m.name.to_string().into_ascii_string();
+                        if name.is_err() {
+                            return None;
+                        }
+
+                        Some(MethodInfo {
+                            method_name: name.unwrap(),
+                            signature: match JavaType::from_str(&m.descriptor)
+                                .expect("Invalid type signature")
+                            {
+                                JavaType::Method(type_sig) => type_sig,
+                                _ => panic!("Method descriptor was not a method signature"),
+                            },
+                            access_flags: m.access_flags,
+                        })
+                    })
+                    .collect(),
+            })
+        }
+    }
+
+    println!("Just parsing took {:?}", total.div(1_000_000));
+    println!("Reading took {:?}", now.elapsed().as_nanos().div(1_000_000));
+    now = Instant::now();
+
+    let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
+
+    let class_index = ClassIndexBuilder::default()
+        .with_expected_method_count(method_count)
+        .build(class_info_list);
+
+    println!(
+        "Building took {:?}",
+        now.elapsed().as_nanos().div(1_000_000)
+    );
+
+    class_index
 }

@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.lang.reflect.Modifier;
-import java.util.List;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -16,8 +16,9 @@ public class BasicTest {
 
     @BeforeAll
     public void init() {
-        List<byte[]> classes = SampleClassesHelper.loadSampleClasses();
-        index = new ClassIndex(classes);
+        long t = System.nanoTime();
+        index = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
+        System.out.println((System.nanoTime() - t) / 1_000_000.0);
     }
 
     @Test

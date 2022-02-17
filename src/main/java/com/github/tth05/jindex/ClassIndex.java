@@ -20,14 +20,6 @@ public class ClassIndex {
     private long pointer;
     private boolean destroyed;
 
-    public ClassIndex(String filePath) {
-        loadClassIndexFromFile(filePath);
-    }
-
-    public ClassIndex(List<byte[]> classes) {
-        createClassIndex(classes);
-    }
-
     public native IndexedClass[] findClasses(String query, int limit);
 
     public native IndexedClass findClass(String packageName, String className);
@@ -42,6 +34,8 @@ public class ClassIndex {
 
     private native void createClassIndex(List<byte[]> classes);
 
+    private native void createClassIndexFromJars(List<String> classes);
+
     private native void loadClassIndexFromFile(String filePath);
 
     @Override
@@ -50,5 +44,23 @@ public class ClassIndex {
             return;
 
         destroy();
+    }
+
+    public static ClassIndex fromJars(List<String> jarFileNames) {
+        ClassIndex c = new ClassIndex();
+        c.createClassIndexFromJars(jarFileNames);
+        return c;
+    }
+
+    public static ClassIndex fromBytecode(List<byte[]> classes) {
+        ClassIndex c = new ClassIndex();
+        c.createClassIndex(classes);
+        return c;
+    }
+
+    public static ClassIndex fromFile(String path) {
+        ClassIndex c = new ClassIndex();
+        c.loadClassIndexFromFile(path);
+        return c;
     }
 }

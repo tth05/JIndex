@@ -1,8 +1,7 @@
-use jni::objects::JValue;
-use jni::sys::{jlong, jobject, jshort, jstring};
+use jni::sys::{jobject, jshort, jstring};
 use jni::JNIEnv;
 
-use crate::class_index::{IndexedClass, IndexedField};
+use crate::class_index::IndexedField;
 use crate::ClassIndex;
 
 #[no_mangle]
@@ -54,20 +53,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getType(
     let indexed_field =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedField);
 
-    let result_class = env
-        .find_class("com/github/tth05/jindex/IndexedClass")
-        .expect("Result class not found");
-
-    /*env.new_object(
-        result_class,
-        "(JJ)V",
-        &[
-            JValue::from(class_index_pointer as jlong),
-            JValue::from((class_index.get_class_at as *const IndexedClass) as jlong),
-        ],
-    )
-        .expect("Failed to create result object")
-        .into_inner()*/
     if indexed_field.type_class_index() < 0 {
         env.new_string(indexed_field.type_class_index().to_string())
             .unwrap()
