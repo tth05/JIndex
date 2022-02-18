@@ -1,6 +1,6 @@
 use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
-use ascii::{AsciiChar, AsciiStr};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 use speedy::{Readable, Writable};
 use std::cmp::min;
 
@@ -114,7 +114,7 @@ impl ClassIndexConstantPool {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq)]
 pub struct ConstantPoolStringView {
     index: u32,
     start: u8,
@@ -126,8 +126,6 @@ impl PartialEq for ConstantPoolStringView {
         self.index == other.index && self.start == other.start && self.end == other.end
     }
 }
-
-impl Eq for ConstantPoolStringView {}
 
 impl ConstantPoolStringView {
     pub fn new(index: u32, start: u8, end: u8) -> Self {
@@ -185,6 +183,26 @@ impl ConstantPoolStringView {
             if current_byte != current_char
                 && (!ignore_case || current_byte != switch_ascii_char_case(current_char))
             {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn equals_ascii(
+        &self,
+        constant_pool: &ClassIndexConstantPool,
+        other: &AsciiStr
+    ) -> bool {
+        if other.len() != self.len() as usize {
+            return false;
+        }
+
+        for i in 0..self.len() {
+            let current_byte = self.byte_at(constant_pool, i);
+            let current_char = other[i as usize];
+            if current_byte != current_char {
                 return false;
             }
         }

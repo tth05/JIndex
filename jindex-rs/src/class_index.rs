@@ -6,7 +6,7 @@ use cafebabe::{
 use jni::signature::{JavaType, TypeSignature};
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
@@ -117,23 +117,23 @@ impl ClassIndex {
         package_name: &AsciiStr,
         class_name: &AsciiStr,
     ) -> Option<(u32, &IndexedClass)> {
-        let classes: Vec<_> = self
-            .find_classes(class_name.as_ascii_str().unwrap(), usize::MAX)
-            .expect("Find classes failed");
+        let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
-        for class in classes.into_iter() {
-            if !self
+        for (index, class) in class_iter.1.enumerate() {
+            if self
                 .constant_pool()
-                .package_at(class.1.package_index())
-                .package_name_with_parents_equals(
-                    &self.constant_pool(),
-                    package_name.as_ascii_str().unwrap(),
-                )
+                .string_view_at(class.name_index)
+                .equals_ascii(&self.constant_pool(), class_name)
+                && self
+                    .constant_pool()
+                    .package_at(class.package_index())
+                    .package_name_with_parents_equals(
+                        &self.constant_pool(),
+                        package_name.as_ascii_str().unwrap(),
+                    )
             {
-                continue;
+                return Some((class_iter.0.start + index as u32, class));
             }
-
-            return Some(class);
         }
 
         None
