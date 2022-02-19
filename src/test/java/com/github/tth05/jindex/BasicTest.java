@@ -23,9 +23,9 @@ public class BasicTest {
 
     @Test
     public void testFindClass() {
-        IndexedClass singleClass = index.findClass("com.sun.org.apache.xpath.internal.operations", "String");
+        IndexedClass singleClass = index.findClass("com/sun/org/apache/xpath/internal/operations", "String");
         assertNotNull(singleClass);
-        assertEquals("com.sun.org.apache.xpath.internal.operations.String", singleClass.getNameWithPackage());
+        assertEquals("com/sun/org/apache/xpath/internal/operations/String", singleClass.getNameWithPackage());
     }
 
     @Test
@@ -37,7 +37,7 @@ public class BasicTest {
         IndexedClass resultClass = results[0];
         assertEquals(1, resultClass.getFields().length);
         assertEquals(2, resultClass.getMethods().length);
-        assertEquals("com.sun.org.apache.xpath.internal.operations.String", resultClass.getNameWithPackage());
+        assertEquals("com/sun/org/apache/xpath/internal/operations/String", resultClass.getNameWithPackage());
         assertTrue(Modifier.isPublic(resultClass.getAccessFlags()));
 
         assertEquals("serialVersionUID", resultClass.getFields()[0].getName());

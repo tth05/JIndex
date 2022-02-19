@@ -31,14 +31,37 @@ impl ClassIndex {
 
         //Construct prefix range map
         let mut prefix_count_map: HashMap<u8, u32> = HashMap::new();
-        classes.sort_by_cached_key(|c| {
-            let name = c.class_name(&constant_pool);
+
+        let time = Instant::now();
+        classes.sort_by(|a, b| {
+            let a_name = a.class_name(&constant_pool);
+            let b_name = b.class_name(&constant_pool);
+            match a_name.cmp(b_name) {
+                Ordering::Equal => constant_pool
+                    .package_at(a.package_index)
+                    .package_name_with_parents(&constant_pool)
+                    .cmp(
+                        &constant_pool
+                            .package_at(b.package_index)
+                            .package_name_with_parents(&constant_pool),
+                    ),
+                o => o,
+            }
+        });
+
+        for class in classes.iter() {
             let count = prefix_count_map
-                .entry(name.get_ascii(0).unwrap().as_byte())
+                .entry(
+                    class
+                        .class_name(&constant_pool)
+                        .get_ascii(0)
+                        .unwrap()
+                        .as_byte(),
+                )
                 .or_insert(0);
             *count += 1;
-            name
-        });
+        }
+        println!("Sort {}", time.elapsed().as_millis());
 
         let mut range_map: HashMap<u8, Range<u32>> = HashMap::new();
         let mut total = 0u32;
@@ -119,21 +142,23 @@ impl ClassIndex {
     ) -> Option<(u32, &IndexedClass)> {
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
-        for (index, class) in class_iter.1.enumerate() {
-            if self
-                .constant_pool()
-                .string_view_at(class.name_index)
-                .equals_ascii(&self.constant_pool(), class_name)
-                && self
-                    .constant_pool()
-                    .package_at(class.package_index())
-                    .package_name_with_parents_equals(
-                        &self.constant_pool(),
-                        package_name.as_ascii_str().unwrap(),
-                    )
-            {
-                return Some((class_iter.0.start + index as u32, class));
-            }
+        let vec: Vec<&IndexedClass> = class_iter.1.collect();
+
+        let index =
+            vec.binary_search_by(
+                |a| match a.class_name(&self.constant_pool()).cmp(class_name) {
+                    Ordering::Equal => self
+                        .constant_pool()
+                        .package_at(a.package_index)
+                        .package_name_with_parents(&self.constant_pool())
+                        .as_ascii_str()
+                        .unwrap()
+                        .cmp(package_name),
+                    o => o,
+                },
+            );
+        if let Ok(i) = index {
+            return Some((class_iter.0.start + i as u32, vec.get(i).unwrap()));
         }
 
         None
@@ -428,7 +453,7 @@ impl IndexedClass {
             .string_view_at(self.name_index)
             .to_ascii_string(constant_pool);
 
-        package_name + ".".as_ascii_str().unwrap() + class_name
+        package_name + "/".as_ascii_str().unwrap() + class_name
     }
 
     pub fn class_name_index(&self) -> u32 {
@@ -609,7 +634,7 @@ impl IndexedPackage {
         while parent_index != 0 {
             let parent_package = constant_pool.package_at(parent_index);
             base = parent_package.package_name(constant_pool).to_owned()
-                + ".".as_ascii_str().unwrap()
+                + "/".as_ascii_str().unwrap()
                 + &base;
             parent_index = parent_package.previous_package_index;
         }
@@ -638,63 +663,85 @@ impl IndexedPackage {
     }
 }
 
-pub fn create_class_index_from_jars(jar_names: Vec<String>) -> ClassIndex {
-    let mut threads = Vec::with_capacity(min(jar_names.len(), num_cpus::get()));
-    let arc = Arc::new(Mutex::new(jar_names));
+pub fn do_multi_threaded<I, O>(
+    queue: Vec<I>,
+    func: &'static (dyn Fn(&[I]) -> Vec<O> + Sync),
+) -> Vec<O>
+where
+    O: std::marker::Send,
+    I: Sync + std::marker::Send,
+{
+    do_multi_threaded_with_config(queue, num_cpus::get(), func)
+}
 
-    let now = Instant::now();
+pub fn do_multi_threaded_with_config<I, O>(
+    queue: Vec<I>,
+    thread_count: usize,
+    func: &'static (dyn Fn(&[I]) -> Vec<O> + Sync),
+) -> Vec<O>
+where
+    O: std::marker::Send,
+    I: Sync + std::marker::Send,
+{
+    let mut threads = Vec::with_capacity(min(queue.len(), thread_count));
+
+    let split_size = queue.len() / threads.capacity();
+    let queue_arc = Arc::new(queue);
     for i in 0..threads.capacity() {
+        let queue = Arc::clone(&queue_arc);
+
+        let start = i * split_size;
+        let end = if i == threads.capacity() - 1 {
+            queue.len()
+        } else {
+            start + split_size
+        };
         threads.push(
             std::thread::Builder::new()
-                .name(format!("JIndex Thread {}", i))
-                .spawn({
-                    let queue = Arc::clone(&arc);
-                    move || {
-                        let mut output = Vec::new();
-                        loop {
-                            let mut vec = queue.lock().unwrap();
-                            if vec.is_empty() {
-                                break;
-                            }
-
-                            let file_name = vec.remove(0);
-                            drop(vec); //Release lock
-
-                            let file_path = Path::new(&file_name);
-                            if !file_path.exists() {
-                                continue;
-                            }
-
-                            let mut archive =
-                                ZipArchive::new(File::open(file_path).unwrap()).unwrap();
-
-                            for i in 0..archive.len() {
-                                let mut entry = archive.by_index(i).unwrap();
-                                if entry.is_dir() || !entry.name().ends_with(".class") {
-                                    continue;
-                                }
-
-                                let mut data = Vec::with_capacity(entry.size() as usize);
-                                entry.read_to_end(&mut data).expect("Unable to read entry");
-                                output.push(data);
-                            }
-                        }
-
-                        output
-                    }
-                })
+                // .name(format!("JIndex Thread {}", i))
+                .spawn({ move || func(&queue[start..end]) })
                 .unwrap(),
         )
     }
 
-    let class_bytes = threads
+    threads
         .into_iter()
         .map(|t| t.join().unwrap())
         .reduce(|mut v1, v2| {
             v1.extend(v2);
             v1
         })
-        .unwrap();
+        .unwrap()
+}
+
+fn process_jar_worker(queue: &[String]) -> Vec<Vec<u8>> {
+    let mut output = Vec::new();
+    for file_name in queue.iter() {
+        let file_path = Path::new(&file_name);
+        if !file_path.exists() {
+            continue;
+        }
+
+        let mut archive = ZipArchive::new(File::open(file_path).unwrap()).unwrap();
+
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).unwrap();
+            if entry.is_dir() || !entry.name().ends_with(".class") {
+                continue;
+            }
+
+            let mut data = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut data).expect("Unable to read entry");
+            output.push(data);
+        }
+    }
+
+    output
+}
+
+pub fn create_class_index_from_jars(jar_names: Vec<String>) -> ClassIndex {
+    let now = Instant::now();
+    let class_bytes = do_multi_threaded(jar_names, &process_jar_worker);
 
     println!(
         "read {} classes into ram in {}ms",
@@ -705,17 +752,12 @@ pub fn create_class_index_from_jars(jar_names: Vec<String>) -> ClassIndex {
     create_class_index(class_bytes)
 }
 
-pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
-    let mut now = Instant::now();
-    let mut total = 0;
+fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
+    let mut class_info_list = Vec::new();
 
-    let mut class_info_list: Vec<ClassInfo> = Vec::new();
-
-    for bytes in class_bytes.iter() {
-        let now2 = Instant::now();
+    for bytes in bytes_queue.iter() {
         let thing =
             parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
-        total += now2.elapsed().as_nanos();
 
         if let Ok(class) = thing {
             let full_class_name = class.this_class.to_string();
@@ -772,7 +814,15 @@ pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
         }
     }
 
-    println!("Just parsing took {:?}", total.div(1_000_000));
+    class_info_list
+}
+
+pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
+    let mut now = Instant::now();
+    let class_info_list: Vec<ClassInfo> =
+        //TODO: When using more than 2 threads, the build method which comes after this runs significantly slower (Stuck in syscalls?). Does not happen in WSL    
+        do_multi_threaded_with_config(class_bytes, 2, &process_class_bytes_worker);
+
     println!("Reading took {:?}", now.elapsed().as_nanos().div(1_000_000));
     now = Instant::now();
 
