@@ -34,7 +34,7 @@ public class BasicTest {
 
         assertEquals(62, results.length);
 
-        IndexedClass resultClass = results[0];
+        IndexedClass resultClass = Arrays.stream(results).filter(c -> c.getNameWithPackage().equals("com/sun/org/apache/xpath/internal/operations/String")).findFirst().get();
         assertEquals(1, resultClass.getFields().length);
         assertEquals(2, resultClass.getMethods().length);
         assertEquals("com/sun/org/apache/xpath/internal/operations/String", resultClass.getNameWithPackage());

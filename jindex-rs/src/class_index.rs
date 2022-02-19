@@ -1,5 +1,5 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString};
+use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString, ToAsciiChar};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
@@ -39,8 +39,8 @@ impl ClassIndex {
             match a_name.cmp(b_name) {
                 Ordering::Equal => constant_pool
                     .package_at(a.package_index)
-                    .package_name_with_parents(&constant_pool)
-                    .cmp(
+                    .package_name_with_parents_cmp(
+                        &constant_pool,
                         &constant_pool
                             .package_at(b.package_index)
                             .package_name_with_parents(&constant_pool),
@@ -96,6 +96,7 @@ impl ClassIndex {
         let mut index = 0;
         let mut res: Vec<(u32, &IndexedClass)> = lower_case_iter
             .1
+            .iter()
             .filter_map(|class| {
                 let mut result = None;
                 if self
@@ -116,6 +117,7 @@ impl ClassIndex {
         //TODO: Duplicated code
         upper_case_iter
             .1
+            .iter()
             .filter_map(|class| {
                 let mut result = None;
                 if self
@@ -142,23 +144,17 @@ impl ClassIndex {
     ) -> Option<(u32, &IndexedClass)> {
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
-        let vec: Vec<&IndexedClass> = class_iter.1.collect();
-
-        let index =
-            vec.binary_search_by(
-                |a| match a.class_name(&self.constant_pool()).cmp(class_name) {
-                    Ordering::Equal => self
-                        .constant_pool()
-                        .package_at(a.package_index)
-                        .package_name_with_parents(&self.constant_pool())
-                        .as_ascii_str()
-                        .unwrap()
-                        .cmp(package_name),
-                    o => o,
-                },
-            );
+        let index = class_iter.1.binary_search_by(|a| {
+            match a.class_name(&self.constant_pool()).cmp(class_name) {
+                Ordering::Equal => self
+                    .constant_pool()
+                    .package_at(a.package_index)
+                    .package_name_with_parents_cmp(&self.constant_pool(), package_name),
+                o => o,
+            }
+        });
         if let Ok(i) = index {
-            return Some((class_iter.0.start + i as u32, vec.get(i).unwrap()));
+            return Some((class_iter.0.start + i as u32, class_iter.1.get(i).unwrap()));
         }
 
         None
@@ -217,15 +213,10 @@ impl ClassIndex {
         self.constant_pool.borrow_mut()
     }
 
-    fn class_iter_for_char(&self, char: u8) -> (Range<u32>, Iter<IndexedClass>) {
+    fn class_iter_for_char(&self, char: u8) -> (Range<u32>, &[IndexedClass]) {
         self.class_prefix_range_map.get(&char).map_or_else(
-            || (0..0, self.classes[0..0].iter()),
-            |r| {
-                (
-                    r.clone(),
-                    self.classes[r.start as usize..r.end as usize].iter(),
-                )
-            },
+            || (0..0, &self.classes[0..0]),
+            |r| (r.clone(), &self.classes[r.start as usize..r.end as usize]),
         )
     }
 }
@@ -589,27 +580,44 @@ impl IndexedPackage {
         constant_pool: &ClassIndexConstantPool,
         str: &AsciiStr,
     ) -> bool {
-        //TODO: Support empty str parameter
+        self.package_name_with_parents_cmp(constant_pool, str) == Ordering::Equal
+    }
 
+    pub fn package_name_with_parents_cmp(
+        &self,
+        constant_pool: &ClassIndexConstantPool,
+        str: &AsciiStr,
+    ) -> Ordering {
         let mut index = str.len() - 1;
 
         let mut current_package = self;
+        let mut current_part = constant_pool.string_view_at(current_package.package_name_index);
+        if str.is_empty() {
+            return if current_part.is_empty() {
+                Ordering::Equal
+            } else {
+                Ordering::Greater
+            };
+        }
+
         loop {
-            let current_part = constant_pool.string_view_at(current_package.package_name_index);
             for i in (0..current_part.len()).rev() {
-                if current_part.byte_at(constant_pool, i) != str[index] {
-                    return false;
+                let compare = current_part
+                    .byte_at(constant_pool, i)
+                    .cmp(&str[index].as_byte());
+                if compare != Ordering::Equal {
+                    return compare;
                 }
 
                 if index == 0 {
-                    return true;
+                    return Ordering::Equal;
                 }
                 index -= 1;
             }
 
             //If we do not end a slash, the package names don't match
             if str[index] != '/' {
-                return false;
+                return Ordering::Less;
             } else {
                 index -= 1;
             }
@@ -618,10 +626,11 @@ impl IndexedPackage {
                 break;
             }
 
-            current_package = constant_pool.package_at(current_package.previous_package_index)
+            current_package = constant_pool.package_at(current_package.previous_package_index);
+            current_part = constant_pool.string_view_at(current_package.package_name_index);
         }
 
-        false
+        Ordering::Less
     }
 
     pub fn package_name_with_parents(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
@@ -821,7 +830,7 @@ pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
     let mut now = Instant::now();
     let class_info_list: Vec<ClassInfo> =
         //TODO: When using more than 2 threads, the build method which comes after this runs significantly slower (Stuck in syscalls?). Does not happen in WSL    
-        do_multi_threaded_with_config(class_bytes, 2, &process_class_bytes_worker);
+        do_multi_threaded(class_bytes, &process_class_bytes_worker);
 
     println!("Reading took {:?}", now.elapsed().as_nanos().div(1_000_000));
     now = Instant::now();
