@@ -11,9 +11,7 @@ anyhow = "1.0.44"
 jni = "0.19.0"
 cafebabe = "0.5.0"
 speedy = "0.8.0"
-# TODO: Replace flate2 with zip
-flate2 = "1.0.22"
-zip = "0.5.13"
+zip = { version = "0.5.13", features = ["deflate"], default-features = false}
 num_cpus = "1.13.1"
 
 [lib]

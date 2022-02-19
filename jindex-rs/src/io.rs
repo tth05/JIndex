@@ -1,49 +1,42 @@
 use std::fs::OpenOptions;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufWriter, Read, Write};
 
 use crate::class_index::IndexedClass;
-use flate2::bufread::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
 use speedy::{Context, Readable, Reader, Writable, Writer};
+use zip::write::FileOptions;
+use zip::{ZipArchive, ZipWriter};
 
 use crate::constant_pool::ClassIndexConstantPool;
 use crate::ClassIndex;
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
-    let file = OpenOptions::new().read(true).open(path).unwrap();
+    let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
+    let mut file = archive.by_index(0).unwrap();
+    let file_size = file.size();
 
-    let file_size = file.metadata().unwrap().len();
-
-    let reader = BufReader::new(file);
     let mut output_buf = Vec::with_capacity(file_size as usize);
-    let mut decoder = GzDecoder::new(reader);
-    decoder
-        .read_to_end(&mut output_buf)
-        .expect("Decompression failed");
+    file.read_to_end(&mut output_buf)
+        .expect("Unable to read from zip file");
 
     ClassIndex::read_from_buffer(&output_buf).expect("Deserialization failed")
 }
 
 pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) {
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(path)
-        .unwrap();
+    let mut file = ZipWriter::new(
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(path)
+            .unwrap(),
+    );
 
     let serialized_buf = class_index.write_to_vec().expect("Serialization failed");
 
-    let mut writer = BufWriter::new(file);
-    let output_buf = Vec::with_capacity(serialized_buf.len() / 2);
-
-    let mut encoder = GzEncoder::new(output_buf, Compression::best());
-    encoder
-        .write_all(&serialized_buf)
-        .expect("Compression failed");
-    writer
-        .write_all(&encoder.finish().unwrap())
-        .expect("Write to file failed");
+    file.start_file("index", FileOptions::default())
+        .expect("Unable to start file");
+    file.write_all(&serialized_buf)
+        .expect("Unable to write file contents");
+    file.finish().expect("Failed to write zip file");
 }
 
 impl<'a, C> Readable<'a, C> for ClassIndex
