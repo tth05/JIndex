@@ -1,7 +1,9 @@
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Read, Write};
 
-use crate::class_index::IndexedClass;
+use crate::class_index::{
+    IndexedClass, IndexedField, IndexedMethod, IndexedMethodSignature, IndexedSignature,
+};
 use speedy::{Context, Readable, Reader, Writable, Writer};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};

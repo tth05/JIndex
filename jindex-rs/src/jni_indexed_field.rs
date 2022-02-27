@@ -1,7 +1,7 @@
 use jni::sys::{jobject, jshort, jstring};
 use jni::JNIEnv;
 
-use crate::class_index::IndexedField;
+use crate::class_index::{IndexedField, IndexedSignature};
 use crate::ClassIndex;
 
 #[no_mangle]
@@ -53,17 +53,18 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getType(
     let indexed_field =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedField);
 
-    if indexed_field.type_class_index() < 0 {
-        env.new_string(indexed_field.type_class_index().to_string())
+    match indexed_field.field_signature() {
+        IndexedSignature::Primitive(p_index) => {
+            env.new_string(p_index.to_string()).unwrap().into_inner()
+        }
+        IndexedSignature::Object(index) => env
+            .new_string(
+                class_index
+                    .class_at_index(*index)
+                    .class_name_with_package(&class_index.constant_pool()),
+            )
             .unwrap()
-            .into_inner()
-    } else {
-        env.new_string(
-            class_index
-                .class_at_index(indexed_field.type_class_index() as u32)
-                .class_name_with_package(&class_index.constant_pool()),
-        )
-        .unwrap()
-        .into_inner()
+            .into_inner(),
+        _ => env.new_string("--Unresolved--").unwrap().into_inner(),
     }
 }

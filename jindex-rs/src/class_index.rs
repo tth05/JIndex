@@ -3,18 +3,17 @@ use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString, ToAsciiChar};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
-use jni::signature::{JavaType, TypeSignature};
+use jni::signature::{JavaType, Primitive, TypeSignature};
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::ops::{Div, Range};
+use std::ops::{Div, Index, Range};
 use std::path::Path;
-use std::slice::Iter;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use zip::ZipArchive;
 
@@ -290,10 +289,12 @@ impl ClassIndexBuilder {
 
         let mut time = 0;
         for class_info in vec.iter() {
+            let t = Instant::now();
             let indexed_class = class_index
                 .find_class(&class_info.package_name, &class_info.class_name)
                 .unwrap()
                 .1;
+            time += t.elapsed().as_nanos();
             let mut indexed_fields = indexed_class.fields_mut();
 
             for field_info in class_info.fields.iter() {
@@ -307,35 +308,11 @@ impl ClassIndexBuilder {
 
                 indexed_fields.push(IndexedField::new(
                     field_name_index,
-                    match &field_info.descriptor {
-                        JavaType::Object(full_class_name) => {
-                            let split_pair = full_class_name
-                                .rsplit_once("/")
-                                .unwrap_or(("", full_class_name));
-
-                            let package_name = split_pair.0.into_ascii_string().unwrap();
-                            let class_name = split_pair.1.into_ascii_string().unwrap();
-
-                            let t = Instant::now();
-                            let option = class_index.find_class(&package_name, &class_name);
-                            time += t.elapsed().as_nanos();
-                            if option.is_none() {
-                                -4
-                            } else {
-                                option
-                                    .unwrap_or_else(|| {
-                                        panic!(
-                                            "Field type not found {:?}, {:?}",
-                                            &package_name, class_name
-                                        )
-                                    })
-                                    .0 as i32
-                            }
-                        }
-                        JavaType::Primitive(p) => -1,
-                        _ => -2,
-                    },
                     field_info.access_flags.bits(),
+                    ClassIndexBuilder::compute_signature_for_descriptor(
+                        &field_info.descriptor,
+                        &class_index,
+                    ),
                 ));
             }
 
@@ -353,6 +330,23 @@ impl ClassIndexBuilder {
                 indexed_methods.push(IndexedMethod::new(
                     method_name_index,
                     method_info.access_flags.bits(),
+                    IndexedMethodSignature::new(
+                        method_info
+                            .signature
+                            .args
+                            .iter()
+                            .map(|arg| {
+                                ClassIndexBuilder::compute_signature_for_descriptor(
+                                    arg,
+                                    &class_index,
+                                )
+                            })
+                            .collect(),
+                        ClassIndexBuilder::compute_signature_for_descriptor(
+                            &method_info.signature.ret,
+                            &class_index,
+                        ),
+                    ),
                 ));
             }
         }
@@ -360,6 +354,49 @@ impl ClassIndexBuilder {
         println!("Time spent in findClass {:?}", time.div(1_000_000));
 
         class_index
+    }
+
+    fn compute_signature_for_descriptor(
+        java_type: &JavaType,
+        class_index: &ClassIndex,
+    ) -> IndexedSignature {
+        match java_type {
+            JavaType::Object(full_class_name) => {
+                ClassIndexBuilder::compute_signature_for_object(full_class_name, class_index)
+            }
+            JavaType::Primitive(p) => IndexedSignature::from_primitive_type(p),
+            JavaType::Array(t) => IndexedSignature::Array(Box::new(
+                ClassIndexBuilder::compute_signature_for_descriptor(t, class_index),
+            )),
+            _ => unreachable!(),
+        }
+    }
+
+    fn compute_signature_for_object(
+        full_class_name: &str,
+        class_index: &ClassIndex,
+    ) -> IndexedSignature {
+        let split_pair = full_class_name
+            .rsplit_once("/")
+            .unwrap_or(("", full_class_name));
+
+        let package_name = split_pair.0.into_ascii_string().unwrap();
+        let class_name = split_pair.1.into_ascii_string().unwrap();
+
+        // let t = Instant::now();
+        let option = class_index.find_class(&package_name, &class_name);
+        // time += t.elapsed().as_nanos();
+        if option.is_none() {
+            IndexedSignature::Unresolved
+        } else {
+            IndexedSignature::Object(
+                option
+                    .unwrap_or_else(|| {
+                        panic!("Field type not found {:?}, {:?}", &package_name, class_name)
+                    })
+                    .0,
+            )
+        }
     }
 
     fn get_index_from_pool<'a>(
@@ -400,7 +437,7 @@ pub struct FieldInfo {
 
 pub struct MethodInfo {
     pub method_name: AsciiString,
-    pub signature: Box<TypeSignature>,
+    pub signature: TypeSignature,
     pub access_flags: MethodAccessFlags,
 }
 
@@ -430,7 +467,7 @@ impl IndexedClass {
         }
     }
 
-    pub fn class_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+    pub fn class_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
             .to_ascii_string(constant_pool)
@@ -484,23 +521,74 @@ impl IndexedClass {
     }
 }
 
+#[derive(Readable, Writable, Clone)]
+pub enum IndexedSignature {
+    Primitive(u8),
+    Object(u32),
+    Array(Box<IndexedSignature>),
+    Void,
+    Unresolved,
+}
+
+//TODO: Primitive const optimization? Signatures take a lot of RAM
+/*static PRIMITIVE_SIG_BOOLEAN: IndexedSignature = IndexedSignature::Primitive(0);
+static PRIMITIVE_SIG_BYTE :IndexedSignature = IndexedSignature::Primitive(1);
+static PRIMITIVE_SIG_CHAR :IndexedSignature = IndexedSignature::Primitive(2);
+static PRIMITIVE_SIG_DOUBLE :IndexedSignature = IndexedSignature::Primitive(3);
+static PRIMITIVE_SIG_FLOAT :IndexedSignature = IndexedSignature::Primitive(4);
+static PRIMITIVE_SIG_INT :IndexedSignature = IndexedSignature::Primitive(5);
+static PRIMITIVE_SIG_LONG :IndexedSignature = IndexedSignature::Primitive(6);
+static PRIMITIVE_SIG_SHORT :IndexedSignature = IndexedSignature::Primitive(7);
+static PRIMITIVE_SIG_VOID :IndexedSignature = IndexedSignature::Primitive(8);
+*/
+impl IndexedSignature {
+    fn from_primitive_type(t: &jni::signature::Primitive) -> Self {
+        match t {
+            Primitive::Boolean => IndexedSignature::Primitive(0),
+            Primitive::Byte => IndexedSignature::Primitive(1),
+            Primitive::Char => IndexedSignature::Primitive(2),
+            Primitive::Double => IndexedSignature::Primitive(3),
+            Primitive::Float => IndexedSignature::Primitive(4),
+            Primitive::Int => IndexedSignature::Primitive(5),
+            Primitive::Long => IndexedSignature::Primitive(6),
+            Primitive::Short => IndexedSignature::Primitive(7),
+            Primitive::Void => IndexedSignature::Void,
+        }
+    }
+}
+
+#[derive(Readable, Writable, Clone)]
+pub struct IndexedMethodSignature {
+    params: Option<Vec<IndexedSignature>>,
+    return_type: IndexedSignature,
+}
+
+impl IndexedMethodSignature {
+    pub fn new(params: Vec<IndexedSignature>, return_type: IndexedSignature) -> Self {
+        Self {
+            params: Option::Some(params).filter(|vec| !vec.is_empty()),
+            return_type,
+        }
+    }
+}
+
 #[derive(Readable, Writable)]
 pub struct IndexedField {
     name_index: u32,
-    type_class_index: i32,
     access_flags: u16,
+    field_signature: IndexedSignature,
 }
 
 impl IndexedField {
-    pub fn new(name_index: u32, type_class_index: i32, access_flags: u16) -> Self {
+    pub fn new(name_index: u32, access_flags: u16, field_signature: IndexedSignature) -> Self {
         Self {
             name_index,
-            type_class_index,
             access_flags,
+            field_signature,
         }
     }
 
-    pub fn field_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+    pub fn field_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
             .to_ascii_string(constant_pool)
@@ -510,26 +598,32 @@ impl IndexedField {
         self.access_flags
     }
 
-    pub fn type_class_index(&self) -> i32 {
-        self.type_class_index
+    pub fn field_signature(&self) -> &IndexedSignature {
+        &self.field_signature
     }
 }
 
-#[derive(Readable, Writable)]
+#[derive(Readable, Writable, Clone)]
 pub struct IndexedMethod {
     name_index: u32,
     access_flags: u16,
+    method_signature: IndexedMethodSignature,
 }
 
 impl IndexedMethod {
-    pub fn new(name_index: u32, access_flags: u16) -> Self {
+    pub fn new(
+        name_index: u32,
+        access_flags: u16,
+        method_signature: IndexedMethodSignature,
+    ) -> Self {
         Self {
             name_index,
             access_flags,
+            method_signature,
         }
     }
 
-    pub fn method_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+    pub fn method_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
             .to_ascii_string(constant_pool)
@@ -537,12 +631,6 @@ impl IndexedMethod {
 
     pub fn access_flags(&self) -> u16 {
         self.access_flags
-    }
-}
-
-impl Clone for IndexedMethod {
-    fn clone(&self) -> Self {
-        IndexedMethod::new(self.name_index, self.access_flags)
     }
 }
 
@@ -809,12 +897,8 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
                         Some(MethodInfo {
                             method_name: name.unwrap(),
-                            signature: match JavaType::from_str(&m.descriptor)
-                                .expect("Invalid type signature")
-                            {
-                                JavaType::Method(type_sig) => type_sig,
-                                _ => panic!("Method descriptor was not a method signature"),
-                            },
+                            signature: TypeSignature::from_str(&m.descriptor)
+                                .expect("Not a method descriptor"),
                             access_flags: m.access_flags,
                         })
                     })
@@ -829,7 +913,6 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
     let mut now = Instant::now();
     let class_info_list: Vec<ClassInfo> =
-        //TODO: When using more than 2 threads, the build method which comes after this runs significantly slower (Stuck in syscalls?). Does not happen in WSL    
         do_multi_threaded(class_bytes, &process_class_bytes_worker);
 
     println!("Reading took {:?}", now.elapsed().as_nanos().div(1_000_000));
