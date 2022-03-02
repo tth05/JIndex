@@ -14,7 +14,7 @@ public class IndexedField {
 
     public native short getAccessFlags();
 
-    public native String getType();
+    public native IndexedSignature getTypeSignature();
 
     @Override
     public String toString() {

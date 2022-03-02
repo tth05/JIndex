@@ -14,6 +14,10 @@ public class IndexedMethod {
 
     public native short getAccessFlags();
 
+    public native IndexedSignature getReturnTypeSignature();
+
+    public native IndexedSignature[] getParameterTypeSignatures();
+
     @Override
     public String toString() {
         return getName();

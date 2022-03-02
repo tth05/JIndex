@@ -1,5 +1,5 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString, ToAsciiChar};
+use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
@@ -10,7 +10,7 @@ use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
-use std::ops::{Div, Index, Range};
+use std::ops::{Div, Range};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -287,7 +287,7 @@ impl ClassIndexBuilder {
 
         let class_index = ClassIndex::new(constant_pool, classes);
 
-        let mut time = 0;
+        let mut time = 0u128;
         for class_info in vec.iter() {
             let t = Instant::now();
             let indexed_class = class_index
@@ -559,16 +559,24 @@ impl IndexedSignature {
 
 #[derive(Readable, Writable, Clone)]
 pub struct IndexedMethodSignature {
-    params: Option<Vec<IndexedSignature>>,
+    //TODO: Parameter names
+    params: Vec<IndexedSignature>,
     return_type: IndexedSignature,
 }
 
 impl IndexedMethodSignature {
     pub fn new(params: Vec<IndexedSignature>, return_type: IndexedSignature) -> Self {
         Self {
-            params: Option::Some(params).filter(|vec| !vec.is_empty()),
+            params,
             return_type,
         }
+    }
+
+    pub fn params(&self) -> &Vec<IndexedSignature> {
+        &self.params
+    }
+    pub fn return_type(&self) -> &IndexedSignature {
+        &self.return_type
     }
 }
 
@@ -631,6 +639,10 @@ impl IndexedMethod {
 
     pub fn access_flags(&self) -> u16 {
         self.access_flags
+    }
+
+    pub fn method_signature(&self) -> &IndexedMethodSignature {
+        &self.method_signature
     }
 }
 
