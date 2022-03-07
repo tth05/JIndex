@@ -16,6 +16,10 @@ public class IndexedClass {
 
     public native String getNameWithPackage();
 
+    public String getNameWithPackageDot() {
+        return getNameWithPackage().replace('/', '.');
+    }
+
     public native IndexedField[] getFields();
 
     public native IndexedMethod[] getMethods();
