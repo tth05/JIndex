@@ -14,6 +14,8 @@ public class IndexedClass {
 
     public native String getName();
 
+    public native String getPackage();
+
     public native String getNameWithPackage();
 
     public String getNameWithPackageDot() {
