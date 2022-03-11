@@ -1,8 +1,7 @@
 use crate::class_index::{IndexedClass, IndexedSignature};
 use crate::ClassIndex;
-use anyhow::bail;
 use jni::objects::{JObject, JValue};
-use jni::sys::{jboolean, jclass, jlong, jobject, jstring, JNI_CreateJavaVM};
+use jni::sys::{jboolean, jclass, jlong, jobject, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -173,5 +172,56 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getA
             .expect("Failed to create result object")
             .into_inner(),
         _ => JObject::null().into_inner(),
+    }
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_toSignatureString(
+    env: JNIEnv,
+    this: jobject,
+) -> jstring {
+    let class_index = &*(env
+        .get_field(this, "classIndexPointer", "J")
+        .unwrap()
+        .j()
+        .unwrap() as *const ClassIndex);
+
+    let indexed_signature =
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+
+    env.new_string(signature_to_string(indexed_signature, class_index))
+        .expect("Unable to create String")
+        .into_inner()
+}
+
+fn signature_to_string(sig: &IndexedSignature, class_index: &ClassIndex) -> String {
+    match sig {
+        IndexedSignature::Primitive(i) => match i {
+            0 => String::from("Z"),
+            1 => String::from("B"),
+            2 => String::from("C"),
+            3 => String::from("D"),
+            4 => String::from("F"),
+            5 => String::from("I"),
+            6 => String::from("J"),
+            7 => String::from("S"),
+            _ => unreachable!(),
+        },
+        IndexedSignature::Object(index) => {
+            let mut result = String::from("L;");
+            result.insert_str(
+                1,
+                class_index
+                    .class_at_index(*index)
+                    .class_name_with_package(&class_index.constant_pool())
+                    .as_ref(),
+            );
+            result
+        }
+        IndexedSignature::Array(sig) => String::from("[") + &signature_to_string(sig, class_index),
+        IndexedSignature::Void => String::from("V"),
+        IndexedSignature::Unresolved => String::from(""),
     }
 }

@@ -34,4 +34,10 @@ public class IndexedSignature {
      * @return The inner component of this array, or {@code null} if {@link #isArray()} returns {@code false}.
      */
     public native IndexedSignature getArrayComponent();
+
+    /**
+     * @return A {@link String} formatted according to the JVM spec, representing this signature; returns {@code an
+     * empty string} if {@link #isUnresolved()} returns {@code true}
+     */
+    public native String toSignatureString();
 }
