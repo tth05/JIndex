@@ -521,9 +521,9 @@ impl IndexedClass {
     }
 }
 
-#[derive(Readable, Writable, Clone)]
+#[derive(Clone)]
 pub enum IndexedSignature {
-    Primitive(u8),
+    Primitive(jni::signature::Primitive),
     Object(u32),
     Array(Box<IndexedSignature>),
     Void,
@@ -544,15 +544,8 @@ static PRIMITIVE_SIG_VOID :IndexedSignature = IndexedSignature::Primitive(8);
 impl IndexedSignature {
     fn from_primitive_type(t: &jni::signature::Primitive) -> Self {
         match t {
-            Primitive::Boolean => IndexedSignature::Primitive(0),
-            Primitive::Byte => IndexedSignature::Primitive(1),
-            Primitive::Char => IndexedSignature::Primitive(2),
-            Primitive::Double => IndexedSignature::Primitive(3),
-            Primitive::Float => IndexedSignature::Primitive(4),
-            Primitive::Int => IndexedSignature::Primitive(5),
-            Primitive::Long => IndexedSignature::Primitive(6),
-            Primitive::Short => IndexedSignature::Primitive(7),
             Primitive::Void => IndexedSignature::Void,
+            _ => IndexedSignature::Primitive(t.clone()),
         }
     }
 }

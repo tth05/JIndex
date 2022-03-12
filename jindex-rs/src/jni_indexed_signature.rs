@@ -108,14 +108,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getP
     match indexed_signature {
         IndexedSignature::Primitive(index) => {
             let primitive_name = match index {
-                0 => "boolean",
-                1 => "byte",
-                2 => "char",
-                3 => "double",
-                4 => "float",
-                5 => "int",
-                6 => "long",
-                7 => "short",
+                jni::signature::Primitive::Boolean => "boolean",
+                jni::signature::Primitive::Byte => "byte",
+                jni::signature::Primitive::Char => "char",
+                jni::signature::Primitive::Double => "double",
+                jni::signature::Primitive::Float => "float",
+                jni::signature::Primitive::Int => "int",
+                jni::signature::Primitive::Long => "long",
+                jni::signature::Primitive::Short => "short",
                 _ => unreachable!(),
             };
 
@@ -198,17 +198,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_toSi
 
 fn signature_to_string(sig: &IndexedSignature, class_index: &ClassIndex) -> String {
     match sig {
-        IndexedSignature::Primitive(i) => match i {
-            0 => String::from("Z"),
-            1 => String::from("B"),
-            2 => String::from("C"),
-            3 => String::from("D"),
-            4 => String::from("F"),
-            5 => String::from("I"),
-            6 => String::from("J"),
-            7 => String::from("S"),
-            _ => unreachable!(),
-        },
+        IndexedSignature::Primitive(i) => i.to_string(),
         IndexedSignature::Object(index) => {
             let mut result = String::from("L;");
             result.insert_str(
