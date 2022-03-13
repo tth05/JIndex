@@ -14,6 +14,8 @@ public class IndexedMethod {
 
     public native short getAccessFlags();
 
+    public native String getDescriptorString();
+
     public native IndexedSignature getReturnTypeSignature();
 
     public native IndexedSignature[] getParameterTypeSignatures();

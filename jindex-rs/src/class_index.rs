@@ -1,5 +1,5 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use ascii::{AsAsciiStr, AsciiStr, AsciiString, IntoAsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
@@ -546,6 +546,30 @@ impl IndexedSignature {
         match t {
             Primitive::Void => IndexedSignature::Void,
             _ => IndexedSignature::Primitive(t.clone()),
+        }
+    }
+    
+    pub fn signature_string(&self, class_index: &ClassIndex) -> String {
+        Self::signature_to_string(self ,class_index)
+    }
+
+    fn signature_to_string(sig: &IndexedSignature, class_index: &ClassIndex) -> String {
+        match sig {
+            IndexedSignature::Primitive(i) => i.to_string(),
+            IndexedSignature::Object(index) => {
+                let mut result = String::from("L;");
+                result.insert_str(
+                    1,
+                    class_index
+                        .class_at_index(*index)
+                        .class_name_with_package(&class_index.constant_pool())
+                        .as_ref(),
+                );
+                result
+            }
+            IndexedSignature::Array(sig) => String::from("[") + &IndexedSignature::signature_to_string(sig, class_index),
+            IndexedSignature::Void => String::from("V"),
+            IndexedSignature::Unresolved => String::from(""),
         }
     }
 }

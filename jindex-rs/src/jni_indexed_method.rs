@@ -120,3 +120,39 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getPara
 
     array
 }
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDescriptorString(
+    env: JNIEnv,
+    this: jobject,
+) -> jstring {
+    let class_index = &*(env
+        .get_field(this, "classIndexPointer", "J")
+        .unwrap()
+        .j()
+        .unwrap() as *const ClassIndex);
+
+    let indexed_method =
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+
+    let parameter_signatures = &indexed_method.method_signature().params();
+
+    let mut descriptor = String::from('(');
+    for signature in parameter_signatures.iter() {
+        descriptor.push_str(&signature.signature_string(class_index));
+    }
+
+    descriptor.push(')');
+    descriptor.push_str(
+        &indexed_method
+            .method_signature()
+            .return_type()
+            .signature_string(class_index),
+    );
+
+    env.new_string(descriptor)
+        .expect("Unable to create descriptor String")
+        .into_inner()
+}
