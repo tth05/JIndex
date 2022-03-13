@@ -548,9 +548,9 @@ impl IndexedSignature {
             _ => IndexedSignature::Primitive(t.clone()),
         }
     }
-    
+
     pub fn signature_string(&self, class_index: &ClassIndex) -> String {
-        Self::signature_to_string(self ,class_index)
+        Self::signature_to_string(self, class_index)
     }
 
     fn signature_to_string(sig: &IndexedSignature, class_index: &ClassIndex) -> String {
@@ -577,21 +577,22 @@ impl IndexedSignature {
 #[derive(Readable, Writable, Clone)]
 pub struct IndexedMethodSignature {
     //TODO: Parameter names
-    params: Vec<IndexedSignature>,
+    params: Option<Vec<IndexedSignature>>,
     return_type: IndexedSignature,
 }
 
 impl IndexedMethodSignature {
     pub fn new(params: Vec<IndexedSignature>, return_type: IndexedSignature) -> Self {
         Self {
-            params,
+            params: Some(params).filter(|v| !v.is_empty()),
             return_type,
         }
     }
 
-    pub fn params(&self) -> &Vec<IndexedSignature> {
-        &self.params
+    pub fn params(&self) -> Option<&Vec<IndexedSignature>> {
+        self.params.as_ref()
     }
+
     pub fn return_type(&self) -> &IndexedSignature {
         &self.return_type
     }
@@ -824,8 +825,8 @@ where
         };
         threads.push(
             std::thread::Builder::new()
-                // .name(format!("JIndex Thread {}", i))
-                .spawn({ move || func(&queue[start..end]) })
+                .name(format!("JIndex Thread {}", i))
+                .spawn(move || func(&queue[start..end]))
                 .unwrap(),
         )
     }

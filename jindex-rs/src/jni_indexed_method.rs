@@ -92,30 +92,30 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getPara
         .find_class("com/github/tth05/jindex/IndexedSignature")
         .expect("Result class not found");
 
-    let parameter_signatures = &indexed_method.method_signature().params();
+    let parameter_signatures_or_none = indexed_method.method_signature().params();
+
+    let array_length = parameter_signatures_or_none.map_or(0, |v| v.len());
     let array = env
-        .new_object_array(
-            parameter_signatures.len() as jsize,
-            result_class,
-            JObject::null(),
-        )
+        .new_object_array(array_length as jsize, result_class, JObject::null())
         .expect("Failed to create array");
 
-    for (index, signature) in parameter_signatures.iter().enumerate() {
-        let object = env
-            .new_object(
-                result_class,
-                "(JJ)V",
-                &[
-                    JValue::Long(class_index_pointer),
-                    JValue::Long((signature as *const IndexedSignature) as jlong),
-                ],
-            )
-            .expect("Failed to create instance")
-            .into_inner();
+    if let Some(parameter_signatures) = parameter_signatures_or_none {
+        for (index, signature) in parameter_signatures.iter().enumerate() {
+            let object = env
+                .new_object(
+                    result_class,
+                    "(JJ)V",
+                    &[
+                        JValue::Long(class_index_pointer),
+                        JValue::Long((signature as *const IndexedSignature) as jlong),
+                    ],
+                )
+                .expect("Failed to create instance")
+                .into_inner();
 
-        env.set_object_array_element(array, index as jsize, object)
-            .expect("Failed to set array element");
+            env.set_object_array_element(array, index as jsize, object)
+                .expect("Failed to set array element");
+        }
     }
 
     array
@@ -137,11 +137,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     let indexed_method =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
 
-    let parameter_signatures = &indexed_method.method_signature().params();
+    let parameter_signatures_or_none = indexed_method.method_signature().params();
 
     let mut descriptor = String::from('(');
-    for signature in parameter_signatures.iter() {
-        descriptor.push_str(&signature.signature_string(class_index));
+    if let Some(parameter_signatures) = parameter_signatures_or_none {
+        for signature in parameter_signatures.iter() {
+            descriptor.push_str(&signature.signature_string(class_index));
+        }
     }
 
     descriptor.push(')');

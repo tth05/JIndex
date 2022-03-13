@@ -150,7 +150,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getA
         .unwrap()
         .j()
         .unwrap();
-    let class_index = &*(class_index_pointer as *const ClassIndex);
 
     let indexed_signature =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);

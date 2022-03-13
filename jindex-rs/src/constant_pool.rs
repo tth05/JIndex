@@ -1,6 +1,6 @@
 use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use ascii::{AsciiChar, AsciiStr};
 use speedy::{Readable, Writable};
 use std::cmp::min;
 

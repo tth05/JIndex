@@ -1,7 +1,6 @@
 use jni::objects::JValue;
 use jni::sys::{jlong, jobject, jshort, jstring};
 use jni::JNIEnv;
-use std::ops::Index;
 
 use crate::class_index::{IndexedField, IndexedSignature};
 use crate::ClassIndex;
