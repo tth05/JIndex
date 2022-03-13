@@ -1,9 +1,11 @@
 use crate::constant_pool::ClassIndexConstantPool;
+use crate::signature::{SignaturePrimitive, SignatureType};
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
+use cafebabe::attributes::AttributeData;
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
-use jni::signature::{JavaType, Primitive, TypeSignature};
+use jni::signature::{Primitive, TypeSignature};
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{min, Ordering};
@@ -331,19 +333,20 @@ impl ClassIndexBuilder {
                     method_name_index,
                     method_info.access_flags.bits(),
                     IndexedMethodSignature::new(
-                        method_info
-                            .signature
-                            .args
-                            .iter()
-                            .map(|arg| {
-                                ClassIndexBuilder::compute_signature_for_descriptor(
-                                    arg,
-                                    &class_index,
-                                )
-                            })
-                            .collect(),
+                        /*method_info
+                        .signature
+                        .args
+                        .iter()
+                        .map(|arg| {
+                            ClassIndexBuilder::compute_signature_for_descriptor(
+                                arg,
+                                &class_index,
+                            )
+                        })
+                        .collect()*/
+                        Vec::new(),
                         ClassIndexBuilder::compute_signature_for_descriptor(
-                            &method_info.signature.ret,
+                            &SignatureType::Primitive(SignaturePrimitive::Void),
                             &class_index,
                         ),
                     ),
@@ -357,15 +360,15 @@ impl ClassIndexBuilder {
     }
 
     fn compute_signature_for_descriptor(
-        java_type: &JavaType,
+        signature_type: &SignatureType,
         class_index: &ClassIndex,
     ) -> IndexedSignature {
-        match java_type {
-            JavaType::Object(full_class_name) => {
+        match signature_type {
+            SignatureType::Object(full_class_name) => {
                 ClassIndexBuilder::compute_signature_for_object(full_class_name, class_index)
             }
-            JavaType::Primitive(p) => IndexedSignature::from_primitive_type(p),
-            JavaType::Array(t) => IndexedSignature::Array(Box::new(
+            SignatureType::Primitive(p) => IndexedSignature::from_primitive_type(p),
+            SignatureType::Array(t) => IndexedSignature::Array(Box::new(
                 ClassIndexBuilder::compute_signature_for_descriptor(t, class_index),
             )),
             _ => unreachable!(),
@@ -373,12 +376,10 @@ impl ClassIndexBuilder {
     }
 
     fn compute_signature_for_object(
-        full_class_name: &str,
+        full_class_name: &AsciiStr,
         class_index: &ClassIndex,
     ) -> IndexedSignature {
-        let split_pair = full_class_name
-            .rsplit_once("/")
-            .unwrap_or(("", full_class_name));
+        let split_pair = rsplit_once(full_class_name, AsciiChar::Slash);
 
         let package_name = split_pair.0.into_ascii_string().unwrap();
         let class_name = split_pair.1.into_ascii_string().unwrap();
@@ -415,6 +416,16 @@ impl ClassIndexBuilder {
     }
 }
 
+fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &AsciiStr) {
+    for i in (0..str.len()).rev() {
+        if str.get_ascii(i).unwrap() == separator {
+            return (&str[0..i], &str[(i + 1)..]);
+        }
+    }
+
+    ("".as_ascii_str().unwrap(), &str[..])
+}
+
 impl Default for ClassIndexBuilder {
     fn default() -> Self {
         Self::new()
@@ -431,7 +442,7 @@ pub struct ClassInfo {
 
 pub struct FieldInfo {
     pub field_name: AsciiString,
-    pub descriptor: JavaType,
+    pub descriptor: SignatureType,
     pub access_flags: FieldAccessFlags,
 }
 
@@ -567,7 +578,9 @@ impl IndexedSignature {
                 );
                 result
             }
-            IndexedSignature::Array(sig) => String::from("[") + &IndexedSignature::signature_to_string(sig, class_index),
+            IndexedSignature::Array(sig) => {
+                String::from("[") + &IndexedSignature::signature_to_string(sig, class_index)
+            }
             IndexedSignature::Void => String::from("V"),
             IndexedSignature::Unresolved => String::from(""),
         }
@@ -887,6 +900,13 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
             parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
 
         if let Ok(class) = thing {
+            //<T:Ljava/lang/Throwable;>Ljava/lang/Object;Ljava/lang/Cloneable;
+            //<A:LMain;B:LMain;:Ljava/lang/Comparable;>([TA;)TB;
+            let option = class
+                .attributes
+                .iter()
+                .find(|a| matches!(a.data, AttributeData::Signature(_)));
+
             let full_class_name = class.this_class.to_string();
             let split_pair = full_class_name
                 .rsplit_once("/")
@@ -910,7 +930,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
                         Some(FieldInfo {
                             field_name: name.unwrap(),
-                            descriptor: JavaType::from_str(&m.descriptor)
+                            descriptor: SignatureType::from_str(&m.descriptor)
                                 .expect("Invalid field signature"),
                             access_flags: m.access_flags,
                         })
