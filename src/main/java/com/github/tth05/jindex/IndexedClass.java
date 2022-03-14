@@ -22,6 +22,9 @@ public class IndexedClass {
         return getNameWithPackage().replace('/', '.');
     }
 
+    public native IndexedClass getSuperClass();
+    public native IndexedClass[] getInterfaces();
+
     public native IndexedField[] getFields();
 
     public native IndexedMethod[] getMethods();

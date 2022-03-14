@@ -1,5 +1,4 @@
 use ascii::{AsAsciiStr, AsAsciiStrError, AsciiChar, AsciiString, ToAsciiChar};
-use cafebabe::attributes::AttributeData::Signature;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;

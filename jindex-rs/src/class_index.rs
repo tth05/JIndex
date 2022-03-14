@@ -297,6 +297,33 @@ impl ClassIndexBuilder {
                 .unwrap()
                 .1;
             time += t.elapsed().as_nanos();
+
+            //Super class
+            if let Some(super_class_name) = &class_info.super_class {
+                let super_class_name = rsplit_once(super_class_name, AsciiChar::Slash);
+                let index_or_none = class_index
+                    .find_class(super_class_name.0, super_class_name.1)
+                    .map(|s| s.0);
+                if let Some(i) = index_or_none {
+                    indexed_class.set_super_class_index(i);
+                }
+            }
+
+            //Interfaces
+            indexed_class.set_interfaces_indices(
+                class_info
+                    .interfaces
+                    .iter()
+                    .filter_map(|interface_name| {
+                        let interface_name = rsplit_once(interface_name, AsciiChar::Slash);
+                        class_index
+                            .find_class(interface_name.0, interface_name.1)
+                            .map(|s| s.0)
+                    })
+                    .collect(),
+            );
+
+            //Fields
             let mut indexed_fields = indexed_class.fields_mut();
 
             for field_info in class_info.fields.iter() {
@@ -318,6 +345,7 @@ impl ClassIndexBuilder {
                 ));
             }
 
+            //Methods
             let mut indexed_methods = indexed_class.methods_mut();
 
             for method_info in class_info.methods.iter() {
@@ -381,11 +409,11 @@ impl ClassIndexBuilder {
     ) -> IndexedSignature {
         let split_pair = rsplit_once(full_class_name, AsciiChar::Slash);
 
-        let package_name = split_pair.0.into_ascii_string().unwrap();
-        let class_name = split_pair.1.into_ascii_string().unwrap();
+        let package_name = split_pair.0;
+        let class_name = split_pair.1;
 
         // let t = Instant::now();
-        let option = class_index.find_class(&package_name, &class_name);
+        let option = class_index.find_class(package_name, class_name);
         // time += t.elapsed().as_nanos();
         if option.is_none() {
             IndexedSignature::Unresolved
@@ -393,7 +421,7 @@ impl ClassIndexBuilder {
             IndexedSignature::Object(
                 option
                     .unwrap_or_else(|| {
-                        panic!("Field type not found {:?}, {:?}", &package_name, class_name)
+                        panic!("Field type not found {:?}, {:?}", package_name, class_name)
                     })
                     .0,
             )
@@ -436,6 +464,8 @@ pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
     pub access_flags: ClassAccessFlags,
+    pub super_class: Option<AsciiString>,
+    pub interfaces: Vec<AsciiString>,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
 }
@@ -457,6 +487,11 @@ pub struct IndexedClass {
     package_index: u32,
     name_index: u32,
     access_flags: u16,
+    //TODO: These should use IndexedSignatureType to support generic data, for
+    // example 'implements Comparable<? extends Number>'. This would
+    // be 'Ljava/lang/Object;Ljava/lang/Comparable<+Ljava/lang/Number>;'
+    super_class_index: RefCell<Option<u32>>,
+    interfaces_indices: RefCell<Option<Vec<u32>>>,
     fields: RefCell<Vec<IndexedField>>,
     methods: RefCell<Vec<IndexedMethod>>,
 }
@@ -473,6 +508,8 @@ impl IndexedClass {
             package_index,
             name_index: class_name_index,
             access_flags,
+            super_class_index: RefCell::new(None),
+            interfaces_indices: RefCell::new(None),
             fields: RefCell::new(fields),
             methods: RefCell::new(methods),
         }
@@ -495,6 +532,14 @@ impl IndexedClass {
         package_name + "/".as_ascii_str().unwrap() + class_name
     }
 
+    pub fn set_super_class_index(&self, super_class_index: u32) {
+        self.super_class_index.replace(Some(super_class_index));
+    }
+
+    pub fn set_interfaces_indices(&self, interfaces_indices: Vec<u32>) {
+        self.interfaces_indices.replace(Some(interfaces_indices));
+    }
+
     pub fn class_name_index(&self) -> u32 {
         self.name_index
     }
@@ -509,6 +554,14 @@ impl IndexedClass {
 
     pub fn package_index(&self) -> u32 {
         self.package_index
+    }
+
+    pub fn super_class_index(&self) -> Option<u32> {
+        *self.super_class_index.borrow()
+    }
+
+    pub fn interface_indicies(&self) -> Ref<Option<Vec<u32>>> {
+        self.interfaces_indices.borrow()
     }
 
     pub fn fields(&self) -> Ref<Vec<IndexedField>> {
@@ -526,7 +579,6 @@ impl IndexedClass {
     pub fn methods_mut(&self) -> RefMut<Vec<IndexedMethod>> {
         self.methods.borrow_mut()
     }
-
     pub fn access_flags(&self) -> u16 {
         self.access_flags
     }
@@ -919,11 +971,17 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 package_name,
                 class_name,
                 access_flags: class.access_flags,
+                super_class: class.super_class.map(|s| s.into_ascii_string().unwrap()),
+                interfaces: class
+                    .interfaces
+                    .into_iter()
+                    .map(|i| i.into_ascii_string().unwrap())
+                    .collect(),
                 fields: class
                     .fields
-                    .iter()
+                    .into_iter()
                     .filter_map(|m| {
-                        let name = m.name.to_string().into_ascii_string();
+                        let name = m.name.into_ascii_string();
                         if name.is_err() {
                             return None;
                         }
@@ -938,9 +996,9 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                     .collect(),
                 methods: class
                     .methods
-                    .iter()
+                    .into_iter()
                     .filter_map(|m| {
-                        let name = m.name.to_string().into_ascii_string();
+                        let name = m.name.into_ascii_string();
                         if name.is_err() {
                             return None;
                         }
