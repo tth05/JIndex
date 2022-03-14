@@ -1023,10 +1023,22 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
 pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
     let mut now = Instant::now();
-    let class_info_list: Vec<ClassInfo> =
+    let mut class_info_list: Vec<ClassInfo> =
         do_multi_threaded(class_bytes, &process_class_bytes_worker);
 
-    println!("Reading took {:?}", now.elapsed().as_nanos().div(1_000_000));
+    //Removes duplicate classes
+    class_info_list.sort_unstable_by(|a, b| match a.class_name.cmp(&b.class_name) {
+        Ordering::Equal => a.package_name.cmp(&b.package_name),
+        o => o,
+    });
+    class_info_list
+        .dedup_by(|a, b| a.class_name.eq(&b.class_name) && a.package_name.eq(&b.package_name));
+
+    println!(
+        "Reading {} classes took {:?}",
+        class_info_list.len(),
+        now.elapsed().as_nanos().div(1_000_000)
+    );
     now = Instant::now();
 
     let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
