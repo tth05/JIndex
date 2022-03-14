@@ -190,11 +190,7 @@ impl ConstantPoolStringView {
         true
     }
 
-    pub fn equals_ascii(
-        &self,
-        constant_pool: &ClassIndexConstantPool,
-        other: &AsciiStr
-    ) -> bool {
+    pub fn equals_ascii(&self, constant_pool: &ClassIndexConstantPool, other: &AsciiStr) -> bool {
         if other.len() != self.len() as usize {
             return false;
         }

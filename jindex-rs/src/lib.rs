@@ -1,3 +1,4 @@
+#![feature(once_cell)]
 use crate::class_index::ClassIndex;
 
 mod class_index;

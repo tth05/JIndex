@@ -110,7 +110,6 @@ pub fn parse_generic_signature_data(
         while current_index < input.len() && !input[current_index..].starts_with('>') {
             let part = parse_generic_signature_data_single(&input[current_index..])?;
             current_index += part.0 as usize;
-            println!("Index after part {}", current_index);
             //TODO: Find new name if it already exists
             parts.push(part.1);
         }

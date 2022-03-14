@@ -196,7 +196,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
         .expect("Result class not found");
 
     if let Some(index) = indexed_class.super_class_index() {
-        let class = class_index.class_at_index(index);
+        let class = class_index.class_at_index(*index);
         env.new_object(
             result_class,
             "(JJ)V",

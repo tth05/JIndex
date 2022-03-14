@@ -12,7 +12,9 @@ use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
+use std::lazy::OnceCell;
 use std::ops::{Div, Range};
+use std::panic::resume_unwind;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -266,22 +268,20 @@ impl ClassIndexBuilder {
             HashMap::with_capacity(vec.len() + self.expected_method_count as usize);
 
         for class_info in vec.iter() {
-            let class_name = class_info.class_name.as_ascii_str().unwrap();
-            let class_name_index =
-                self.get_index_from_pool(class_name, &mut constant_pool_map, &mut constant_pool);
-
-            let indexed_fields = Vec::with_capacity(class_info.fields.len());
-            let indexed_methods = Vec::with_capacity(class_info.methods.len());
+            let package_index = constant_pool
+                .get_or_add_package(&class_info.package_name)
+                .unwrap()
+                .index();
+            let class_name_index = self.get_index_from_pool(
+                &class_info.class_name,
+                &mut constant_pool_map,
+                &mut constant_pool,
+            );
 
             let indexed_class = IndexedClass::new(
-                constant_pool
-                    .get_or_add_package(&class_info.package_name)
-                    .unwrap()
-                    .index(),
+                package_index,
                 class_name_index,
                 class_info.access_flags.bits(),
-                indexed_fields,
-                indexed_methods,
             );
 
             classes.push(indexed_class);
@@ -324,7 +324,7 @@ impl ClassIndexBuilder {
             );
 
             //Fields
-            let mut indexed_fields = indexed_class.fields_mut();
+            let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
 
             for field_info in class_info.fields.iter() {
                 let field_name = field_info.field_name.as_ascii_str().unwrap();
@@ -345,8 +345,10 @@ impl ClassIndexBuilder {
                 ));
             }
 
+            indexed_class.set_fields(indexed_fields).unwrap();
+
             //Methods
-            let mut indexed_methods = indexed_class.methods_mut();
+            let mut indexed_methods = Vec::with_capacity(class_info.methods.len());
 
             for method_info in class_info.methods.iter() {
                 let method_name = method_info.method_name.as_ascii_str().unwrap();
@@ -380,6 +382,8 @@ impl ClassIndexBuilder {
                     ),
                 ));
             }
+
+            indexed_class.set_methods(indexed_methods).unwrap();
         }
 
         println!("Time spent in findClass {:?}", time.div(1_000_000));
@@ -490,28 +494,22 @@ pub struct IndexedClass {
     //TODO: These should use IndexedSignatureType to support generic data, for
     // example 'implements Comparable<? extends Number>'. This would
     // be 'Ljava/lang/Object;Ljava/lang/Comparable<+Ljava/lang/Number>;'
-    super_class_index: RefCell<Option<u32>>,
-    interfaces_indices: RefCell<Option<Vec<u32>>>,
-    fields: RefCell<Vec<IndexedField>>,
-    methods: RefCell<Vec<IndexedMethod>>,
+    super_class_index: OnceCell<u32>,
+    interfaces_indices: OnceCell<Vec<u32>>,
+    fields: OnceCell<Vec<IndexedField>>,
+    methods: OnceCell<Vec<IndexedMethod>>,
 }
 
 impl IndexedClass {
-    pub fn new(
-        package_index: u32,
-        class_name_index: u32,
-        access_flags: u16,
-        fields: Vec<IndexedField>,
-        methods: Vec<IndexedMethod>,
-    ) -> Self {
+    pub fn new(package_index: u32, class_name_index: u32, access_flags: u16) -> Self {
         Self {
             package_index,
             name_index: class_name_index,
             access_flags,
-            super_class_index: RefCell::new(None),
-            interfaces_indices: RefCell::new(None),
-            fields: RefCell::new(fields),
-            methods: RefCell::new(methods),
+            super_class_index: OnceCell::new(),
+            interfaces_indices: OnceCell::new(),
+            fields: OnceCell::new(),
+            methods: OnceCell::new(),
         }
     }
 
@@ -533,11 +531,11 @@ impl IndexedClass {
     }
 
     pub fn set_super_class_index(&self, super_class_index: u32) {
-        self.super_class_index.replace(Some(super_class_index));
+        self.super_class_index.set(super_class_index);
     }
 
     pub fn set_interfaces_indices(&self, interfaces_indices: Vec<u32>) {
-        self.interfaces_indices.replace(Some(interfaces_indices));
+        self.interfaces_indices.set(interfaces_indices);
     }
 
     pub fn class_name_index(&self) -> u32 {
@@ -545,46 +543,47 @@ impl IndexedClass {
     }
 
     pub fn field_count(&self) -> u16 {
-        self.fields.borrow().len() as u16
+        self.fields.get().unwrap().len() as u16
     }
 
     pub fn method_count(&self) -> u16 {
-        self.methods.borrow().len() as u16
+        self.methods.get().unwrap().len() as u16
     }
 
     pub fn package_index(&self) -> u32 {
         self.package_index
     }
 
-    pub fn super_class_index(&self) -> Option<u32> {
-        *self.super_class_index.borrow()
+    pub fn super_class_index(&self) -> Option<&u32> {
+        self.super_class_index.get()
     }
 
-    pub fn interface_indicies(&self) -> Ref<Option<Vec<u32>>> {
-        self.interfaces_indices.borrow()
+    pub fn interface_indicies(&self) -> Option<&Vec<u32>> {
+        self.interfaces_indices.get()
     }
 
-    pub fn fields(&self) -> Ref<Vec<IndexedField>> {
-        self.fields.borrow()
+    pub fn fields(&self) -> &Vec<IndexedField> {
+        self.fields.get().unwrap()
     }
 
-    pub fn fields_mut(&self) -> RefMut<Vec<IndexedField>> {
-        self.fields.borrow_mut()
+    pub fn set_fields(&self, fields: Vec<IndexedField>) -> Result<(), Vec<IndexedField>> {
+        self.fields.set(fields)
     }
 
-    pub fn methods(&self) -> Ref<Vec<IndexedMethod>> {
-        self.methods.borrow()
+    pub fn methods(&self) -> &Vec<IndexedMethod> {
+        self.methods.get().unwrap()
     }
 
-    pub fn methods_mut(&self) -> RefMut<Vec<IndexedMethod>> {
-        self.methods.borrow_mut()
+    pub fn set_methods(&self, methods: Vec<IndexedMethod>) -> Result<(), Vec<IndexedMethod>> {
+        self.methods.set(methods)
     }
+
     pub fn access_flags(&self) -> u16 {
         self.access_flags
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum IndexedSignature {
     Primitive(jni::signature::Primitive),
     Object(u32),
@@ -639,7 +638,7 @@ impl IndexedSignature {
     }
 }
 
-#[derive(Readable, Writable, Clone)]
+#[derive(Readable, Writable, Debug, Clone)]
 pub struct IndexedMethodSignature {
     //TODO: Parameter names
     params: Option<Vec<IndexedSignature>>,
@@ -663,7 +662,7 @@ impl IndexedMethodSignature {
     }
 }
 
-#[derive(Readable, Writable)]
+#[derive(Readable, Writable, Debug)]
 pub struct IndexedField {
     name_index: u32,
     access_flags: u16,
@@ -694,7 +693,7 @@ impl IndexedField {
     }
 }
 
-#[derive(Readable, Writable, Clone)]
+#[derive(Readable, Writable, Debug, Clone)]
 pub struct IndexedMethod {
     name_index: u32,
     access_flags: u16,
@@ -793,7 +792,11 @@ impl IndexedPackage {
                 }
 
                 if index == 0 {
-                    return Ordering::Equal;
+                    return if i > 0 || current_package.previous_package_index != 0 {
+                        Ordering::Greater
+                    } else {
+                        Ordering::Equal
+                    };
                 }
                 index -= 1;
             }
@@ -959,7 +962,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 .iter()
                 .find(|a| matches!(a.data, AttributeData::Signature(_)));
 
-            let full_class_name = class.this_class.to_string();
+            let full_class_name = class.this_class;
             let split_pair = full_class_name
                 .rsplit_once("/")
                 .unwrap_or(("", &full_class_name));
