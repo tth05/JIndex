@@ -110,6 +110,32 @@ impl FromStr for SignatureType {
     }
 }
 
+impl ToString for SignatureType {
+    fn to_string(&self) -> String {
+        match &self {
+            SignatureType::ObjectGeneric(inner) => {
+                let (actual_type, type_bounds) = inner.as_ref();
+
+                String::from('L')
+                    + actual_type.as_ref()
+                    + "<"
+                    + &type_bounds
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect::<Vec<_>>()
+                        .join("")
+                    + ">;"
+            }
+            SignatureType::Primitive(p) => p.to_string(),
+            SignatureType::Object(name) => String::from('L') + name.as_ref() + ";",
+            SignatureType::Generic(inner) => String::from('T') + &inner.to_string() + ";",
+            SignatureType::ObjectMinus(inner) => String::from('-') + &inner.to_string(),
+            SignatureType::ObjectPlus(inner) => String::from('+') + &inner.to_string(),
+            SignatureType::Array(inner) => String::from('[') + &inner.to_string(),
+        }
+    }
+}
+
 /// Maps generic parameter names to their bound types. If the associated Option is None,
 /// java/lang/Object should be implied as the only bound.
 pub struct TypeParameterData {
@@ -244,81 +270,76 @@ impl ParseError {
 #[cfg(test)]
 mod tests {
     use crate::signature::{parse_generic_signature_data, SignatureType};
-    use ascii::AsciiChar;
 
     #[test]
     fn test_signature_type_parser_object() {
-        let result = SignatureType::parse("Ljava/lang/Object;");
+        let input = "Ljava/lang/Object;";
+        let result = SignatureType::parse(input);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, 18);
-        assert!(matches!(result.1, SignatureType::Object(_)));
-        assert_is_object_signature("java/lang/Object", &result.1);
+        assert_eq!(input, result.1.to_string());
     }
 
     #[test]
     fn test_signature_type_parser_object_plus_minus() {
-        //? extends Object
-        let result = SignatureType::parse("+Ljava/lang/Object;");
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.0, 19);
-        assert!(matches!(result.1, SignatureType::ObjectPlus(_)));
-        if let SignatureType::ObjectPlus(inner) = result.1 {
-            assert_is_object_signature("java/lang/Object", &inner);
+        macro_rules! test_object_prefix {
+            ($prefix: literal, $type: ident) => {
+                let input = $prefix.to_owned() + "Ljava/lang/Object;";
+                let result = SignatureType::parse(&input);
+                assert!(result.is_ok());
+                let result = result.unwrap();
+                assert_eq!(result.0, 19);
+                assert_eq!(input, result.1.to_string());
+            };
         }
 
+        //? extends Object
+        test_object_prefix!("+", ObjectPlus);
         //? super Object
-        let result = SignatureType::parse("-Ljava/lang/Object;");
+        test_object_prefix!("-", ObjectMinus);
+    }
+
+    #[test]
+    fn test_signature_type_parser_object_with_type_bounds() {
+        let input = "Ljava/lang/Object<+TC;Ltest;>;";
+        let result = SignatureType::parse(input);
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.0, 19);
-        assert!(matches!(result.1, SignatureType::ObjectMinus(_)));
-        if let SignatureType::ObjectMinus(inner) = result.1 {
-            assert_is_object_signature("java/lang/Object", &inner);
-        }
+        assert_eq!(result.0, 30);
+        assert_eq!(input, result.1.to_string());
     }
 
     #[test]
     fn test_signature_type_parser_array() {
-        let result = SignatureType::parse("[[Ljava/lang/Object;");
+        let input = "[[Ljava/lang/Object;";
+        let result = SignatureType::parse(input);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, 20);
-        assert!(matches!(result.1, SignatureType::Array(_)));
-        if let SignatureType::Array(inner) = result.1 {
-            assert!(matches!(*inner, SignatureType::Array(_)));
-            if let SignatureType::Array(object) = *inner {
-                assert!(matches!(*object, SignatureType::Object(_)));
-                assert_is_object_signature("java/lang/Object", &object);
-            }
-        }
+        assert_eq!(input, result.1.to_string());
     }
 
     #[test]
     fn test_signature_type_parser_generic() {
-        let result = SignatureType::parse("TB;");
+        let input = "TB;";
+        let result = SignatureType::parse(input);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, 3);
-        assert!(matches!(result.1, SignatureType::Generic(_)));
-        if let SignatureType::Generic(name) = result.1 {
-            assert_eq!(AsciiChar::B, name);
-        }
+        assert_eq!(input, result.1.to_string());
     }
 
     #[test]
     fn test_signature_type_parser_primitive() {
         let primitives = vec!['Z', 'B', 'C', 'D', 'F', 'I', 'J', 'S', 'V'];
         for p in primitives {
-            let result = SignatureType::parse(&p.to_string());
+            let input = p.to_string();
+            let result = SignatureType::parse(&input);
             assert!(result.is_ok());
             let result = result.unwrap();
             assert_eq!(result.0, 1);
-            assert!(matches!(result.1, SignatureType::Primitive(_)));
-            if let SignatureType::Primitive(p_type) = result.1 {
-                assert_eq!(p.to_string(), p_type.to_string());
-            }
+            assert_eq!(input, result.1.to_string());
         }
     }
 
