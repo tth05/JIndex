@@ -128,32 +128,12 @@ impl PartialEq for ConstantPoolStringView {
 }
 
 impl ConstantPoolStringView {
-    pub fn new(index: u32, start: u8, end: u8) -> Self {
-        Self { index, start, end }
-    }
-
-    pub fn to_ascii_string(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
+    pub fn into_ascii_string(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
         AsciiStr::from_ascii(
             &constant_pool.string_data[(self.index + self.start as u32) as usize
                 ..(self.index + self.end as u32) as usize],
         )
         .unwrap()
-    }
-
-    pub fn substring_to_end(&self, start: u8) -> Result<ConstantPoolStringView> {
-        self.substring(min(start, self.end - self.start), self.end - self.start)
-    }
-
-    pub fn substring(&self, start: u8, end: u8) -> Result<ConstantPoolStringView> {
-        if start > end || end > self.end - self.start {
-            return Err(anyhow::Error::msg("Parameters out of range"));
-        }
-
-        Ok(ConstantPoolStringView {
-            index: self.index,
-            start: self.start + start,
-            end: self.start + end,
-        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -190,34 +170,8 @@ impl ConstantPoolStringView {
         true
     }
 
-    pub fn equals_ascii(&self, constant_pool: &ClassIndexConstantPool, other: &AsciiStr) -> bool {
-        if other.len() != self.len() as usize {
-            return false;
-        }
-
-        for i in 0..self.len() {
-            let current_byte = self.byte_at(constant_pool, i);
-            let current_char = other[i as usize];
-            if current_byte != current_char {
-                return false;
-            }
-        }
-
-        true
-    }
-
     pub fn len(&self) -> u8 {
         self.end - self.start
-    }
-
-    pub fn index(&self) -> u32 {
-        self.index
-    }
-    pub fn start(&self) -> u8 {
-        self.start
-    }
-    pub fn end(&self) -> u8 {
-        self.end
     }
 }
 

@@ -14,7 +14,6 @@ use std::fs::File;
 use std::io::Read;
 use std::lazy::OnceCell;
 use std::ops::{Div, Range};
-use std::panic::resume_unwind;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -241,16 +240,6 @@ impl ClassIndexBuilder {
 
     pub fn with_expected_method_count(mut self, count: u32) -> Self {
         self.expected_method_count = count;
-        self
-    }
-
-    pub fn with_average_class_name_size(mut self, size: u32) -> Self {
-        self.average_class_name_size = size;
-        self
-    }
-
-    pub fn with_average_method_name_size(mut self, size: u32) -> Self {
-        self.average_method_name_size = size;
         self
     }
 
@@ -516,7 +505,7 @@ impl IndexedClass {
     pub fn class_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
-            .to_ascii_string(constant_pool)
+            .into_ascii_string(constant_pool)
     }
 
     pub fn class_name_with_package(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
@@ -525,17 +514,17 @@ impl IndexedClass {
             .package_name_with_parents(constant_pool);
         let class_name = constant_pool
             .string_view_at(self.name_index)
-            .to_ascii_string(constant_pool);
+            .into_ascii_string(constant_pool);
 
         package_name + "/".as_ascii_str().unwrap() + class_name
     }
 
     pub fn set_super_class_index(&self, super_class_index: u32) {
-        self.super_class_index.set(super_class_index);
+        self.super_class_index.set(super_class_index).unwrap();
     }
 
     pub fn set_interfaces_indices(&self, interfaces_indices: Vec<u32>) {
-        self.interfaces_indices.set(interfaces_indices);
+        self.interfaces_indices.set(interfaces_indices).unwrap();
     }
 
     pub fn class_name_index(&self) -> u32 {
@@ -681,7 +670,7 @@ impl IndexedField {
     pub fn field_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
-            .to_ascii_string(constant_pool)
+            .into_ascii_string(constant_pool)
     }
 
     pub fn access_flags(&self) -> u16 {
@@ -716,7 +705,7 @@ impl IndexedMethod {
     pub fn method_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
-            .to_ascii_string(constant_pool)
+            .into_ascii_string(constant_pool)
     }
 
     pub fn access_flags(&self) -> u16 {
@@ -754,15 +743,7 @@ impl IndexedPackage {
     pub fn package_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
         constant_pool
             .string_view_at(self.package_name_index)
-            .to_ascii_string(constant_pool)
-    }
-
-    pub fn package_name_with_parents_equals(
-        &self,
-        constant_pool: &ClassIndexConstantPool,
-        str: &AsciiStr,
-    ) -> bool {
-        self.package_name_with_parents_cmp(constant_pool, str) == Ordering::Equal
+            .into_ascii_string(constant_pool)
     }
 
     pub fn package_name_with_parents_cmp(
@@ -822,7 +803,7 @@ impl IndexedPackage {
     pub fn package_name_with_parents(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
         let mut base = constant_pool
             .string_view_at(self.package_name_index)
-            .to_ascii_string(constant_pool)
+            .into_ascii_string(constant_pool)
             .to_owned();
 
         let mut parent_index = self.previous_package_index;
@@ -845,16 +826,8 @@ impl IndexedPackage {
         &self.sub_packages_indexes[..]
     }
 
-    pub fn previous_package_index(&self) -> u32 {
-        self.previous_package_index
-    }
-
     pub fn index(&self) -> u32 {
         self.index
-    }
-
-    pub fn package_name_index(&self) -> u32 {
-        self.package_name_index
     }
 }
 

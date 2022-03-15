@@ -17,7 +17,7 @@ pub enum SignatureType {
     /// +Lsome/type;
     ObjectPlus(Box<SignatureType>),
     /// Lsome/type<Lsome/type/bound;>;
-    ObjectGeneric(Box<(AsciiString, Vec<SignatureType>)>),
+    ObjectTypeBounds(Box<(AsciiString, Vec<SignatureType>)>),
     /// [L/some/type;
     Array(Box<SignatureType>),
 }
@@ -61,7 +61,7 @@ impl SignatureType {
                         //Consume '>' unchecked
                         special_char_index += 1;
 
-                        SignatureType::ObjectGeneric(Box::new((base_type, vec)))
+                        SignatureType::ObjectTypeBounds(Box::new((base_type, vec)))
                     } else {
                         SignatureType::Object(base_type)
                     };
@@ -113,7 +113,7 @@ impl FromStr for SignatureType {
 impl ToString for SignatureType {
     fn to_string(&self) -> String {
         match &self {
-            SignatureType::ObjectGeneric(inner) => {
+            SignatureType::ObjectTypeBounds(inner) => {
                 let (actual_type, type_bounds) = inner.as_ref();
 
                 String::from('L')

@@ -68,8 +68,8 @@ where
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
         let class = IndexedClass::new(reader.read_u32()?, reader.read_u32()?, reader.read_u16()?);
-        class.set_fields(Vec::read_from(reader)?);
-        class.set_methods(Vec::read_from(reader)?);
+        class.set_fields(Vec::read_from(reader)?).unwrap();
+        class.set_methods(Vec::read_from(reader)?).unwrap();
         Ok(class)
     }
 }
