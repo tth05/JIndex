@@ -39,12 +39,34 @@ impl SignatureType {
                 'S' => (1, SignatureType::Primitive(SignaturePrimitive::Short)),
                 'V' => (1, SignatureType::Primitive(SignaturePrimitive::Void)),
                 'L' => {
-                    let semi_colon_index = input.find(|c| c == ';').ok_or(ParseError::Eof)?;
-                    let sig = SignatureType::Object(AsciiString::from(
-                        input[1..semi_colon_index].as_ascii_str()?,
-                    ));
+                    //Find < or ;
+                    let mut special_char_index = input
+                        .find(|c| c == '<' || c == ';')
+                        .ok_or(ParseError::Eof)?;
+                    //Parse the first type, which we'll need either way
+                    let base_type = AsciiString::from(input[1..special_char_index].as_ascii_str()?);
 
-                    (semi_colon_index as u16 + 1, sig)
+                    //Parse the generic type bounds if there are any
+                    let sig = if input.get_ascii(special_char_index).unwrap() == '<' {
+                        let mut vec = Vec::with_capacity(1);
+
+                        //Consume '<'
+                        special_char_index += 1;
+                        while input.get_ascii(special_char_index).ok_or(ParseError::Eof)? != '>' {
+                            let parse_result = SignatureType::parse(&input[special_char_index..])?;
+                            special_char_index += parse_result.0 as usize;
+                            vec.push(parse_result.1);
+                        }
+
+                        //Consume '>' unchecked
+                        special_char_index += 1;
+
+                        SignatureType::ObjectGeneric(Box::new((base_type, vec)))
+                    } else {
+                        SignatureType::Object(base_type)
+                    };
+
+                    (special_char_index as u16 + 1, sig)
                 }
                 '[' => {
                     let inner = SignatureType::parse(&input[1..])?;
@@ -132,7 +154,7 @@ fn parse_generic_signature_data_single(
             return Err(ParseError::Eof);
         }
 
-        if is_first && input[separator_index + 1..].starts_with(":") {
+        if is_first && input[separator_index + 1..].starts_with(':') {
             separator_index += 1;
         } else {
             if !is_first && !input[separator_index..].starts_with(':') {
