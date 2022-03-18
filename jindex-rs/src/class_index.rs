@@ -1,15 +1,18 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use crate::signature::{SignaturePrimitive, SignatureType};
+use crate::signature::{ClassSignature, MethodSignature, SignaturePrimitive, SignatureType};
+use anyhow::Context;
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
-use cafebabe::attributes::AttributeData;
+use cafebabe::attributes::AttributeData::Signature;
+use cafebabe::attributes::{AttributeData, AttributeInfo};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
-use jni::signature::{Primitive, TypeSignature};
+use jni::signature::Primitive;
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
+use std::fmt::format;
 use std::fs::File;
 use std::io::Read;
 use std::lazy::OnceCell;
@@ -288,7 +291,7 @@ impl ClassIndexBuilder {
             time += t.elapsed().as_nanos();
 
             //Super class
-            if let Some(super_class_name) = &class_info.super_class {
+            /*if let Some(super_class_name) = &class_info.super_class {
                 let super_class_name = rsplit_once(super_class_name, AsciiChar::Slash);
                 let index_or_none = class_index
                     .find_class(super_class_name.0, super_class_name.1)
@@ -310,7 +313,7 @@ impl ClassIndexBuilder {
                             .map(|s| s.0)
                     })
                     .collect(),
-            );
+            );*/
 
             //Fields
             let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
@@ -457,8 +460,7 @@ pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
     pub access_flags: ClassAccessFlags,
-    pub super_class: Option<AsciiString>,
-    pub interfaces: Vec<AsciiString>,
+    pub signature: ClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
 }
@@ -471,7 +473,7 @@ pub struct FieldInfo {
 
 pub struct MethodInfo {
     pub method_name: AsciiString,
-    pub signature: TypeSignature,
+    pub signature: MethodSignature,
     pub access_flags: MethodAccessFlags,
 }
 
@@ -930,10 +932,33 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
         if let Ok(class) = thing {
             //<T:Ljava/lang/Throwable;>Ljava/lang/Object;Ljava/lang/Cloneable;
             //<A:LMain;B:LMain;:Ljava/lang/Comparable;>([TA;)TB;
-            let option = class
-                .attributes
-                .iter()
-                .find(|a| matches!(a.data, AttributeData::Signature(_)));
+            let clone2 = class.this_class.to_string();
+            let parsed_signature = if let Some(attr) = get_signature_attribute(&class.attributes) {
+                let mut clone = String::new();
+                ClassSignature::from_str(match &attr.data {
+                    AttributeData::Signature(s) => {
+                        clone = s.to_string();
+                        s
+                    }
+                    _ => unreachable!(),
+                })
+                .with_context(|| clone + " ------> " + &clone2)
+                .expect("Invalid class signature")
+            } else {
+                ClassSignature::new(
+                    class
+                        .super_class
+                        .map(|s| SignatureType::Object(s.into_ascii_string().unwrap())),
+                    Some(
+                        class
+                            .interfaces
+                            .into_iter()
+                            .map(|s| SignatureType::Object(s.into_ascii_string().unwrap()))
+                            .collect(),
+                    )
+                    .filter(|v: &Vec<SignatureType>| v.is_empty()),
+                )
+            };
 
             let full_class_name = class.this_class;
             let split_pair = full_class_name
@@ -947,12 +972,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 package_name,
                 class_name,
                 access_flags: class.access_flags,
-                super_class: class.super_class.map(|s| s.into_ascii_string().unwrap()),
-                interfaces: class
-                    .interfaces
-                    .into_iter()
-                    .map(|i| i.into_ascii_string().unwrap())
-                    .collect(),
+                signature: parsed_signature,
                 fields: class
                     .fields
                     .into_iter()
@@ -979,10 +999,28 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                             return None;
                         }
 
+                        let signature =
+                            get_signature_attribute(&m.attributes).map_or(&m.descriptor, |i| {
+                                if let AttributeData::Signature(ref s) = i.data {
+                                    return s;
+                                }
+                                unreachable!();
+                            });
+
+                        let method_name = name.unwrap();
+                        let cloned = format!(
+                            "{:?}",
+                            (
+                                signature.to_string(),
+                                method_name.to_string(),
+                                (full_class_name).to_string(),
+                            )
+                        );
                         Some(MethodInfo {
-                            method_name: name.unwrap(),
-                            signature: TypeSignature::from_str(&m.descriptor)
-                                .expect("Not a method descriptor"),
+                            method_name: method_name,
+                            signature: MethodSignature::from_str(signature)
+                                .with_context(|| cloned)
+                                .expect("Invalid method descriptor"),
                             access_flags: m.access_flags,
                         })
                     })
@@ -992,6 +1030,14 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
     }
 
     class_info_list
+}
+
+fn get_signature_attribute<'a>(
+    attributes: &'a Vec<AttributeInfo<'a>>,
+) -> Option<&'a AttributeInfo<'a>> {
+    attributes
+        .iter()
+        .find(|a| matches!(a.data, AttributeData::Signature(_)))
 }
 
 pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
