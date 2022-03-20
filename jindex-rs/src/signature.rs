@@ -17,8 +17,9 @@ pub enum SignatureType {
     ObjectMinus(Box<SignatureType>),
     /// +Lsome/type;
     ObjectPlus(Box<SignatureType>),
-    //TODO: ObjectInnerClass(Box<Vec<SignatureType>>) for stuff like Lit/unimi/dsi/fastutil/ints/AbstractInt2ObjectSortedMap<TV;>.KeySet
-    /// Lsome/type<Lsome/type/bound;>; --- If the second part is Option::None, we have Lsome/type<*>;
+    /// Lit/unimi/dsi/fastutil/ints/AbstractInt2ObjectSortedMap<TV;>.KeySet;
+    ObjectInnerClass(Box<Vec<SignatureType>>),
+    /// Lsome/type<Lsome/type/bound;>; --- If any parameter is Option::None, that parameter is *
     ObjectTypeBounds(Box<(AsciiString, Vec<Option<SignatureType>>)>),
     /// [L/some/type;
     Array(Box<SignatureType>),
@@ -41,45 +42,23 @@ impl SignatureType {
                 'S' => (1, SignatureType::Primitive(SignaturePrimitive::Short)),
                 'V' => (1, SignatureType::Primitive(SignaturePrimitive::Void)),
                 'L' => {
-                    //Find < or ;
-                    let mut special_char_index = input
-                        .find(|c| c == '<' || c == ';')
-                        .ok_or(ParseError::Eof)?;
-                    //Parse the first type, which we'll need either way
-                    let base_type = AsciiString::from(input[1..special_char_index].as_ascii_str()?);
-
-                    //Parse the generic type bounds if there are any
-                    let sig = if input.get_ascii(special_char_index).ok_or(ParseError::Eof)? == '<'
-                    {
-                        let mut vec = Vec::with_capacity(1);
-
-                        //Consume '<'
-                        special_char_index += 1;
-                        while input.get_ascii(special_char_index).ok_or(ParseError::Eof)? != '>' {
-                            vec.push(
-                                if input.get_ascii(special_char_index).ok_or(ParseError::Eof)?
-                                    == '*'
-                                {
-                                    special_char_index += 1;
-                                    None
-                                } else {
-                                    let parse_result =
-                                        SignatureType::parse(&input[special_char_index..])?;
-                                    special_char_index += parse_result.0 as usize;
-                                    Some(parse_result.1)
-                                },
-                            );
+                    let object = SignatureType::parse_object(&input[1..])?;
+                    let mut index = object.0 as usize;
+                    if input.get_ascii(index).ok_or(ParseError::Eof)? == ';' {
+                        (index as u16 + 1, object.1)
+                    } else {
+                        let mut parts = vec![object.1];
+                        while input.get_ascii(index).ok_or(ParseError::Eof)? != ';' {
+                            let data = SignatureType::parse_object(&input[(index + 1)..])?;
+                            index += data.0 as usize;
+                            parts.push(data.1);
                         }
 
-                        //Consume '>' unchecked
-                        special_char_index += 1;
-
-                        SignatureType::ObjectTypeBounds(Box::new((base_type, vec)))
-                    } else {
-                        SignatureType::Object(base_type)
-                    };
-
-                    (special_char_index as u16 + 1, sig)
+                        (
+                            index as u16 + 1,
+                            SignatureType::ObjectInnerClass(Box::new(parts)),
+                        )
+                    }
                 }
                 '[' => {
                     let inner = SignatureType::parse(&input[1..])?;
@@ -110,6 +89,56 @@ impl SignatureType {
             Err(ParseError::Eof)
         }
     }
+
+    fn parse_object(input: &str) -> Result<ParseResultData<SignatureType>, ParseError> {
+        //Find < or ;
+        let mut special_char_index = input
+            .find(|c| c == '<' || c == ';' || c == '.')
+            .ok_or(ParseError::Eof)?;
+        //Parse the first type, which we'll need either way
+        let base_type = AsciiString::from(input[..special_char_index].as_ascii_str()?);
+
+        //Parse the generic type bounds if there are any
+        let sig = match SignatureType::parse_generic_type_bounds(&input[special_char_index..]) {
+            Ok(data) => {
+                special_char_index += data.0 as usize;
+                SignatureType::ObjectTypeBounds(Box::new((base_type, data.1)))
+            }
+            Err(_) => SignatureType::Object(base_type),
+        };
+
+        Ok((special_char_index as u16 + 1, sig))
+    }
+
+    fn parse_generic_type_bounds(
+        input: &str,
+    ) -> Result<ParseResultData<Vec<Option<SignatureType>>>, ParseError> {
+        let mut index = 0;
+        let first_char = input.get_ascii(index).ok_or(ParseError::Eof)?;
+        if first_char != '<' {
+            return Err(ParseError::UnexpectedChar(first_char.as_char()));
+        }
+
+        let mut vec = Vec::with_capacity(1);
+
+        //Consume '<'
+        index += 1;
+        while input.get_ascii(index).ok_or(ParseError::Eof)? != '>' {
+            vec.push(if input.get_ascii(index).ok_or(ParseError::Eof)? == '*' {
+                index += 1;
+                None
+            } else {
+                let parse_result = SignatureType::parse(&input[index..])?;
+                index += parse_result.0 as usize;
+                Some(parse_result.1)
+            });
+        }
+
+        //Consume '>' unchecked
+        index += 1;
+
+        Ok((index as u16, vec))
+    }
 }
 
 impl FromStr for SignatureType {
@@ -134,14 +163,26 @@ impl ToString for SignatureType {
                         .map(|t| {
                             t.as_ref()
                                 .map(|v| v.to_string())
-                                .unwrap_or(String::from('*'))
+                                .unwrap_or_else(|| String::from('*'))
                         })
                         .fold(String::new(), |a, b| a + &b)
                     + ">;"
             }
+            SignatureType::ObjectInnerClass(inner) => {
+                String::from('L')
+                    + &inner
+                        .as_ref()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .fold(String::new(), |a, b| {
+                            let separator = if a.is_empty() { "" } else { "." };
+                            a + (separator) + &b[1..b.len() - 1]
+                        })
+                    + ";"
+            }
             SignatureType::Primitive(p) => p.to_string(),
             SignatureType::Object(name) => String::from('L') + name.as_ref() + ";",
-            SignatureType::Generic(inner) => String::from('T') + &inner.to_string() + ";",
+            SignatureType::Generic(inner) => String::from('T') + inner.as_ref() + ";",
             SignatureType::ObjectMinus(inner) => String::from('-') + &inner.to_string(),
             SignatureType::ObjectPlus(inner) => String::from('+') + &inner.to_string(),
             SignatureType::Array(inner) => String::from('[') + &inner.to_string(),
@@ -274,14 +315,14 @@ impl ClassSignature {
 impl ToString for ClassSignature {
     fn to_string(&self) -> String {
         (if self.generic_data.is_some() {
-            String::from('<') + &join_vec(self.generic_data.as_ref(), "") + ">"
+            String::from('<') + &join_vec(self.generic_data.as_ref()) + ">"
         } else {
             String::new()
         }) + &self
             .super_class
             .as_ref()
             .map_or(String::new(), |s| s.to_string())
-            + &join_vec(self.interfaces.as_ref(), "")
+            + &join_vec(self.interfaces.as_ref())
     }
 }
 
@@ -330,11 +371,11 @@ pub struct MethodSignature {
 impl ToString for MethodSignature {
     fn to_string(&self) -> String {
         (if self.generic_data.is_some() {
-            String::from('<') + &join_vec(self.generic_data.as_ref(), "") + ">"
+            String::from('<') + &join_vec(self.generic_data.as_ref()) + ">"
         } else {
             String::new()
         }) + "("
-            + &join_vec(Some(&self.parameters), "")
+            + &join_vec(Some(&self.parameters))
             + ")"
             + &self.return_type.to_string()
     }
@@ -378,14 +419,14 @@ impl FromStr for MethodSignature {
     }
 }
 
-fn join_vec<T>(vec: Option<&Vec<T>>, separator: &str) -> String
+fn join_vec<T>(vec: Option<&Vec<T>>) -> String
 where
     T: ToString,
 {
     vec.unwrap_or(&Vec::new())
         .iter()
         .map(|t| t.to_string())
-        .fold(String::new(), |a, b| a + separator + &b)
+        .fold(String::new(), |a, b| a + &b)
 }
 
 pub enum ParseError {
@@ -463,6 +504,7 @@ mod tests {
 
     #[test]
     fn test_signature_type_parser_object_with_type_bounds() {
+        //Normal type bounds
         let input = "Ljava/lang/Object<+TC;Ltest;>;";
         let result = SignatureType::parse(input);
         assert!(result.is_ok());
@@ -470,9 +512,18 @@ mod tests {
         assert_eq!(result.0, input.len() as u16);
         assert_eq!(input, result.1.to_string());
 
+        //Wildcard
         let input = "Ljava/lang/Object<*>;";
         let result = SignatureType::parse(input);
         assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result.0, input.len() as u16);
+        assert_eq!(input, result.1.to_string());
+
+        //Inner classes
+        let input = "Lgnu/trove/map/custom_hash/TObjectByteCustomHashMap<TK;>.MapBackedView<TK;>.AnotherOne;";
+        let result = SignatureType::parse(input);
+        // assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, input.len() as u16);
         assert_eq!(input, result.1.to_string());
@@ -562,9 +613,8 @@ mod tests {
         assert_eq!(input, result.to_string());
 
         let input = "<INPUT:Lmekanism/common/recipe/inputs/MachineInput<*TINPUT;*>;OUTPUT:Lmekanism/common/recipe/outputs/MachineOutput<TOUTPUT;>;RECIPE:Lmekanism/common/recipe/machines/MachineRecipe<TINPUT;TOUTPUT;TRECIPE;>;>Lmekanism/common/integration/crafttweaker/util/RecipeMapModification<TINPUT;TRECIPE;>;";
-
         let result = ClassSignature::from_str(input);
-        // assert!(result.is_ok());
+        assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(input, result.to_string());
     }

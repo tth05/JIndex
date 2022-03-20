@@ -2,7 +2,6 @@ use crate::constant_pool::ClassIndexConstantPool;
 use crate::signature::{ClassSignature, MethodSignature, SignaturePrimitive, SignatureType};
 use anyhow::Context;
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
-use cafebabe::attributes::AttributeData::Signature;
 use cafebabe::attributes::{AttributeData, AttributeInfo};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
@@ -12,7 +11,6 @@ use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
-use std::fmt::format;
 use std::fs::File;
 use std::io::Read;
 use std::lazy::OnceCell;
@@ -173,36 +171,18 @@ impl ClassIndex {
         &self,
         name: &AsciiStr,
         limit: usize,
-    ) -> anyhow::Result<Vec<IndexedMethod>> {
-        let mut res = Vec::new();
-        'outer: for c in self.classes.iter() {
-            for method in c.methods().iter() {
-                if res.len() > limit {
-                    break 'outer;
-                }
-
-                if !self
-                    .constant_pool()
+    ) -> anyhow::Result<Vec<&IndexedMethod>> {
+        let res = self
+            .classes
+            .iter()
+            .flat_map(|class| class.methods())
+            .filter(|method| {
+                self.constant_pool()
                     .string_view_at(method.name_index)
                     .starts_with(&self.constant_pool(), name, false)
-                {
-                    continue;
-                }
-                //TODO: Somehow make this work without clone?
-                res.push(method.clone());
-            }
-        }
-        /*let res = self
-        .classes
-        .iter()
-        .flat_map(|class| *class.methods())
-        .filter(|method| {
-            self.constant_pool()
-                .string_view_at(method.name_index)
-                .starts_with(&self.constant_pool(), name, false)
-        })
-        .take(limit)
-        .collect();*/
+            })
+            .take(limit)
+            .collect();
         Ok(res)
     }
 
@@ -930,19 +910,11 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
             parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
 
         if let Ok(class) = thing {
-            //<T:Ljava/lang/Throwable;>Ljava/lang/Object;Ljava/lang/Cloneable;
-            //<A:LMain;B:LMain;:Ljava/lang/Comparable;>([TA;)TB;
-            let clone2 = class.this_class.to_string();
             let parsed_signature = if let Some(attr) = get_signature_attribute(&class.attributes) {
-                let mut clone = String::new();
                 ClassSignature::from_str(match &attr.data {
-                    AttributeData::Signature(s) => {
-                        clone = s.to_string();
-                        s
-                    }
+                    AttributeData::Signature(s) => s,
                     _ => unreachable!(),
                 })
-                .with_context(|| clone + " ------> " + &clone2)
                 .expect("Invalid class signature")
             } else {
                 ClassSignature::new(
@@ -962,7 +934,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
             let full_class_name = class.this_class;
             let split_pair = full_class_name
-                .rsplit_once("/")
+                .rsplit_once('/')
                 .unwrap_or(("", &full_class_name));
 
             let package_name = split_pair.0.into_ascii_string().unwrap();
@@ -1007,19 +979,9 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                                 unreachable!();
                             });
 
-                        let method_name = name.unwrap();
-                        let cloned = format!(
-                            "{:?}",
-                            (
-                                signature.to_string(),
-                                method_name.to_string(),
-                                (full_class_name).to_string(),
-                            )
-                        );
                         Some(MethodInfo {
-                            method_name: method_name,
+                            method_name: name.unwrap(),
                             signature: MethodSignature::from_str(signature)
-                                .with_context(|| cloned)
                                 .expect("Invalid method descriptor"),
                             access_flags: m.access_flags,
                         })
@@ -1033,7 +995,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 }
 
 fn get_signature_attribute<'a>(
-    attributes: &'a Vec<AttributeInfo<'a>>,
+    attributes: &'a [AttributeInfo<'a>],
 ) -> Option<&'a AttributeInfo<'a>> {
     attributes
         .iter()
