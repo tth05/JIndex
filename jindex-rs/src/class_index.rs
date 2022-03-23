@@ -39,17 +39,16 @@ impl ClassIndex {
         classes.sort_by(|a, b| {
             let a_name = a.class_name(&constant_pool);
             let b_name = b.class_name(&constant_pool);
-            match a_name.cmp(b_name) {
-                Ordering::Equal => constant_pool
+            a_name.cmp(b_name).then_with(|| {
+                constant_pool
                     .package_at(a.package_index)
                     .package_name_with_parents_cmp(
                         &constant_pool,
                         &constant_pool
                             .package_at(b.package_index)
                             .package_name_with_parents(&constant_pool),
-                    ),
-                o => o,
-            }
+                    )
+            })
         });
 
         for class in classes.iter() {
@@ -148,13 +147,13 @@ impl ClassIndex {
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
         let index = class_iter.1.binary_search_by(|a| {
-            match a.class_name(&self.constant_pool()).cmp(class_name) {
-                Ordering::Equal => self
-                    .constant_pool()
-                    .package_at(a.package_index)
-                    .package_name_with_parents_cmp(&self.constant_pool(), package_name),
-                o => o,
-            }
+            a.class_name(&self.constant_pool())
+                .cmp(class_name)
+                .then_with(|| {
+                    self.constant_pool()
+                        .package_at(a.package_index)
+                        .package_name_with_parents_cmp(&self.constant_pool(), package_name)
+                })
         });
         if let Ok(i) = index {
             return Some((class_iter.0.start + i as u32, class_iter.1.get(i).unwrap()));
@@ -394,13 +393,7 @@ impl ClassIndexBuilder {
         if option.is_none() {
             IndexedSignature::Unresolved
         } else {
-            IndexedSignature::Object(
-                option
-                    .unwrap_or_else(|| {
-                        panic!("Field type not found {:?}, {:?}", package_name, class_name)
-                    })
-                    .0,
-            )
+            IndexedSignature::Object(option.0)
         }
     }
 
@@ -1008,9 +1001,10 @@ pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
         do_multi_threaded(class_bytes, &process_class_bytes_worker);
 
     //Removes duplicate classes
-    class_info_list.sort_unstable_by(|a, b| match a.class_name.cmp(&b.class_name) {
-        Ordering::Equal => a.package_name.cmp(&b.package_name),
-        o => o,
+    class_info_list.sort_unstable_by(|a, b| {
+        a.class_name
+            .cmp(&b.class_name)
+            .then_with(|| a.package_name.cmp(&b.package_name))
     });
     class_info_list
         .dedup_by(|a, b| a.class_name.eq(&b.class_name) && a.package_name.eq(&b.package_name));

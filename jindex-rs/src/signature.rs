@@ -504,29 +504,22 @@ mod tests {
 
     #[test]
     fn test_signature_type_parser_object_with_type_bounds() {
-        //Normal type bounds
-        let input = "Ljava/lang/Object<+TC;Ltest;>;";
-        let result = SignatureType::parse(input);
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.0, input.len() as u16);
-        assert_eq!(input, result.1.to_string());
+        let data = vec![
+            //Normal type bounds
+            "Ljava/lang/Object<+TC;Ltest;>;",
+            //Wildcard
+            "Ljava/lang/Object<*Lother/type;**>;",
+            //Inner classes
+            "Lgnu/trove/map/custom_hash/TObjectByteCustomHashMap<TK;>.MapBackedView<TK;>.AnotherOne;",
+        ];
 
-        //Wildcard
-        let input = "Ljava/lang/Object<*>;";
-        let result = SignatureType::parse(input);
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.0, input.len() as u16);
-        assert_eq!(input, result.1.to_string());
-
-        //Inner classes
-        let input = "Lgnu/trove/map/custom_hash/TObjectByteCustomHashMap<TK;>.MapBackedView<TK;>.AnotherOne;";
-        let result = SignatureType::parse(input);
-        // assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.0, input.len() as u16);
-        assert_eq!(input, result.1.to_string());
+        for input in data {
+            let result = SignatureType::parse(input);
+            assert!(result.is_ok());
+            let result = result.unwrap();
+            assert_eq!(result.0, input.len() as u16);
+            assert_eq!(input, result.1.to_string());
+        }
     }
 
     #[test]
