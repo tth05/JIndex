@@ -1,5 +1,4 @@
-use crate::class_index::{IndexedClass, IndexedField, IndexedMethod};
-use crate::ClassIndex;
+use crate::class_index::{ClassIndex, IndexedClass, IndexedField, IndexedMethod};
 use jni::objects::{JObject, JValue};
 use jni::sys::{jlong, jobject, jobjectArray, jshort, jsize, jstring};
 use jni::JNIEnv;
@@ -195,8 +194,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    if let Some(index) = indexed_class.super_class_index() {
-        let class = class_index.class_at_index(*index);
+    if let Some(index) = indexed_class.signature().super_class() {
+        let class = class_index.class_at_index(*index.extract_base_object_type());
         env.new_object(
             result_class,
             "(JJ)V",
@@ -233,14 +232,19 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let interface_indicies = indexed_class.interface_indicies();
-    let array_length = interface_indicies.as_ref().map_or(0, |v| v.len());
+    let interface_indicies = indexed_class.signature().interfaces();
+
+    let array_length = interface_indicies.map_or(0, |v| v.len());
+    if array_length == 0 {
+        return JObject::null().into_inner();
+    }
+
     let result_array = env
         .new_object_array(array_length as jsize, result_class, JObject::null())
         .expect("Failed to create result array");
 
     for (index, interface_index) in interface_indicies.as_ref().unwrap().iter().enumerate() {
-        let class = class_index.class_at_index(*interface_index);
+        let class = class_index.class_at_index(*interface_index.extract_base_object_type());
 
         let object = env
             .new_object(

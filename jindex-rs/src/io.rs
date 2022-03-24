@@ -1,13 +1,13 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
-use crate::class_index::{IndexedClass, IndexedSignature};
+use crate::class_index::{ClassIndex, IndexedClass};
 use speedy::{Context, Readable, Reader, Writable, Writer};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::constant_pool::ClassIndexConstantPool;
-use crate::ClassIndex;
+use crate::signature::{IndexedClassSignature, IndexedSignatureType};
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
     let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
@@ -68,6 +68,7 @@ where
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
         let class = IndexedClass::new(reader.read_u32()?, reader.read_u32()?, reader.read_u16()?);
+        class.set_signature(IndexedClassSignature::read_from(reader)?);
         class.set_fields(Vec::read_from(reader)?).unwrap();
         class.set_methods(Vec::read_from(reader)?).unwrap();
         Ok(class)
@@ -82,43 +83,48 @@ where
         self.package_index().write_to(writer)?;
         self.class_name_index().write_to(writer)?;
         self.access_flags().write_to(writer)?;
+        self.signature().write_to(writer)?;
         self.fields().write_to(writer)?;
         self.methods().write_to(writer)?;
         Ok(())
     }
 }
 
-impl<'a, C> Readable<'a, C> for IndexedSignature
+impl<'a, C> Readable<'a, C> for IndexedSignatureType
 where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        Ok(match reader.read_u8()? {
-            0 => IndexedSignature::Primitive(match reader.read_u8()? {
-                0 => jni::signature::Primitive::Boolean,
-                1 => jni::signature::Primitive::Byte,
-                2 => jni::signature::Primitive::Char,
-                3 => jni::signature::Primitive::Double,
-                4 => jni::signature::Primitive::Float,
-                5 => jni::signature::Primitive::Int,
-                6 => jni::signature::Primitive::Long,
-                7 => jni::signature::Primitive::Short,
-                _ => unreachable!(),
-            }),
-            1 => IndexedSignature::Object(reader.read_u32()?),
-            2 => IndexedSignature::Array(Box::new(IndexedSignature::read_from(reader)?)),
-            3 => IndexedSignature::Void,
-            _ => IndexedSignature::Unresolved,
-        })
+        //TODO: reading
+        Ok(
+            IndexedSignatureType::Unresolved, /*match reader.read_u8()? {
+                                                  0 => IndexedSignatureType::Primitive(match reader.read_u8()? {
+                                                      0 => jni::signature::Primitive::Boolean,
+                                                      1 => jni::signature::Primitive::Byte,
+                                                      2 => jni::signature::Primitive::Char,
+                                                      3 => jni::signature::Primitive::Double,
+                                                      4 => jni::signature::Primitive::Float,
+                                                      5 => jni::signature::Primitive::Int,
+                                                      6 => jni::signature::Primitive::Long,
+                                                      7 => jni::signature::Primitive::Short,
+                                                      _ => unreachable!(),
+                                                  }),
+                                                  1 => IndexedSignature::Object(reader.read_u32()?),
+                                                  2 => IndexedSignature::Array(Box::new(IndexedSignature::read_from(reader)?)),
+                                                  3 => IndexedSignature::Void,
+                                                  _ => IndexedSignature::Unresolved,
+                                              }*/
+        )
     }
 }
 
-impl<C> Writable<C> for IndexedSignature
+impl<C> Writable<C> for IndexedSignatureType
 where
     C: Context,
 {
     fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
-        match self {
+        //TODO: writing
+        /*match self {
             IndexedSignature::Primitive(p) => {
                 writer.write_u8(0)?;
                 writer.write_u8(match p {
@@ -143,7 +149,7 @@ where
             }
             IndexedSignature::Void => writer.write_u8(3)?,
             IndexedSignature::Unresolved => writer.write_u8(4)?,
-        }
+        }*/
         Ok(())
     }
 }

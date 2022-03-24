@@ -1,7 +1,6 @@
-use crate::class_index::{IndexedMethod, IndexedSignature};
-use crate::ClassIndex;
-use jni::objects::{JObject, JValue};
-use jni::sys::{jlong, jobject, jobjectArray, jshort, jsize, jstring};
+use crate::class_index::{ClassIndex, IndexedMethod};
+use jni::objects::JObject;
+use jni::sys::{jobject, jobjectArray, jshort, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -57,19 +56,21 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getRetu
         .find_class("com/github/tth05/jindex/IndexedSignature")
         .expect("Result class not found");
 
-    env.new_object(
+    //TODO: Method return type
+    /*env.new_object(
         result_class,
         "(JJ)V",
         &[
             JValue::Long(class_index_pointer),
             JValue::Long(
-                (indexed_method.method_signature().return_type() as *const IndexedSignature)
+                (indexed_method.method_signature().return_type() as *const IndexedSignatureType)
                     as jlong,
             ),
         ],
     )
     .expect("Failed to create instance")
-    .into_inner()
+    .into_inner()*/
+    JObject::null().into_inner()
 }
 
 #[no_mangle]
@@ -92,7 +93,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getPara
         .find_class("com/github/tth05/jindex/IndexedSignature")
         .expect("Result class not found");
 
-    let parameter_signatures_or_none = indexed_method.method_signature().params();
+    //TODO: Method parameter signatures
+    /*let parameter_signatures_or_none = indexed_method.method_signature().params();
 
     let array_length = parameter_signatures_or_none.map_or(0, |v| v.len());
     let array = env
@@ -107,7 +109,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getPara
                     "(JJ)V",
                     &[
                         JValue::Long(class_index_pointer),
-                        JValue::Long((signature as *const IndexedSignature) as jlong),
+                        JValue::Long((signature as *const IndexedSignatureType) as jlong),
                     ],
                 )
                 .expect("Failed to create instance")
@@ -118,7 +120,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getPara
         }
     }
 
-    array
+    array*/
+    JObject::null().into_inner()
 }
 
 #[no_mangle]
@@ -137,7 +140,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     let indexed_method =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
 
-    let parameter_signatures_or_none = indexed_method.method_signature().params();
+    /*let parameter_signatures_or_none = indexed_method.method_signature().params();
 
     let mut descriptor = String::from('(');
     if let Some(parameter_signatures) = parameter_signatures_or_none {
@@ -152,9 +155,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
             .method_signature()
             .return_type()
             .signature_string(class_index),
-    );
+    );*/
 
-    env.new_string(descriptor)
+    //TODO: Method descriptor string
+    env.new_string(/*descriptor*/ "")
         .expect("Unable to create descriptor String")
         .into_inner()
 }

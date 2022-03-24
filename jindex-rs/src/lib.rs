@@ -1,5 +1,5 @@
+#![recursion_limit = "40"]
 #![feature(once_cell)]
-use crate::class_index::ClassIndex;
 
 mod class_index;
 mod constant_pool;
@@ -8,4 +8,6 @@ mod signature;
 
 pub mod jni;
 
+#[cfg(test)]
 mod test {
+}

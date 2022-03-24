@@ -1,12 +1,14 @@
 use crate::constant_pool::ClassIndexConstantPool;
-use crate::signature::{ClassSignature, MethodSignature, SignaturePrimitive, SignatureType};
-use anyhow::Context;
+use crate::signature::indexed_signature::ToIndexedType;
+use crate::signature::{
+    ClassSignature, IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType,
+    MethodSignature, RawClassSignature, RawMethodSignature, RawSignatureType, SignatureType,
+};
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::attributes::{AttributeData, AttributeInfo};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
-use jni::signature::Primitive;
 use speedy::{Readable, Writable};
 use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{min, Ordering};
@@ -243,7 +245,7 @@ impl ClassIndexBuilder {
                 .get_or_add_package(&class_info.package_name)
                 .unwrap()
                 .index();
-            let class_name_index = self.get_index_from_pool(
+            let class_name_index = ClassIndexBuilder::get_index_from_pool(
                 &class_info.class_name,
                 &mut constant_pool_map,
                 &mut constant_pool,
@@ -269,38 +271,21 @@ impl ClassIndexBuilder {
                 .1;
             time += t.elapsed().as_nanos();
 
-            //Super class
-            /*if let Some(super_class_name) = &class_info.super_class {
-                let super_class_name = rsplit_once(super_class_name, AsciiChar::Slash);
-                let index_or_none = class_index
-                    .find_class(super_class_name.0, super_class_name.1)
-                    .map(|s| s.0);
-                if let Some(i) = index_or_none {
-                    indexed_class.set_super_class_index(i);
-                }
-            }
-
-            //Interfaces
-            indexed_class.set_interfaces_indices(
+            //Signature
+            indexed_class.set_signature(
                 class_info
-                    .interfaces
-                    .iter()
-                    .filter_map(|interface_name| {
-                        let interface_name = rsplit_once(interface_name, AsciiChar::Slash);
-                        class_index
-                            .find_class(interface_name.0, interface_name.1)
-                            .map(|s| s.0)
-                    })
-                    .collect(),
-            );*/
+                    .signature
+                    .to_indexed_type(&class_index, &mut constant_pool_map),
+            );
 
             //Fields
             let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
 
+            //TODO: Possibly into_iter to take ownership when converting?
             for field_info in class_info.fields.iter() {
                 let field_name = field_info.field_name.as_ascii_str().unwrap();
 
-                let field_name_index = self.get_index_from_pool(
+                let field_name_index = ClassIndexBuilder::get_index_from_pool(
                     field_name,
                     &mut constant_pool_map,
                     &mut class_index.constant_pool_mut(),
@@ -309,10 +294,9 @@ impl ClassIndexBuilder {
                 indexed_fields.push(IndexedField::new(
                     field_name_index,
                     field_info.access_flags.bits(),
-                    ClassIndexBuilder::compute_signature_for_descriptor(
-                        &field_info.descriptor,
-                        &class_index,
-                    ),
+                    field_info
+                        .descriptor
+                        .to_indexed_type(&class_index, &mut constant_pool_map),
                 ));
             }
 
@@ -324,13 +308,14 @@ impl ClassIndexBuilder {
             for method_info in class_info.methods.iter() {
                 let method_name = method_info.method_name.as_ascii_str().unwrap();
 
-                let method_name_index = self.get_index_from_pool(
+                let method_name_index = ClassIndexBuilder::get_index_from_pool(
                     method_name,
                     &mut constant_pool_map,
                     &mut class_index.constant_pool_mut(),
                 );
 
-                indexed_methods.push(IndexedMethod::new(
+                //TODO: add method to convert signature
+                /*indexed_methods.push(IndexedMethod::new(
                     method_name_index,
                     method_info.access_flags.bits(),
                     IndexedMethodSignature::new(
@@ -351,7 +336,7 @@ impl ClassIndexBuilder {
                             &class_index,
                         ),
                     ),
-                ));
+                ));*/
             }
 
             indexed_class.set_methods(indexed_methods).unwrap();
@@ -363,15 +348,16 @@ impl ClassIndexBuilder {
     }
 
     fn compute_signature_for_descriptor(
-        signature_type: &SignatureType,
+        signature_type: &RawSignatureType,
         class_index: &ClassIndex,
-    ) -> IndexedSignature {
+    ) -> IndexedSignatureType {
         match signature_type {
             SignatureType::Object(full_class_name) => {
                 ClassIndexBuilder::compute_signature_for_object(full_class_name, class_index)
             }
-            SignatureType::Primitive(p) => IndexedSignature::from_primitive_type(p),
-            SignatureType::Array(t) => IndexedSignature::Array(Box::new(
+            //TODO: Add back from_primitive_type method?
+            SignatureType::Primitive(p) => IndexedSignatureType::Unresolved, /*IndexedSignatureType::from_primitive_type(p)*/
+            SignatureType::Array(t) => IndexedSignatureType::Array(Box::new(
                 ClassIndexBuilder::compute_signature_for_descriptor(t, class_index),
             )),
             _ => unreachable!(),
@@ -381,7 +367,7 @@ impl ClassIndexBuilder {
     fn compute_signature_for_object(
         full_class_name: &AsciiStr,
         class_index: &ClassIndex,
-    ) -> IndexedSignature {
+    ) -> IndexedSignatureType {
         let split_pair = rsplit_once(full_class_name, AsciiChar::Slash);
 
         let package_name = split_pair.0;
@@ -391,14 +377,13 @@ impl ClassIndexBuilder {
         let option = class_index.find_class(package_name, class_name);
         // time += t.elapsed().as_nanos();
         if option.is_none() {
-            IndexedSignature::Unresolved
+            IndexedSignatureType::Unresolved
         } else {
-            IndexedSignature::Object(option.0)
+            IndexedSignatureType::Object(option.unwrap().0)
         }
     }
 
-    fn get_index_from_pool<'a>(
-        &self,
+    pub fn get_index_from_pool<'a>(
         value: &'a AsciiStr,
         map: &mut HashMap<&'a AsciiStr, u32>,
         pool: &mut ClassIndexConstantPool,
@@ -413,7 +398,7 @@ impl ClassIndexBuilder {
     }
 }
 
-fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &AsciiStr) {
+pub fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &AsciiStr) {
     for i in (0..str.len()).rev() {
         if str.get_ascii(i).unwrap() == separator {
             return (&str[0..i], &str[(i + 1)..]);
@@ -433,20 +418,20 @@ pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
     pub access_flags: ClassAccessFlags,
-    pub signature: ClassSignature,
+    pub signature: RawClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
 }
 
 pub struct FieldInfo {
     pub field_name: AsciiString,
-    pub descriptor: SignatureType,
+    pub descriptor: RawSignatureType,
     pub access_flags: FieldAccessFlags,
 }
 
 pub struct MethodInfo {
     pub method_name: AsciiString,
-    pub signature: MethodSignature,
+    pub signature: RawMethodSignature,
     pub access_flags: MethodAccessFlags,
 }
 
@@ -455,11 +440,7 @@ pub struct IndexedClass {
     package_index: u32,
     name_index: u32,
     access_flags: u16,
-    //TODO: These should use IndexedSignatureType to support generic data, for
-    // example 'implements Comparable<? extends Number>'. This would
-    // be 'Ljava/lang/Object;Ljava/lang/Comparable<+Ljava/lang/Number>;'
-    super_class_index: OnceCell<u32>,
-    interfaces_indices: OnceCell<Vec<u32>>,
+    signature: OnceCell<IndexedClassSignature>,
     fields: OnceCell<Vec<IndexedField>>,
     methods: OnceCell<Vec<IndexedMethod>>,
 }
@@ -470,8 +451,7 @@ impl IndexedClass {
             package_index,
             name_index: class_name_index,
             access_flags,
-            super_class_index: OnceCell::new(),
-            interfaces_indices: OnceCell::new(),
+            signature: OnceCell::new(),
             fields: OnceCell::new(),
             methods: OnceCell::new(),
         }
@@ -494,12 +474,8 @@ impl IndexedClass {
         package_name + "/".as_ascii_str().unwrap() + class_name
     }
 
-    pub fn set_super_class_index(&self, super_class_index: u32) {
-        self.super_class_index.set(super_class_index).unwrap();
-    }
-
-    pub fn set_interfaces_indices(&self, interfaces_indices: Vec<u32>) {
-        self.interfaces_indices.set(interfaces_indices).unwrap();
+    pub fn set_signature(&self, signature: IndexedClassSignature) {
+        self.signature.set(signature).unwrap();
     }
 
     pub fn class_name_index(&self) -> u32 {
@@ -518,12 +494,8 @@ impl IndexedClass {
         self.package_index
     }
 
-    pub fn super_class_index(&self) -> Option<&u32> {
-        self.super_class_index.get()
-    }
-
-    pub fn interface_indicies(&self) -> Option<&Vec<u32>> {
-        self.interfaces_indices.get()
+    pub fn signature(&self) -> &IndexedClassSignature {
+        self.signature.get().unwrap()
     }
 
     pub fn fields(&self) -> &Vec<IndexedField> {
@@ -541,88 +513,8 @@ impl IndexedClass {
     pub fn set_methods(&self, methods: Vec<IndexedMethod>) -> Result<(), Vec<IndexedMethod>> {
         self.methods.set(methods)
     }
-
     pub fn access_flags(&self) -> u16 {
         self.access_flags
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum IndexedSignature {
-    Primitive(jni::signature::Primitive),
-    Object(u32),
-    Array(Box<IndexedSignature>),
-    Void,
-    Unresolved,
-}
-
-//TODO: Primitive const optimization? Signatures take a lot of RAM
-/*static PRIMITIVE_SIG_BOOLEAN: IndexedSignature = IndexedSignature::Primitive(0);
-static PRIMITIVE_SIG_BYTE :IndexedSignature = IndexedSignature::Primitive(1);
-static PRIMITIVE_SIG_CHAR :IndexedSignature = IndexedSignature::Primitive(2);
-static PRIMITIVE_SIG_DOUBLE :IndexedSignature = IndexedSignature::Primitive(3);
-static PRIMITIVE_SIG_FLOAT :IndexedSignature = IndexedSignature::Primitive(4);
-static PRIMITIVE_SIG_INT :IndexedSignature = IndexedSignature::Primitive(5);
-static PRIMITIVE_SIG_LONG :IndexedSignature = IndexedSignature::Primitive(6);
-static PRIMITIVE_SIG_SHORT :IndexedSignature = IndexedSignature::Primitive(7);
-static PRIMITIVE_SIG_VOID :IndexedSignature = IndexedSignature::Primitive(8);
-*/
-impl IndexedSignature {
-    fn from_primitive_type(t: &jni::signature::Primitive) -> Self {
-        match t {
-            Primitive::Void => IndexedSignature::Void,
-            _ => IndexedSignature::Primitive(t.clone()),
-        }
-    }
-
-    pub fn signature_string(&self, class_index: &ClassIndex) -> String {
-        Self::signature_to_string(self, class_index)
-    }
-
-    fn signature_to_string(sig: &IndexedSignature, class_index: &ClassIndex) -> String {
-        match sig {
-            IndexedSignature::Primitive(i) => i.to_string(),
-            IndexedSignature::Object(index) => {
-                let mut result = String::from("L;");
-                result.insert_str(
-                    1,
-                    class_index
-                        .class_at_index(*index)
-                        .class_name_with_package(&class_index.constant_pool())
-                        .as_ref(),
-                );
-                result
-            }
-            IndexedSignature::Array(sig) => {
-                String::from("[") + &IndexedSignature::signature_to_string(sig, class_index)
-            }
-            IndexedSignature::Void => String::from("V"),
-            IndexedSignature::Unresolved => String::from(""),
-        }
-    }
-}
-
-#[derive(Readable, Writable, Debug, Clone)]
-pub struct IndexedMethodSignature {
-    //TODO: Parameter names
-    params: Option<Vec<IndexedSignature>>,
-    return_type: IndexedSignature,
-}
-
-impl IndexedMethodSignature {
-    pub fn new(params: Vec<IndexedSignature>, return_type: IndexedSignature) -> Self {
-        Self {
-            params: Some(params).filter(|v| !v.is_empty()),
-            return_type,
-        }
-    }
-
-    pub fn params(&self) -> Option<&Vec<IndexedSignature>> {
-        self.params.as_ref()
-    }
-
-    pub fn return_type(&self) -> &IndexedSignature {
-        &self.return_type
     }
 }
 
@@ -630,11 +522,11 @@ impl IndexedMethodSignature {
 pub struct IndexedField {
     name_index: u32,
     access_flags: u16,
-    field_signature: IndexedSignature,
+    field_signature: IndexedSignatureType,
 }
 
 impl IndexedField {
-    pub fn new(name_index: u32, access_flags: u16, field_signature: IndexedSignature) -> Self {
+    pub fn new(name_index: u32, access_flags: u16, field_signature: IndexedSignatureType) -> Self {
         Self {
             name_index,
             access_flags,
@@ -652,12 +544,12 @@ impl IndexedField {
         self.access_flags
     }
 
-    pub fn field_signature(&self) -> &IndexedSignature {
+    pub fn field_signature(&self) -> &IndexedSignatureType {
         &self.field_signature
     }
 }
 
-#[derive(Readable, Writable, Debug, Clone)]
+#[derive(Readable, Writable, Debug)]
 pub struct IndexedMethod {
     name_index: u32,
     access_flags: u16,
@@ -904,24 +796,24 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
         if let Ok(class) = thing {
             let parsed_signature = if let Some(attr) = get_signature_attribute(&class.attributes) {
-                ClassSignature::from_str(match &attr.data {
+                RawClassSignature::from_str(match &attr.data {
                     AttributeData::Signature(s) => s,
                     _ => unreachable!(),
                 })
                 .expect("Invalid class signature")
             } else {
-                ClassSignature::new(
+                RawClassSignature::new(
                     class
                         .super_class
-                        .map(|s| SignatureType::Object(s.into_ascii_string().unwrap())),
+                        .map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap())),
                     Some(
                         class
                             .interfaces
                             .into_iter()
-                            .map(|s| SignatureType::Object(s.into_ascii_string().unwrap()))
+                            .map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap()))
                             .collect(),
                     )
-                    .filter(|v: &Vec<SignatureType>| v.is_empty()),
+                    .filter(|v: &Vec<RawSignatureType>| !v.is_empty()),
                 )
             };
 

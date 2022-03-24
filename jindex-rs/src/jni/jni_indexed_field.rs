@@ -2,8 +2,8 @@ use jni::objects::JValue;
 use jni::sys::{jlong, jobject, jshort, jstring};
 use jni::JNIEnv;
 
-use crate::class_index::{IndexedField, IndexedSignature};
-use crate::ClassIndex;
+use crate::class_index::{ClassIndex, IndexedField};
+use crate::signature::IndexedSignatureType;
 
 #[no_mangle]
 /// # Safety
@@ -63,7 +63,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getTypeS
         "(JJ)V",
         &[
             JValue::Long(class_index_pointer),
-            JValue::Long((indexed_field.field_signature() as *const IndexedSignature) as jlong),
+            JValue::Long((indexed_field.field_signature() as *const IndexedSignatureType) as jlong),
         ],
     )
     .expect("Failed to create instance")

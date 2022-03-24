@@ -1,5 +1,5 @@
-use crate::class_index::{IndexedClass, IndexedSignature};
-use crate::ClassIndex;
+use crate::class_index::{ClassIndex, IndexedClass};
+use crate::signature::IndexedSignatureType;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jboolean, jclass, jlong, jobject, jstring};
 use jni::JNIEnv;
@@ -12,9 +12,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_isAr
     this: jobject,
 ) -> jboolean {
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
-    matches!(indexed_signature, IndexedSignature::Array(_)).into()
+    matches!(indexed_signature, IndexedSignatureType::Array(_)).into()
 }
 
 #[no_mangle]
@@ -25,9 +25,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_isPr
     this: jobject,
 ) -> jboolean {
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
-    matches!(indexed_signature, IndexedSignature::Primitive(_)).into()
+    matches!(indexed_signature, IndexedSignatureType::Primitive(_)).into()
 }
 
 #[no_mangle]
@@ -38,9 +38,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_isVo
     this: jobject,
 ) -> jboolean {
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
-    matches!(indexed_signature, IndexedSignature::Void).into()
+    matches!(
+        indexed_signature,
+        IndexedSignatureType::Primitive(jni::signature::Primitive::Void)
+    )
+    .into()
 }
 
 #[no_mangle]
@@ -51,9 +55,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_isUn
     this: jobject,
 ) -> jboolean {
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
-    matches!(indexed_signature, IndexedSignature::Unresolved).into()
+    matches!(indexed_signature, IndexedSignatureType::Unresolved).into()
 }
 
 #[no_mangle]
@@ -71,14 +75,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getT
     let class_index = &*(class_index_pointer as *const ClassIndex);
 
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
     match indexed_signature {
-        IndexedSignature::Object(index) => {
+        IndexedSignatureType::Object(index) => {
             let pointer = class_index.class_at_index(*index) as *const IndexedClass;
             env.new_object(
                 result_class,
@@ -103,10 +107,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getP
     this: jobject,
 ) -> jclass {
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
     match indexed_signature {
-        IndexedSignature::Primitive(index) => {
+        IndexedSignatureType::Primitive(index) => {
             let primitive_name = match index {
                 jni::signature::Primitive::Boolean => "boolean",
                 jni::signature::Primitive::Byte => "byte",
@@ -116,6 +120,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getP
                 jni::signature::Primitive::Int => "int",
                 jni::signature::Primitive::Long => "long",
                 jni::signature::Primitive::Short => "short",
+                //TODO: Void?
                 _ => unreachable!(),
             };
 
@@ -152,20 +157,20 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getA
         .unwrap();
 
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedSignature")
         .expect("Result class not found");
 
     match indexed_signature {
-        IndexedSignature::Array(component) => env
+        IndexedSignatureType::Array(component) => env
             .new_object(
                 result_class,
                 "(JJ)V",
                 &[
                     JValue::Long(class_index_pointer),
-                    JValue::Long(((&**component) as *const IndexedSignature) as jlong),
+                    JValue::Long(((&**component) as *const IndexedSignatureType) as jlong),
                 ],
             )
             .expect("Failed to create result object")
@@ -188,9 +193,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_toSi
         .unwrap() as *const ClassIndex);
 
     let indexed_signature =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignature);
+        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedSignatureType);
 
-    env.new_string(indexed_signature.signature_string(class_index))
+    //TODO: Signature into string
+    env.new_string("" /*indexed_signature.signature_string(class_index)*/)
         .expect("Unable to create String")
         .into_inner()
 }
