@@ -1,8 +1,14 @@
 use crate::class_index::{ClassIndex, IndexedClass, IndexedField, IndexedMethod};
+use crate::jni::{
+    get_class_index, get_java_lang_object, get_pointer_field, is_basic_signature_type,
+};
+use crate::signature::indexed_signature::ToStringIndexedType;
+use crate::signature::SignatureType;
+use crate::signature::SignatureType::ObjectPlus;
+use ascii::AsAsciiStr;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jlong, jobject, jobjectArray, jshort, jsize, jstring};
 use jni::JNIEnv;
-use crate::jni::get_class_index;
 
 #[no_mangle]
 /// # Safety
@@ -11,9 +17,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-    let indexed_class =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+    let (_, class_index) = get_class_index(env, this);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     env.new_string(indexed_class.class_name(&class_index.constant_pool()))
         .unwrap()
@@ -27,9 +32,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-    let indexed_class =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+    let (_, class_index) = get_class_index(env, this);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     env.new_string(
         class_index
@@ -48,9 +52,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-    let indexed_class =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+    let (_, class_index) = get_class_index(env, this);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     env.new_string(indexed_class.class_name_with_package(&class_index.constant_pool()))
         .unwrap()
@@ -64,8 +67,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAcces
     env: JNIEnv,
     this: jobject,
 ) -> jshort {
-    let indexed_class =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     indexed_class.access_flags() as jshort
 }
@@ -77,10 +79,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getField
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-
-    let indexed_class =
-        &mut *(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+    let (class_index_pointer, _) = get_class_index(env, this);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedField")
@@ -119,10 +119,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMetho
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-
-    let indexed_class =
-        &mut *(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
+    let (class_index_pointer, _) = get_class_index(env, this);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedMethod")
@@ -162,16 +160,21 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
     this: jobject,
 ) -> jobject {
     let (class_index_pointer, class_index) = get_class_index(env, this);
-
-    let indexed_class =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *const IndexedClass);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    if let Some(index) = indexed_class.signature().super_class() {
-        let class = class_index.class_at_index(*index.extract_base_object_type());
+    let super_class = indexed_class.signature().super_class().map_or_else(
+        || get_java_lang_object(class_index),
+        |s| match s {
+            SignatureType::Unresolved => None,
+            _ => Some(class_index.class_at_index(*s.extract_base_object_type())),
+        },
+    );
+
+    if let Some(class) = super_class {
         env.new_object(
             result_class,
             "(JJ)V",
@@ -195,9 +198,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
     this: jobject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
-
-    let indexed_class =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *const IndexedClass);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -232,4 +233,32 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
     }
 
     result_array
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGenericSignatureString(
+    env: JNIEnv,
+    this: jobject,
+) -> jstring {
+    let (_, class_index) = get_class_index(env, this);
+    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let signature = indexed_class.signature();
+
+    //No generic signature available
+    if signature.generic_data().is_none()
+        && signature
+            .interfaces()
+            .map_or(true, |v| v.iter().all(is_basic_signature_type))
+        && signature
+            .super_class()
+            .map_or(true, is_basic_signature_type)
+    {
+        return JObject::null().into_inner();
+    }
+
+    env.new_string(signature.to_string(class_index))
+        .expect("Unable to create descriptor String")
+        .into_inner()
 }

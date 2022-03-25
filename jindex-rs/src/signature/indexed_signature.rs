@@ -183,7 +183,6 @@ impl ToStringIndexedType for IndexedSignatureType {
             SignatureType::ObjectPlus(inner) => String::from('+') + &inner.to_string(class_index),
             SignatureType::Array(inner) => String::from('[') + &inner.to_string(class_index),
             SignatureType::Unresolved => String::from("!unresolved!"),
-            _ => unreachable!(),
         }
     }
 }

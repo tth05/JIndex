@@ -1,8 +1,8 @@
 use crate::constant_pool::ClassIndexConstantPool;
 use crate::signature::indexed_signature::ToIndexedType;
 use crate::signature::{
-    ClassSignature, IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType,
-    MethodSignature, RawClassSignature, RawMethodSignature, RawSignatureType, SignatureType,
+    IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType, RawClassSignature,
+    RawMethodSignature, RawSignatureType, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::attributes::{AttributeData, AttributeInfo};
@@ -329,42 +329,6 @@ impl ClassIndexBuilder {
         println!("Time spent in findClass {:?}", time.div(1_000_000));
 
         class_index
-    }
-
-    fn compute_signature_for_descriptor(
-        signature_type: &RawSignatureType,
-        class_index: &ClassIndex,
-    ) -> IndexedSignatureType {
-        match signature_type {
-            SignatureType::Object(full_class_name) => {
-                ClassIndexBuilder::compute_signature_for_object(full_class_name, class_index)
-            }
-            //TODO: Add back from_primitive_type method?
-            SignatureType::Primitive(p) => IndexedSignatureType::Unresolved, /*IndexedSignatureType::from_primitive_type(p)*/
-            SignatureType::Array(t) => IndexedSignatureType::Array(Box::new(
-                ClassIndexBuilder::compute_signature_for_descriptor(t, class_index),
-            )),
-            _ => unreachable!(),
-        }
-    }
-
-    fn compute_signature_for_object(
-        full_class_name: &AsciiStr,
-        class_index: &ClassIndex,
-    ) -> IndexedSignatureType {
-        let split_pair = rsplit_once(full_class_name, AsciiChar::Slash);
-
-        let package_name = split_pair.0;
-        let class_name = split_pair.1;
-
-        // let t = Instant::now();
-        let option = class_index.find_class(package_name, class_name);
-        // time += t.elapsed().as_nanos();
-        if option.is_none() {
-            IndexedSignatureType::Unresolved
-        } else {
-            IndexedSignatureType::Object(option.unwrap().0)
-        }
     }
 
     pub fn get_index_from_pool<'a>(

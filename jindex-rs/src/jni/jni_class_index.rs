@@ -89,7 +89,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile
 ) {
     let path: String = env.get_string(path).expect("Invalid path").into();
 
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let (_, class_index) = get_class_index(env, this);
 
     save_class_index_to_file(class_index, path);
 }

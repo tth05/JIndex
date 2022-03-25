@@ -1,4 +1,4 @@
-use crate::class_index::{ClassIndex, IndexedClass};
+use crate::class_index::IndexedClass;
 use crate::jni::{get_class_index, get_pointer_field};
 use crate::signature::IndexedSignatureType;
 use jni::objects::{JObject, JValue};
@@ -139,7 +139,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_getA
     env: JNIEnv,
     this: jobject,
 ) -> jobject {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let (class_index_pointer, _) = get_class_index(env, this);
     let indexed_signature = get_pointer_field::<IndexedSignatureType>(env, this);
 
     let result_class = env
@@ -169,8 +169,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedSignature_toSi
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-    let indexed_signature = get_pointer_field::<IndexedSignatureType>(env, this);
+    let (_, _) = get_class_index(env, this);
+    let _ = get_pointer_field::<IndexedSignatureType>(env, this);
 
     //TODO: Signature into string
     env.new_string("" /*indexed_signature.signature_string(class_index)*/)

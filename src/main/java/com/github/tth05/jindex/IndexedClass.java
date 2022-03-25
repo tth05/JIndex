@@ -25,6 +25,8 @@ public class IndexedClass {
     public native IndexedClass getSuperClass();
     public native IndexedClass[] getInterfaces();
 
+    public native String getGenericSignatureString();
+
     public native IndexedField[] getFields();
 
     public native IndexedMethod[] getMethods();

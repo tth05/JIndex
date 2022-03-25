@@ -1,10 +1,10 @@
-use jni::objects::JValue;
-use jni::sys::{jlong, jobject, jshort, jstring};
+use jni::objects::JObject;
+use jni::sys::{jobject, jshort, jstring};
 use jni::JNIEnv;
 
 use crate::class_index::IndexedField;
-use crate::jni::{get_class_index, get_pointer_field};
-use crate::signature::IndexedSignatureType;
+use crate::jni::{get_class_index, get_pointer_field, is_basic_signature_type};
+use crate::signature::indexed_signature::ToStringIndexedType;
 
 #[no_mangle]
 /// # Safety
@@ -13,7 +13,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let (_, class_index) = get_class_index(env, this);
     let indexed_field = get_pointer_field::<IndexedField>(env, this);
 
     env.new_string(indexed_field.field_name(&class_index.constant_pool()))
@@ -36,26 +36,20 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAcces
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getTypeSignature(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getGenericSignatureString(
     env: JNIEnv,
     this: jobject,
-) -> jobject {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+) -> jstring {
+    let (_, class_index) = get_class_index(env, this);
+    let indexed_method = get_pointer_field::<IndexedField>(env, this);
+    let signature = indexed_method.field_signature();
 
-    let indexed_field = get_pointer_field::<IndexedField>(env, this);
+    //No generic signature available
+    if is_basic_signature_type(signature) {
+        return JObject::null().into_inner();
+    }
 
-    let result_class = env
-        .find_class("com/github/tth05/jindex/IndexedSignature")
-        .expect("Result class not found");
-
-    env.new_object(
-        result_class,
-        "(JJ)V",
-        &[
-            JValue::Long(class_index_pointer),
-            JValue::Long((indexed_field.field_signature() as *const IndexedSignatureType) as jlong),
-        ],
-    )
-    .expect("Failed to create instance")
-    .into_inner()
+    env.new_string(signature.to_string(class_index))
+        .expect("Unable to create descriptor String")
+        .into_inner()
 }
