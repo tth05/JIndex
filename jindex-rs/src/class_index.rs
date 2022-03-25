@@ -262,6 +262,7 @@ impl ClassIndexBuilder {
 
         let class_index = ClassIndex::new(constant_pool, classes);
 
+        //TODO: Multi thread this loop using dashmap/flurry
         let mut time = 0u128;
         for class_info in vec.iter() {
             let t = Instant::now();
@@ -281,7 +282,6 @@ impl ClassIndexBuilder {
             //Fields
             let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
 
-            //TODO: Possibly into_iter to take ownership when converting?
             for field_info in class_info.fields.iter() {
                 let field_name = field_info.field_name.as_ascii_str().unwrap();
 
@@ -314,29 +314,13 @@ impl ClassIndexBuilder {
                     &mut class_index.constant_pool_mut(),
                 );
 
-                //TODO: add method to convert signature
-                /*indexed_methods.push(IndexedMethod::new(
+                indexed_methods.push(IndexedMethod::new(
                     method_name_index,
                     method_info.access_flags.bits(),
-                    IndexedMethodSignature::new(
-                        /*method_info
+                    method_info
                         .signature
-                        .args
-                        .iter()
-                        .map(|arg| {
-                            ClassIndexBuilder::compute_signature_for_descriptor(
-                                arg,
-                                &class_index,
-                            )
-                        })
-                        .collect()*/
-                        Vec::new(),
-                        ClassIndexBuilder::compute_signature_for_descriptor(
-                            &SignatureType::Primitive(SignaturePrimitive::Void),
-                            &class_index,
-                        ),
-                    ),
-                ));*/
+                        .to_indexed_type(&class_index, &mut constant_pool_map),
+                ));
             }
 
             indexed_class.set_methods(indexed_methods).unwrap();
@@ -866,7 +850,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
                         Some(MethodInfo {
                             method_name: name.unwrap(),
-                            signature: MethodSignature::from_str(signature)
+                            signature: RawMethodSignature::from_str(signature)
                                 .expect("Invalid method descriptor"),
                             access_flags: m.access_flags,
                         })

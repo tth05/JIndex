@@ -1,7 +1,7 @@
 use crate::class_index::{rsplit_once, ClassIndex, ClassIndexBuilder};
 use crate::signature::{
-    IndexedClassSignature, IndexedSignatureType, IndexedTypeParameterData, RawClassSignature,
-    RawSignatureType, RawTypeParameterData, SignatureType,
+    IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType, IndexedTypeParameterData,
+    RawClassSignature, RawMethodSignature, RawSignatureType, RawTypeParameterData, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use std::collections::HashMap;
@@ -179,6 +179,39 @@ impl ToIndexedType for RawTypeParameterData {
             self.type_bound
                 .to_indexed_type(class_index, constant_pool_map),
             self.interface_bounds
+                .to_indexed_type(class_index, constant_pool_map),
+        )
+    }
+}
+
+impl IndexedMethodSignature {
+    pub fn new(
+        generic_data: Option<Vec<IndexedTypeParameterData>>,
+        parameters: Vec<IndexedSignatureType>,
+        return_type: IndexedSignatureType,
+    ) -> Self {
+        Self {
+            generic_data,
+            parameters,
+            return_type,
+        }
+    }
+}
+
+impl ToIndexedType for RawMethodSignature {
+    type Out = IndexedMethodSignature;
+
+    fn to_indexed_type<'a>(
+        &'a self,
+        class_index: &ClassIndex,
+        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+    ) -> Self::Out {
+        IndexedMethodSignature::new(
+            self.generic_data
+                .to_indexed_type(class_index, constant_pool_map),
+            self.parameters
+                .to_indexed_type(class_index, constant_pool_map),
+            self.return_type
                 .to_indexed_type(class_index, constant_pool_map),
         )
     }
