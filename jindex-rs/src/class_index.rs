@@ -455,7 +455,11 @@ impl IndexedClass {
             .string_view_at(self.name_index)
             .into_ascii_string(constant_pool);
 
-        package_name + "/".as_ascii_str().unwrap() + class_name
+        if package_name.is_empty() {
+            class_name.to_ascii_string()
+        } else {
+            package_name + "/".as_ascii_str().unwrap() + class_name
+        }
     }
 
     pub fn set_signature(&self, signature: IndexedClassSignature) {

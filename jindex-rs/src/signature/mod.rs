@@ -80,6 +80,20 @@ pub struct MethodSignature<T> {
     return_type: SignatureType<T>,
 }
 
+impl<T> MethodSignature<T> {
+    pub fn generic_data(&self) -> Option<&Vec<TypeParameterData<T>>> {
+        self.generic_data.as_ref()
+    }
+
+    pub fn parameters(&self) -> &Vec<SignatureType<T>> {
+        &self.parameters
+    }
+
+    pub fn return_type(&self) -> &SignatureType<T> {
+        &self.return_type
+    }
+}
+
 pub type RawMethodSignature = MethodSignature<AsciiString>;
 pub type IndexedMethodSignature = MethodSignature<u32>;
 

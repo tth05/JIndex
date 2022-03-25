@@ -1,5 +1,7 @@
 use crate::class_index::{ClassIndex, IndexedMethod};
 use crate::jni::{get_class_index, get_pointer_field};
+use crate::signature::indexed_signature::ToStringIndexedType;
+use crate::signature::SignatureType;
 use jni::objects::JObject;
 use jni::sys::{jobject, jobjectArray, jshort, jstring};
 use jni::JNIEnv;
@@ -139,6 +141,37 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
 
     //TODO: Method descriptor string
     env.new_string(/*descriptor*/ "")
+        .expect("Unable to create descriptor String")
+        .into_inner()
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGenericSignatureString(
+    env: JNIEnv,
+    this: jobject,
+) -> jstring {
+    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let indexed_method = get_pointer_field::<IndexedMethod>(env, this);
+    let signature = indexed_method.method_signature();
+
+    fn is_basic_type(s: &SignatureType<u32>) -> bool {
+        matches!(
+            s,
+            SignatureType::Unresolved | SignatureType::Primitive(_) | SignatureType::Object(_)
+        )
+    }
+
+    //No generic signature available
+    if signature.generic_data().is_none()
+        && signature.parameters().iter().all(is_basic_type)
+        && is_basic_type(signature.return_type())
+    {
+        return JObject::null().into_inner();
+    }
+
+    env.new_string(signature.to_string(class_index))
         .expect("Unable to create descriptor String")
         .into_inner()
 }

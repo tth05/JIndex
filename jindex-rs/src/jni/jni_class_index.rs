@@ -16,10 +16,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
     env: JNIEnv,
     this: jobject,
 ) {
-    let _class_index =
-        Box::from_raw(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex);
+    let _class_index = Box::from_raw(
+        env.get_field(this, "classIndexPointer", "J")
+            .unwrap()
+            .j()
+            .unwrap() as *mut ClassIndex,
+    );
 
-    env.set_field(this, "pointer", "J", JValue::Long(0i64))
+    env.set_field(this, "classIndexPointer", "J", JValue::Long(0i64))
         .expect("Unable to set field");
     env.set_field(this, "destroyed", "Z", JValue::Bool(1))
         .expect("Unable to set field");
@@ -41,7 +45,7 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
 
     env.set_field(
         this,
-        "pointer",
+        "classIndexPointer",
         "J",
         JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
@@ -68,7 +72,7 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexF
 
     env.set_field(
         this,
-        "pointer",
+        "classIndexPointer",
         "J",
         JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
@@ -85,8 +89,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile
 ) {
     let path: String = env.get_string(path).expect("Invalid path").into();
 
-    let class_index =
-        &mut *(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     save_class_index_to_file(class_index, path);
 }
@@ -104,7 +107,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
 
     env.set_field(
         this,
-        "pointer",
+        "classIndexPointer",
         "J",
         JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )

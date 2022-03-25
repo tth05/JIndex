@@ -1,5 +1,5 @@
 use crate::class_index::{ClassIndex, IndexedClass};
-use crate::jni::get_pointer_field;
+use crate::jni::{get_class_index, get_pointer_field};
 use crate::signature::IndexedSignatureType;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jboolean, jclass, jlong, jobject, jstring};

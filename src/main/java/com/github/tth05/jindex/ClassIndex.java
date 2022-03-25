@@ -17,7 +17,7 @@ public class ClassIndex {
         }
     }
 
-    private long pointer;
+    private long classIndexPointer;
     private boolean destroyed;
 
     public native IndexedClass[] findClasses(String query, int limit);

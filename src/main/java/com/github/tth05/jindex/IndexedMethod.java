@@ -16,9 +16,7 @@ public class IndexedMethod {
 
     public native String getDescriptorString();
 
-    public native IndexedSignature getReturnTypeSignature();
-
-    public native IndexedSignature[] getParameterTypeSignatures();
+    public native String getGenericSignatureString();
 
     @Override
     public String toString() {
