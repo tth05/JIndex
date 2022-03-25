@@ -2,6 +2,7 @@ use crate::class_index::{ClassIndex, IndexedClass, IndexedField, IndexedMethod};
 use jni::objects::{JObject, JValue};
 use jni::sys::{jlong, jobject, jobjectArray, jshort, jsize, jstring};
 use jni::JNIEnv;
+use crate::jni::get_class_index;
 
 #[no_mangle]
 /// # Safety
@@ -10,11 +11,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let class_index = &*(env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
 
@@ -30,11 +27,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let class_index = &*(env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
 
@@ -55,11 +48,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let class_index = &*(env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
 
@@ -88,11 +77,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getField
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let class_index_pointer = env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex;
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let indexed_class =
         &mut *(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
@@ -134,11 +119,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMetho
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let class_index_pointer = env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex;
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let indexed_class =
         &mut *(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedClass);
@@ -180,12 +161,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
     env: JNIEnv,
     this: jobject,
 ) -> jobject {
-    let class_index_pointer = env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex;
-    let class_index = &*(class_index_pointer);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *const IndexedClass);
@@ -218,12 +194,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let class_index_pointer = env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex;
-    let class_index = &*(class_index_pointer);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let indexed_class =
         &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *const IndexedClass);

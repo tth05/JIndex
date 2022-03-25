@@ -7,6 +7,7 @@ use crate::class_index::{
     create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass,
 };
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
+use crate::jni::get_class_index;
 
 #[no_mangle]
 /// # Safety
@@ -128,9 +129,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let class_index_pointer =
-        env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex;
-    let class_index = &*(class_index_pointer);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let classes: Vec<_> = class_index
         .find_classes(input.as_ascii_str().unwrap(), limit as usize)
@@ -179,9 +178,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let class_index_pointer =
-        env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut ClassIndex;
-    let class_index = &*(class_index_pointer);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     if let Some((_, class)) = class_index.find_class(
         package_name.replace(".", "/").as_ascii_str().unwrap(),

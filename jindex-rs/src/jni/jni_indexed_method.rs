@@ -1,4 +1,5 @@
 use crate::class_index::{ClassIndex, IndexedMethod};
+use crate::jni::{get_class_index, get_pointer_field};
 use jni::objects::JObject;
 use jni::sys::{jobject, jobjectArray, jshort, jstring};
 use jni::JNIEnv;
@@ -10,13 +11,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let class_index = &*(env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *mut ClassIndex);
-    let indexed_method =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let indexed_method = get_pointer_field::<IndexedMethod>(env, this);
 
     env.new_string(indexed_method.method_name(&class_index.constant_pool()))
         .unwrap()
@@ -30,8 +26,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAcce
     env: JNIEnv,
     this: jobject,
 ) -> jshort {
-    let indexed_method =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+    let indexed_method = get_pointer_field::<IndexedMethod>(env, this);
 
     indexed_method.access_flags() as jshort
 }
@@ -43,14 +38,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getRetu
     env: JNIEnv,
     this: jobject,
 ) -> jobject {
-    let class_index_pointer = env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap();
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
-    let indexed_method =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+    let indexed_method = get_pointer_field::<IndexedMethod>(env, this);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedSignature")
@@ -80,14 +70,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getPara
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let class_index_pointer = env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap();
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
-    let indexed_method =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+    let indexed_method = get_pointer_field::<IndexedMethod>(env, this);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedSignature")
@@ -131,14 +116,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let class_index = &*(env
-        .get_field(this, "classIndexPointer", "J")
-        .unwrap()
-        .j()
-        .unwrap() as *const ClassIndex);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
-    let indexed_method =
-        &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut IndexedMethod);
+    let indexed_method = get_pointer_field::<IndexedMethod>(env, this);
 
     /*let parameter_signatures_or_none = indexed_method.method_signature().params();
 
