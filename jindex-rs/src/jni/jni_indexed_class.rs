@@ -1,11 +1,9 @@
-use crate::class_index::{ClassIndex, IndexedClass, IndexedField, IndexedMethod};
+use crate::class_index::{IndexedClass, IndexedField, IndexedMethod};
 use crate::jni::{
     get_class_index, get_java_lang_object, get_pointer_field, is_basic_signature_type,
 };
-use crate::signature::indexed_signature::ToStringIndexedType;
+use crate::signature::indexed_signature::ToSignatureIndexedType;
 use crate::signature::SignatureType;
-use crate::signature::SignatureType::ObjectPlus;
-use ascii::AsAsciiStr;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jlong, jobject, jobjectArray, jshort, jsize, jstring};
 use jni::JNIEnv;
@@ -98,9 +96,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getField
         let object = env
             .new_object(
                 result_class,
-                "(JJ)V",
+                "(JJJ)V",
                 &[
                     JValue::from(class_index_pointer as jlong),
+                    JValue::from((indexed_class as *const IndexedClass) as jlong),
                     JValue::from((field as *const IndexedField) as jlong),
                 ],
             )
@@ -138,9 +137,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMetho
         let object = env
             .new_object(
                 result_class,
-                "(JJ)V",
+                "(JJJ)V",
                 &[
                     JValue::from(class_index_pointer as jlong),
+                    JValue::from((indexed_class as *const IndexedClass) as jlong),
                     JValue::from((method as *const IndexedMethod) as jlong),
                 ],
             )
@@ -167,7 +167,16 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
         .expect("Result class not found");
 
     let super_class = indexed_class.signature().super_class().map_or_else(
-        || get_java_lang_object(class_index),
+        || {
+            //Object has no super class
+            if indexed_class.class_name_with_package(&class_index.constant_pool())
+                == "java/lang/Object"
+            {
+                None
+            } else {
+                get_java_lang_object(class_index)
+            }
+        },
         |s| match s {
             SignatureType::Unresolved => None,
             _ => Some(class_index.class_at_index(*s.extract_base_object_type())),
@@ -254,11 +263,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
         && signature
             .super_class()
             .map_or(true, is_basic_signature_type)
+        //Object has no signature
+        || indexed_class.class_name_with_package(&class_index.constant_pool()) == "java/lang/Object"
     {
         return JObject::null().into_inner();
     }
 
-    env.new_string(signature.to_string(class_index))
+    env.new_string(signature.to_signature_string(class_index))
         .expect("Unable to create descriptor String")
         .into_inner()
 }

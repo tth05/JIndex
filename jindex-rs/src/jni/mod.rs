@@ -1,6 +1,6 @@
-use ascii::AsAsciiStr;
 use crate::class_index::{ClassIndex, IndexedClass};
 use crate::signature::{IndexedSignatureType, SignatureType};
+use ascii::AsAsciiStr;
 use jni::sys::{jlong, jobject};
 use jni::JNIEnv;
 
@@ -11,7 +11,11 @@ pub mod jni_indexed_method;
 pub mod jni_indexed_signature;
 
 unsafe fn get_pointer_field<T>(env: JNIEnv, this: jobject) -> &T {
-    &*(env.get_field(this, "pointer", "J").unwrap().j().unwrap() as *mut T)
+    get_field(env, this, "pointer")
+}
+
+unsafe fn get_field<'a, T>(env: JNIEnv, this: jobject, name: &str) -> &'a T {
+    &*(env.get_field(this, name, "J").unwrap().j().unwrap() as *mut T)
 }
 
 unsafe fn get_class_index(env: JNIEnv, this: jobject) -> (jlong, &ClassIndex) {

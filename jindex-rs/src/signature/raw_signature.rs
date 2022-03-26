@@ -34,7 +34,7 @@ impl RawSignatureType {
 
                         (
                             index as u16 + 1,
-                            SignatureType::ObjectInnerClass(Box::new(parts)),
+                            RawSignatureType::ObjectInnerClass(Box::new(parts)),
                         )
                     }
                 }
