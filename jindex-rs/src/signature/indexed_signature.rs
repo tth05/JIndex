@@ -2,7 +2,6 @@ use crate::class_index::{rsplit_once, ClassIndex, ClassIndexBuilder};
 use crate::signature::{
     IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType, IndexedTypeParameterData,
     RawClassSignature, RawMethodSignature, RawSignatureType, RawTypeParameterData, SignatureType,
-    TypeParameterData,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use std::collections::HashMap;
@@ -96,7 +95,6 @@ impl ToIndexedType for RawSignatureType {
                             }
                         }
                         RawSignatureType::ObjectTypeBounds(inner) => {
-                            //TODO: Somewhat copied from RawSignatureType::ObjectTypeBounds(inner) => { match arm
                             let (main_type, vec) = inner.as_ref();
                             let main_type_index_or_none = index_for_object_type(
                                 &(base_type_signature_name.clone()
