@@ -1,8 +1,6 @@
 use crate::class_index::{IndexedClass, IndexedField, IndexedMethod};
-use crate::jni::{
-    cached_field_ids, get_class_index, get_field_with_id, get_java_lang_object,
-    is_basic_signature_type,
-};
+use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
+use crate::jni::{get_java_lang_object, is_basic_signature_type};
 use crate::signature::indexed_signature::ToSignatureIndexedType;
 use crate::signature::SignatureType;
 use jni::objects::{JObject, JValue};
