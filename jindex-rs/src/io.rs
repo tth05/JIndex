@@ -95,26 +95,33 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        //TODO: reading
-        Ok(
-            IndexedSignatureType::Unresolved, /*match reader.read_u8()? {
-                                                  0 => IndexedSignatureType::Primitive(match reader.read_u8()? {
-                                                      0 => jni::signature::Primitive::Boolean,
-                                                      1 => jni::signature::Primitive::Byte,
-                                                      2 => jni::signature::Primitive::Char,
-                                                      3 => jni::signature::Primitive::Double,
-                                                      4 => jni::signature::Primitive::Float,
-                                                      5 => jni::signature::Primitive::Int,
-                                                      6 => jni::signature::Primitive::Long,
-                                                      7 => jni::signature::Primitive::Short,
-                                                      _ => unreachable!(),
-                                                  }),
-                                                  1 => IndexedSignature::Object(reader.read_u32()?),
-                                                  2 => IndexedSignature::Array(Box::new(IndexedSignature::read_from(reader)?)),
-                                                  3 => IndexedSignature::Void,
-                                                  _ => IndexedSignature::Unresolved,
-                                              }*/
-        )
+        Ok(match reader.read_u8()? {
+            0 => IndexedSignatureType::Unresolved,
+            1 => IndexedSignatureType::Primitive(match reader.read_u8()? {
+                0 => jni::signature::Primitive::Boolean,
+                1 => jni::signature::Primitive::Byte,
+                2 => jni::signature::Primitive::Char,
+                3 => jni::signature::Primitive::Double,
+                4 => jni::signature::Primitive::Float,
+                5 => jni::signature::Primitive::Int,
+                6 => jni::signature::Primitive::Long,
+                7 => jni::signature::Primitive::Short,
+                8 => jni::signature::Primitive::Void,
+                _ => unreachable!(),
+            }),
+            2 => IndexedSignatureType::Generic(reader.read_u32()?),
+            3 => IndexedSignatureType::Object(reader.read_u32()?),
+            4 => {
+                IndexedSignatureType::ObjectPlus(Box::new(IndexedSignatureType::read_from(reader)?))
+            }
+            5 => IndexedSignatureType::ObjectMinus(Box::new(IndexedSignatureType::read_from(
+                reader,
+            )?)),
+            6 => IndexedSignatureType::ObjectTypeBounds(Box::new(<_>::read_from(reader)?)),
+            7 => IndexedSignatureType::ObjectInnerClass(Box::new(<_>::read_from(reader)?)),
+            8 => IndexedSignatureType::Array(Box::new(<_>::read_from(reader)?)),
+            _ => unreachable!(),
+        })
     }
 }
 
@@ -123,10 +130,10 @@ where
     C: Context,
 {
     fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
-        //TODO: writing
-        /*match self {
-            IndexedSignature::Primitive(p) => {
-                writer.write_u8(0)?;
+        match self {
+            IndexedSignatureType::Unresolved => writer.write_u8(0)?,
+            IndexedSignatureType::Primitive(p) => {
+                writer.write_u8(1)?;
                 writer.write_u8(match p {
                     jni::signature::Primitive::Boolean => 0,
                     jni::signature::Primitive::Byte => 1,
@@ -136,20 +143,38 @@ where
                     jni::signature::Primitive::Int => 5,
                     jni::signature::Primitive::Long => 6,
                     jni::signature::Primitive::Short => 7,
-                    _ => unreachable!(),
+                    jni::signature::Primitive::Void => 8,
                 })?;
             }
-            IndexedSignature::Object(i) => {
-                writer.write_u8(1)?;
+            IndexedSignatureType::Generic(i) => {
+                writer.write_u8(2)?;
                 writer.write_u32(*i)?;
             }
-            IndexedSignature::Array(b) => {
-                writer.write_u8(2)?;
+            IndexedSignatureType::Object(i) => {
+                writer.write_u8(3)?;
+                writer.write_u32(*i)?;
+            }
+            IndexedSignatureType::ObjectPlus(i) => {
+                writer.write_u8(4)?;
+                i.write_to(writer)?;
+            }
+            IndexedSignatureType::ObjectMinus(i) => {
+                writer.write_u8(5)?;
+                i.write_to(writer)?;
+            }
+            IndexedSignatureType::ObjectTypeBounds(i) => {
+                writer.write_u8(6)?;
+                i.write_to(writer)?;
+            }
+            IndexedSignatureType::ObjectInnerClass(i) => {
+                writer.write_u8(7)?;
+                i.write_to(writer)?;
+            }
+            IndexedSignatureType::Array(b) => {
+                writer.write_u8(8)?;
                 b.write_to(writer)?;
             }
-            IndexedSignature::Void => writer.write_u8(3)?,
-            IndexedSignature::Unresolved => writer.write_u8(4)?,
-        }*/
+        }
         Ok(())
     }
 }
