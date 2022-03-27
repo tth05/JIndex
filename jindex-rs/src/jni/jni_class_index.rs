@@ -7,7 +7,7 @@ use crate::class_index::{
     create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass,
 };
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
-use crate::jni::get_class_index;
+use crate::jni::{cached_field_ids, get_class_index, get_field_with_id, init_field_ids};
 
 #[no_mangle]
 /// # Safety
@@ -30,11 +30,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
     env: JNIEnv,
     this: jobject,
     byte_array_list: jobject,
 ) {
+    init_field_ids(env);
+
     let java_list = env.get_list(byte_array_list.into()).unwrap();
     let mut class_bytes = Vec::with_capacity(java_list.size().unwrap() as usize);
     for ar in java_list.iter().unwrap() {
@@ -53,11 +55,13 @@ pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromJars(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromJars(
     env: JNIEnv,
     this: jobject,
     jar_names_list: jobject,
 ) {
+    init_field_ids(env);
+
     let java_list = env.get_list(jar_names_list.into()).unwrap();
     let mut jar_names = Vec::with_capacity(java_list.size().unwrap() as usize);
     for ar in java_list.iter().unwrap() {
@@ -89,7 +93,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile
 ) {
     let path: String = env.get_string(path).expect("Invalid path").into();
 
-    let (_, class_index) = get_class_index(env, this);
+    let (_, class_index) = get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
     save_class_index_to_file(class_index, path);
 }
@@ -102,6 +106,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
     this: jobject,
     path: JString,
 ) {
+    init_field_ids(env);
+
     let path: String = env.get_string(path).expect("Invalid path").into();
     let class_index = load_class_index_from_file(path);
 
@@ -132,7 +138,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let (class_index_pointer, class_index) =
+        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
     let classes: Vec<_> = class_index
         .find_classes(input.as_ascii_str().unwrap(), limit as usize)
@@ -181,7 +188,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let (class_index_pointer, class_index) =
+        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
     if let Some((_, class)) = class_index.find_class(
         package_name.replace(".", "/").as_ascii_str().unwrap(),

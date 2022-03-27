@@ -1,6 +1,7 @@
 use crate::class_index::{IndexedClass, IndexedField, IndexedMethod};
 use crate::jni::{
-    get_class_index, get_java_lang_object, get_pointer_field, is_basic_signature_type,
+    cached_field_ids, get_class_index, get_field_with_id, get_java_lang_object,
+    is_basic_signature_type,
 };
 use crate::signature::indexed_signature::ToSignatureIndexedType;
 use crate::signature::SignatureType;
@@ -15,8 +16,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     env.new_string(indexed_class.class_name(&class_index.constant_pool()))
         .unwrap()
@@ -30,8 +36,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     env.new_string(
         class_index
@@ -50,8 +61,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     env.new_string(indexed_class.class_name_with_package(&class_index.constant_pool()))
         .unwrap()
@@ -65,7 +81,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAcces
     env: JNIEnv,
     this: jobject,
 ) -> jshort {
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     indexed_class.access_flags() as jshort
 }
@@ -77,8 +94,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getField
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, _) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (class_index_pointer, _) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedField")
@@ -118,8 +140,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMetho
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, _) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (class_index_pointer, _) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedMethod")
@@ -159,8 +186,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
     env: JNIEnv,
     this: jobject,
 ) -> jobject {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (class_index_pointer, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -206,8 +238,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (class_index_pointer, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -251,8 +288,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_class = get_pointer_field::<IndexedClass>(env, this);
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_class_index_pointer_id,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
     let signature = indexed_class.signature();
 
     //No generic signature available

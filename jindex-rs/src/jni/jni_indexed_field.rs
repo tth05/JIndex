@@ -3,7 +3,7 @@ use jni::sys::{jobject, jshort, jstring};
 use jni::JNIEnv;
 
 use crate::class_index::{IndexedClass, IndexedField};
-use crate::jni::{get_class_index, get_field, get_pointer_field, is_basic_signature_type};
+use crate::jni::{cached_field_ids, get_class_index, get_field_with_id, is_basic_signature_type};
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
 
 #[no_mangle]
@@ -13,8 +13,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_field = get_pointer_field::<IndexedField>(env, this);
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_field_index_pointer_id,
+    );
+    let indexed_field =
+        get_field_with_id::<IndexedField>(env, this, &cached_field_ids().indexed_field_pointer_id);
 
     env.new_string(indexed_field.field_name(&class_index.constant_pool()))
         .unwrap()
@@ -28,7 +33,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAcces
     env: JNIEnv,
     this: jobject,
 ) -> jshort {
-    let indexed_field = get_pointer_field::<IndexedField>(env, this);
+    let indexed_field =
+        get_field_with_id::<IndexedField>(env, this, &cached_field_ids().indexed_field_pointer_id);
 
     indexed_field.access_flags() as jshort
 }
@@ -40,9 +46,18 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescr
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_field = get_pointer_field::<IndexedField>(env, this);
-    let indexed_class = get_field::<IndexedClass>(env, this, "classPointer");
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_field_index_pointer_id,
+    );
+    let indexed_field =
+        get_field_with_id::<IndexedField>(env, this, &cached_field_ids().indexed_field_pointer_id);
+    let indexed_class = get_field_with_id::<IndexedClass>(
+        env,
+        this,
+        &cached_field_ids().indexed_field_class_pointer_id,
+    );
     let signature = indexed_field.field_signature();
 
     let mut type_parameters = Vec::new();
@@ -66,8 +81,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getGener
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_method = get_pointer_field::<IndexedField>(env, this);
+    let (_, class_index) = get_class_index(
+        env,
+        this,
+        &cached_field_ids().indexed_field_index_pointer_id,
+    );
+    let indexed_method =
+        get_field_with_id::<IndexedField>(env, this, &cached_field_ids().indexed_field_pointer_id);
     let signature = indexed_method.field_signature();
 
     //No generic signature available
