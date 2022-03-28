@@ -4,7 +4,7 @@ use crate::jni::{get_java_lang_object, is_basic_signature_type};
 use crate::signature::indexed_signature::ToSignatureIndexedType;
 use crate::signature::SignatureType;
 use jni::objects::{JObject, JValue};
-use jni::sys::{jlong, jobject, jobjectArray, jshort, jsize, jstring};
+use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -78,11 +78,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAccessFlags(
     env: JNIEnv,
     this: jobject,
-) -> jshort {
+) -> jint {
     let indexed_class =
         get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
-    indexed_class.access_flags() as jshort
+    indexed_class.access_flags() as jint
 }
 
 #[no_mangle]

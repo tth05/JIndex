@@ -31,7 +31,7 @@ public class IndexedClass {
 
     public native IndexedMethod[] getMethods();
 
-    public native short getAccessFlags();
+    public native int getAccessFlags();
 
     @Override
     public String toString() {

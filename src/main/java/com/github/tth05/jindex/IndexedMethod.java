@@ -14,7 +14,7 @@ public class IndexedMethod {
 
     public native String getName();
 
-    public native short getAccessFlags();
+    public native int getAccessFlags();
 
     public native String getDescriptorString();
 

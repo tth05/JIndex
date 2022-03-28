@@ -7,7 +7,7 @@ use crate::class_index::{
     create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass,
 };
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
-use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id, init_field_ids};
+use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
 
 #[no_mangle]
 /// # Safety
@@ -30,6 +30,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
 }
 
 #[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
     env: JNIEnv,
     this: jobject,
@@ -55,6 +57,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 }
 
 #[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromJars(
     env: JNIEnv,
     this: jobject,

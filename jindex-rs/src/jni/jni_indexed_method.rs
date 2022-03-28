@@ -3,7 +3,7 @@ use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::is_basic_signature_type;
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
 use jni::objects::JObject;
-use jni::sys::{jobject, jshort, jstring};
+use jni::sys::{jint, jobject, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -35,14 +35,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAccessFlags(
     env: JNIEnv,
     this: jobject,
-) -> jshort {
+) -> jint {
     let indexed_method = get_field_with_id::<IndexedMethod>(
         env,
         this,
         &cached_field_ids().indexed_method_pointer_id,
     );
 
-    indexed_method.access_flags() as jshort
+    indexed_method.access_flags() as jint
 }
 
 #[no_mangle]

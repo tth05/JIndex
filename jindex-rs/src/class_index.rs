@@ -465,6 +465,7 @@ impl IndexedClass {
     pub fn set_methods(&self, methods: Vec<IndexedMethod>) -> Result<(), Vec<IndexedMethod>> {
         self.methods.set(methods)
     }
+
     pub fn access_flags(&self) -> u16 {
         self.access_flags
     }
