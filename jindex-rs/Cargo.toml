@@ -13,6 +13,10 @@ cafebabe = "0.5.0"
 speedy = "0.8.0"
 zip = { version = "0.5.13", features = ["deflate"], default-features = false}
 num_cpus = "1.13.1"
+atomic_refcell = "0.1.8"
 
 [lib]
 crate_type = ["cdylib"]
+
+[profile.release]
+debug = true

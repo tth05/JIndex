@@ -5,12 +5,12 @@ use crate::signature::{
     RawMethodSignature, RawSignatureType, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
+use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use cafebabe::attributes::{AttributeData, AttributeInfo};
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
 use speedy::{Readable, Writable};
-use std::cell::{Ref, RefCell, RefMut};
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
@@ -24,7 +24,7 @@ use std::time::Instant;
 use zip::ZipArchive;
 
 pub struct ClassIndex {
-    constant_pool: RefCell<ClassIndexConstantPool>,
+    constant_pool: AtomicRefCell<ClassIndexConstantPool>,
     class_prefix_range_map: HashMap<u8, Range<u32>>,
     classes: Vec<IndexedClass>,
 }
@@ -81,7 +81,7 @@ impl ClassIndex {
         }
 
         Self {
-            constant_pool: RefCell::new(constant_pool),
+            constant_pool: AtomicRefCell::new(constant_pool),
             classes,
             class_prefix_range_map: range_map,
         }
@@ -191,11 +191,11 @@ impl ClassIndex {
         &self.classes
     }
 
-    pub fn constant_pool(&self) -> Ref<ClassIndexConstantPool> {
+    pub fn constant_pool(&self) -> AtomicRef<ClassIndexConstantPool> {
         self.constant_pool.borrow()
     }
 
-    pub fn constant_pool_mut(&self) -> RefMut<ClassIndexConstantPool> {
+    pub fn constant_pool_mut(&self) -> AtomicRefMut<ClassIndexConstantPool> {
         self.constant_pool.borrow_mut()
     }
 
