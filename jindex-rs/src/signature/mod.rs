@@ -174,6 +174,8 @@ mod tests {
         let data = vec![
             //Normal type bounds
             "Ljava/lang/Object<+TC;Ltest;>;",
+            //Double object bound
+            "Lnet/minecraft/util/registry/RegistryNamespaced<Lnet/minecraft/util/ResourceLocation;Lnet/minecraft/item/Item;>;",
             //Wildcard
             "Ljava/lang/Object<*Lother/type;**>;",
             //Inner classes

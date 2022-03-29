@@ -792,9 +792,12 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                             return None;
                         }
 
+                        let signature =
+                            get_signature_attribute_or_default(&m.attributes, &m.descriptor);
+
                         Some(FieldInfo {
                             field_name: name.unwrap(),
-                            descriptor: SignatureType::from_str(&m.descriptor)
+                            descriptor: SignatureType::from_str(signature)
                                 .expect("Invalid field signature"),
                             access_flags: m.access_flags,
                         })
@@ -810,17 +813,12 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                         }
 
                         let signature =
-                            get_signature_attribute(&m.attributes).map_or(&m.descriptor, |i| {
-                                if let AttributeData::Signature(ref s) = i.data {
-                                    return s;
-                                }
-                                unreachable!();
-                            });
+                            get_signature_attribute_or_default(&m.attributes, &m.descriptor);
 
                         Some(MethodInfo {
                             method_name: name.unwrap(),
                             signature: RawMethodSignature::from_str(signature)
-                                .expect("Invalid method descriptor"),
+                                .expect("Invalid method signature"),
                             access_flags: m.access_flags,
                         })
                     })
@@ -838,6 +836,18 @@ fn get_signature_attribute<'a>(
     attributes
         .iter()
         .find(|a| matches!(a.data, AttributeData::Signature(_)))
+}
+
+fn get_signature_attribute_or_default<'a>(
+    attributes: &'a [AttributeInfo<'a>],
+    default: &'a str,
+) -> &'a str {
+    get_signature_attribute(attributes).map_or(default, |a| {
+        if let AttributeData::Signature(ref s) = a.data {
+            return s;
+        }
+        unreachable!();
+    })
 }
 
 pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {

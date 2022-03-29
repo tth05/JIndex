@@ -18,8 +18,9 @@ unsafe fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass
 }
 
 fn is_basic_signature_type(s: &IndexedSignatureType) -> bool {
-    matches!(
-        s,
-        SignatureType::Unresolved | SignatureType::Primitive(_) | SignatureType::Object(_)
-    )
+    match s {
+        SignatureType::Array(inner) => is_basic_signature_type(inner),
+        SignatureType::Unresolved | SignatureType::Primitive(_) | SignatureType::Object(_) => true,
+        _ => false,
+    }
 }
