@@ -11,6 +11,8 @@ use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
 use speedy::{Readable, Writable};
+use std::borrow::Borrow;
+use std::cell::Ref;
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
@@ -30,10 +32,7 @@ pub struct ClassIndex {
 }
 
 impl ClassIndex {
-    pub fn new(mut constant_pool: ClassIndexConstantPool, mut classes: Vec<IndexedClass>) -> Self {
-        //Free up some memory, packages only need one way references
-        constant_pool.clear_sub_packages();
-
+    pub fn new(constant_pool: ClassIndexConstantPool, mut classes: Vec<IndexedClass>) -> Self {
         //Construct prefix range map
         let mut prefix_count_map: HashMap<u8, u32> = HashMap::new();
 
@@ -87,11 +86,7 @@ impl ClassIndex {
         }
     }
 
-    pub fn find_classes(
-        &self,
-        name: &AsciiStr,
-        limit: usize,
-    ) -> anyhow::Result<Vec<(u32, &IndexedClass)>> {
+    pub fn find_classes(&self, name: &AsciiStr, limit: usize) -> Vec<(u32, &IndexedClass)> {
         let lower_case_iter =
             self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte());
         let upper_case_iter =
@@ -138,9 +133,14 @@ impl ClassIndex {
             .take(limit.saturating_sub(res.len()))
             .for_each(|el| res.push(el));
 
-        Ok(res)
+        res
     }
 
+    ///TODO: 1. Abstract the prefix_range_map into its own type
+    /// 2. Use that type to fast access all root packages
+    /// 3. Utilize find_package (which uses that new type) and then a binary search on the found package class_indices to make this whole find_class even faster
+    /// For example, when searching for 'java/lang/S', we perform a binary search on a slice with 12k elements.
+    /// Instead we could find java/lang extremely fast and then binary search ~200 classes.
     pub fn find_class(
         &self,
         package_name: &AsciiStr,
@@ -164,8 +164,50 @@ impl ClassIndex {
         None
     }
 
-    pub fn class_at_index(&self, index: u32) -> &IndexedClass {
-        self.classes().get(index as usize).unwrap()
+    pub fn find_package(&self, name: &AsciiStr) -> Option<AtomicRef<IndexedPackage>> {
+        let pool = self.constant_pool();
+        for sub_index in pool.package_at(0).sub_packages_indices() {
+            let result = self.find_package_starting_at(name, *sub_index);
+            if result.is_some() {
+                return result.map(|t| t.1);
+            }
+        }
+
+        None
+    }
+
+    fn find_package_starting_at(
+        &self,
+        name: &AsciiStr,
+        start_package_index: u32,
+    ) -> Option<(u32, AtomicRef<IndexedPackage>)> {
+        let package = AtomicRef::map(self.constant_pool(), |pool| {
+            pool.package_at(start_package_index)
+        });
+        let split_index = name
+            .chars()
+            .position(|ch| ch == AsciiChar::Slash)
+            .unwrap_or(name.len());
+        let part = &name[0..split_index];
+
+        if package.package_name(&self.constant_pool()) != part {
+            return None;
+        }
+
+        if split_index >= name.len() {
+            //We've found it!
+            Some((start_package_index, package))
+        } else {
+            let remaining_name = &name[split_index + 1..];
+            for sub_index in package.sub_packages_indices() {
+                let result = self.find_package_starting_at(remaining_name, *sub_index);
+                if result.is_some() {
+                    return result;
+                }
+            }
+
+            None
+        }
     }
 
     pub fn find_methods(
@@ -185,6 +227,10 @@ impl ClassIndex {
             .take(limit)
             .collect();
         Ok(res)
+    }
+
+    pub fn class_at_index(&self, index: u32) -> &IndexedClass {
+        self.classes().get(index as usize).unwrap()
     }
 
     pub fn classes(&self) -> &Vec<IndexedClass> {
@@ -241,10 +287,7 @@ impl ClassIndexBuilder {
             HashMap::with_capacity(vec.len() + self.expected_method_count as usize);
 
         for class_info in vec.iter() {
-            let package_index = constant_pool
-                .get_or_add_package(&class_info.package_name)
-                .unwrap()
-                .index();
+            let package_index = constant_pool.get_or_add_package_index(&class_info.package_name);
             let class_name_index = ClassIndexBuilder::get_index_from_pool(
                 &class_info.class_name,
                 &mut constant_pool_map,
@@ -266,11 +309,16 @@ impl ClassIndexBuilder {
         let mut time = 0u128;
         for class_info in vec.iter() {
             let t = Instant::now();
-            let indexed_class = class_index
+            let (indexed_class_index, indexed_class) = class_index
                 .find_class(&class_info.package_name, &class_info.class_name)
-                .unwrap()
-                .1;
+                .unwrap();
             time += t.elapsed().as_nanos();
+
+            //Add class to its package
+            class_index
+                .constant_pool_mut()
+                .package_at_mut(indexed_class.package_index)
+                .add_class(indexed_class_index);
 
             //Signature
             indexed_class.set_signature(
@@ -539,25 +587,24 @@ impl IndexedMethod {
 
 #[derive(Readable, Writable)]
 pub struct IndexedPackage {
-    index: u32,
     package_name_index: u32,
-    sub_packages_indexes: Vec<u32>,
+    sub_packages_indices: Vec<u32>,
+    sub_classes_indices: Vec<u32>,
     previous_package_index: u32,
 }
 
 impl IndexedPackage {
-    pub fn new(index: u32, package_name_index: u32, previous_package_index: u32) -> Self {
+    pub fn new(package_name_index: u32, previous_package_index: u32) -> Self {
         Self {
-            index,
             package_name_index,
-            sub_packages_indexes: Vec::new(),
+            sub_packages_indices: Vec::new(),
+            sub_classes_indices: Vec::new(),
             previous_package_index,
         }
     }
 
-    pub fn clear_sub_packages(&mut self) {
-        self.sub_packages_indexes.clear();
-        self.sub_packages_indexes.truncate(0);
+    pub fn add_class(&mut self, class_index: u32) {
+        self.sub_classes_indices.push(class_index);
     }
 
     pub fn package_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
@@ -639,15 +686,15 @@ impl IndexedPackage {
     }
 
     pub fn add_sub_package(&mut self, index: u32) {
-        self.sub_packages_indexes.push(index);
+        self.sub_packages_indices.push(index);
     }
 
-    pub fn sub_packages_indexes(&self) -> &[u32] {
-        &self.sub_packages_indexes[..]
+    pub fn sub_packages_indices(&self) -> &[u32] {
+        &self.sub_packages_indices[..]
     }
 
-    pub fn index(&self) -> u32 {
-        self.index
+    pub fn sub_classes_indices(&self) -> &[u32] {
+        &self.sub_classes_indices[..]
     }
 }
 

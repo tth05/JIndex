@@ -145,9 +145,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     let (class_index_pointer, class_index) =
         get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
-    let classes: Vec<_> = class_index
-        .find_classes(input.as_ascii_str().unwrap(), limit as usize)
-        .expect("Find classes failed");
+    let classes: Vec<_> = class_index.find_classes(input.as_ascii_str().unwrap(), limit as usize);
 
     let result_array = env
         .new_object_array(classes.len() as i32, result_class, JObject::null())
