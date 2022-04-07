@@ -9,6 +9,8 @@ pub struct FieldIDs {
     pub class_index_pointer_id: JFieldID<'static>,
     pub indexed_class_pointer_id: JFieldID<'static>,
     pub indexed_class_index_pointer_id: JFieldID<'static>,
+    pub indexed_package_pointer_id: JFieldID<'static>,
+    pub indexed_package_index_pointer_id: JFieldID<'static>,
     pub indexed_method_pointer_id: JFieldID<'static>,
     pub indexed_method_class_pointer_id: JFieldID<'static>,
     pub indexed_method_index_pointer_id: JFieldID<'static>,
@@ -19,6 +21,7 @@ pub struct FieldIDs {
 unsafe impl Send for FieldIDs {}
 unsafe impl Sync for FieldIDs {}
 
+//TODO: Cache constructors
 static CACHED_FIELD_IDS: SyncOnceCell<FieldIDs> = SyncOnceCell::new();
 
 pub fn cached_field_ids() -> &'static FieldIDs {
@@ -49,6 +52,12 @@ pub unsafe fn init_field_ids(env: JNIEnv) {
             env,
             "classIndexPointer",
             "IndexedClass",
+        ),
+        indexed_package_pointer_id: transmute_field_id(env, "pointer", "IndexedPackage"),
+        indexed_package_index_pointer_id: transmute_field_id(
+            env,
+            "classIndexPointer",
+            "IndexedPackage",
         ),
         indexed_method_pointer_id: transmute_field_id(env, "pointer", "IndexedMethod"),
         indexed_method_class_pointer_id: transmute_field_id(env, "classPointer", "IndexedMethod"),

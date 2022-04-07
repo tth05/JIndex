@@ -7,6 +7,7 @@ use std::cmp::min;
 #[derive(Readable, Writable)]
 pub struct ClassIndexConstantPool {
     string_data: Vec<u8>, //Holds Ascii Strings prefixed with their length
+    //TODO: Remove packages from constant pool, don't know why they're here anyway
     indexed_packages: Vec<IndexedPackage>,
 }
 

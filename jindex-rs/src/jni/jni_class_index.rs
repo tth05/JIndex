@@ -2,9 +2,10 @@ use ascii::AsAsciiStr;
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
+use std::ops::Deref;
 
 use crate::class_index::{
-    create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass,
+    create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass, IndexedPackage,
 };
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
@@ -194,7 +195,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
         get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
     if let Some((_, class)) = class_index.find_class(
-        package_name.replace(".", "/").as_ascii_str().unwrap(),
+        package_name.replace('.', "/").as_ascii_str().unwrap(),
         class_name.as_ascii_str().unwrap(),
     ) {
         env.new_object(
@@ -203,6 +204,44 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
             &[
                 JValue::from(class_index_pointer as jlong),
                 JValue::from((class as *const IndexedClass) as jlong),
+            ],
+        )
+        .expect("Failed to create result object")
+        .into_inner()
+    } else {
+        JObject::null().into_inner()
+    }
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackage(
+    env: JNIEnv,
+    this: jobject,
+    i_package_name: JString,
+) -> jobject {
+    let package_name: String = env
+        .get_string(i_package_name)
+        .expect("Couldn't get java string!")
+        .into();
+
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedPackage")
+        .expect("Result class not found");
+
+    let (class_index_pointer, class_index) =
+        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+
+    if let Some(package) =
+        class_index.find_package(package_name.replace('.', "/").as_ascii_str().unwrap())
+    {
+        env.new_object(
+            result_class,
+            "(JJ)V",
+            &[
+                JValue::from(class_index_pointer as jlong),
+                JValue::from((package.deref() as *const IndexedPackage) as jlong),
             ],
         )
         .expect("Failed to create result object")

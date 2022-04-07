@@ -1,4 +1,4 @@
-use crate::class_index::{IndexedClass, IndexedField, IndexedMethod};
+use crate::class_index::{IndexedClass, IndexedField, IndexedMethod, IndexedPackage};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::{get_java_lang_object, is_basic_signature_type};
 use crate::signature::indexed_signature::ToSignatureIndexedType;
@@ -33,8 +33,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPackage(
     env: JNIEnv,
     this: jobject,
-) -> jstring {
-    let (_, class_index) = get_class_index(
+) -> jobject {
+    let (class_index_pointer, class_index) = get_class_index(
         env,
         this,
         &cached_field_ids().indexed_class_index_pointer_id,
@@ -42,13 +42,19 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
     let indexed_class =
         get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().indexed_class_pointer_id);
 
-    env.new_string(
-        class_index
-            .constant_pool()
-            .package_at(indexed_class.package_index())
-            .package_name_with_parents(&class_index.constant_pool()),
+    let constant_pool = class_index.constant_pool();
+    let indexed_package = constant_pool.package_at(indexed_class.package_index());
+
+    env.new_object(
+        env.find_class("com/github/tth05/jindex/IndexedPackage")
+            .expect("Unable to find class"),
+        "(JJ)V",
+        &[
+            JValue::from(class_index_pointer as jlong),
+            JValue::from((indexed_package as *const IndexedPackage) as jlong),
+        ],
     )
-    .unwrap()
+    .expect("Unable to create object")
     .into_inner()
 }
 

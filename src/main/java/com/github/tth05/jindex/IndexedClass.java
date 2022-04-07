@@ -14,13 +14,12 @@ public class IndexedClass {
 
     public native String getName();
 
-    public native String getPackage();
+    public native IndexedPackage getPackage();
 
     public native String getNameWithPackage();
     public native String getNameWithPackageDot();
 
     public native String getGenericSignatureString();
-
     public native IndexedClass getSuperClass();
     public native IndexedClass[] getInterfaces();
 
