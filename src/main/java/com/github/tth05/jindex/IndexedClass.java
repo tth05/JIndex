@@ -17,15 +17,12 @@ public class IndexedClass {
     public native String getPackage();
 
     public native String getNameWithPackage();
+    public native String getNameWithPackageDot();
 
-    public String getNameWithPackageDot() {
-        return getNameWithPackage().replace('/', '.');
-    }
+    public native String getGenericSignatureString();
 
     public native IndexedClass getSuperClass();
     public native IndexedClass[] getInterfaces();
-
-    public native String getGenericSignatureString();
 
     public native IndexedField[] getFields();
 
