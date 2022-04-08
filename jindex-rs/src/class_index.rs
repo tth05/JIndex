@@ -87,6 +87,10 @@ impl ClassIndex {
     }
 
     pub fn find_classes(&self, name: &AsciiStr, limit: usize) -> Vec<(u32, &IndexedClass)> {
+        if name.is_empty() {
+            return Vec::default();
+        }
+
         let lower_case_iter =
             self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte());
         let upper_case_iter =
@@ -146,6 +150,10 @@ impl ClassIndex {
         package_name: &AsciiStr,
         class_name: &AsciiStr,
     ) -> Option<(u32, &IndexedClass)> {
+        if class_name.is_empty() {
+            return Option::None;
+        }
+
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
         let index = class_iter.1.binary_search_by(|a| {
@@ -165,6 +173,10 @@ impl ClassIndex {
     }
 
     pub fn find_package(&self, name: &AsciiStr) -> Option<AtomicRef<IndexedPackage>> {
+        if name.is_empty() {
+            return Option::None;
+        }
+
         let pool = self.constant_pool();
         for sub_index in pool.package_at(0).sub_packages_indices() {
             let result = self.find_package_starting_at(name, *sub_index);

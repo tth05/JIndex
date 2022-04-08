@@ -1,4 +1,4 @@
-use ascii::AsAsciiStr;
+use ascii::{AsAsciiStr, IntoAsciiString};
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::JNIEnv;
@@ -125,6 +125,27 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
     .expect("Unable to set field");
 }
 
+macro_rules! java_to_ascii_string {
+    ($env:expr, $jstring:ident) => {
+        java_to_ascii_string!($env, $jstring, |s| s)
+    };
+    ($env:expr, $jstring:ident, $mapper:expr) => {{
+        let env_str: String = $mapper($env.get_string($jstring).expect("Not a string").into());
+
+        match env_str.into_ascii_string() {
+            Ok(s) => s,
+            Err(e) => {
+                $env.throw_new(
+                    "java/lang/IllegalArgumentException",
+                    format!("'{}' is not an ASCII string", e.into_source()),
+                )
+                .expect("Unable to throw exception");
+                return JObject::null().into_inner();
+            }
+        }
+    }};
+}
+
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
@@ -134,10 +155,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     input: JString,
     limit: jint,
 ) -> jobjectArray {
-    let input: String = env
-        .get_string(input)
-        .expect("Couldn't get java string!")
-        .into();
+    let input = java_to_ascii_string!(&env, input);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -146,7 +164,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     let (class_index_pointer, class_index) =
         get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
-    let classes: Vec<_> = class_index.find_classes(input.as_ascii_str().unwrap(), limit as usize);
+    let classes: Vec<_> = class_index.find_classes(&input, limit as usize);
 
     let result_array = env
         .new_object_array(classes.len() as i32, result_class, JObject::null())
@@ -178,14 +196,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
     i_package_name: JString,
     i_class_name: JString,
 ) -> jobject {
-    let class_name: String = env
-        .get_string(i_class_name)
-        .expect("Couldn't get java string!")
-        .into();
-    let package_name: String = env
-        .get_string(i_package_name)
-        .expect("Couldn't get java string!")
-        .into();
+    let class_name = java_to_ascii_string!(&env, i_class_name);
+    let package_name = java_to_ascii_string!(&env, i_package_name, |s: String| s.replace('.', "/"));
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -194,10 +206,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
     let (class_index_pointer, class_index) =
         get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
-    if let Some((_, class)) = class_index.find_class(
-        package_name.replace('.', "/").as_ascii_str().unwrap(),
-        class_name.as_ascii_str().unwrap(),
-    ) {
+    if let Some((_, class)) = class_index.find_class(&package_name, &class_name) {
         env.new_object(
             result_class,
             "(JJ)V",
@@ -221,10 +230,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
     this: jobject,
     i_package_name: JString,
 ) -> jobject {
-    let package_name: String = env
-        .get_string(i_package_name)
-        .expect("Couldn't get java string!")
-        .into();
+    let package_name = java_to_ascii_string!(&env, i_package_name, |s: String| s.replace('.', "/"));
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedPackage")
@@ -233,9 +239,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
     let (class_index_pointer, class_index) =
         get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
-    if let Some(package) =
-        class_index.find_package(package_name.replace('.', "/").as_ascii_str().unwrap())
-    {
+    if let Some(package) = class_index.find_package(&package_name) {
         env.new_object(
             result_class,
             "(JJ)V",
