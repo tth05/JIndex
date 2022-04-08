@@ -153,7 +153,7 @@ impl ConstantPoolStringView {
             return false;
         }
 
-        for i in 0..min(self.len(), other.len() as u8) {
+        for i in 0..other.len() as u8 {
             let current_byte = self.byte_at(constant_pool, i);
             let current_char = other[i as usize];
             if current_byte != current_char

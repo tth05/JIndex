@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::lazy::OnceCell;
-use std::ops::{Div, Range};
+use std::ops::{Deref, Div, Range};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -170,6 +170,41 @@ impl ClassIndex {
         }
 
         None
+    }
+
+    pub fn find_packages(&self, name: &AsciiStr) -> Vec<AtomicRef<IndexedPackage>> {
+        if name.is_empty() {
+            return Vec::default();
+        }
+
+        let pool = self.constant_pool();
+        let split_index = rsplit_once(name, AsciiChar::Slash);
+
+        let base_package = if split_index.0.is_empty() {
+            // :/
+            Some(AtomicRef::map(self.constant_pool(), |p| p.package_at(0)))
+        } else {
+            self.find_package(split_index.0)
+        };
+
+        match base_package {
+            Some(p) => {
+                let mut results = Vec::new();
+                for sub_index in p.sub_packages_indices() {
+                    let sub_package =
+                        AtomicRef::map(self.constant_pool(), |p| p.package_at(*sub_index));
+                    if pool
+                        .string_view_at(sub_package.package_name_index)
+                        .starts_with(&pool, split_index.1, true)
+                    {
+                        results.push(sub_package);
+                    }
+                }
+
+                results
+            }
+            None => Vec::default(),
+        }
     }
 
     pub fn find_package(&self, name: &AsciiStr) -> Option<AtomicRef<IndexedPackage>> {
