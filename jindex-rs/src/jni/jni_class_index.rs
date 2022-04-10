@@ -1,14 +1,16 @@
-use ascii::{AsAsciiStr, IntoAsciiString};
+use ascii::IntoAsciiString;
 use jni::objects::{JObject, JString, JValue};
-use jni::sys::{jint, jlong, jobject, jobjectArray};
+use jni::sys::{jlong, jobject, jobjectArray};
 use jni::JNIEnv;
 use std::ops::Deref;
 
 use crate::class_index::{
     create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass, IndexedPackage,
 };
+use crate::constant_pool::{MatchMode, SearchMode, SearchOptions};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
+use crate::jni::get_enum_ordinal;
 
 #[no_mangle]
 /// # Safety
@@ -153,7 +155,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     env: JNIEnv,
     this: jobject,
     input: JString,
-    limit: jint,
+    options: jobject,
 ) -> jobjectArray {
     let input = java_to_ascii_string!(&env, input);
 
@@ -164,7 +166,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     let (class_index_pointer, class_index) =
         get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
 
-    let classes: Vec<_> = class_index.find_classes(&input, limit as usize);
+    let classes: Vec<_> = class_index.find_classes(&input, convert_search_options(env, options));
 
     let result_array = env
         .new_object_array(classes.len() as i32, result_class, JObject::null())
@@ -185,6 +187,59 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     }
 
     result_array
+}
+
+unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> SearchOptions {
+    if options.is_null() {
+        return SearchOptions::default();
+    }
+
+    let match_mode = match get_enum_ordinal(
+        env,
+        env.get_field(
+            options,
+            "matchMode",
+            "Lcom/github/tth05/jindex/SearchOptions$MatchMode;",
+        )
+        .expect("Field not found")
+        .l()
+        .unwrap()
+        .into_inner(),
+    ) {
+        0 => MatchMode::IgnoreCase,
+        1 => MatchMode::MatchCase,
+        2 => MatchMode::MatchCaseFirstCharOnly,
+        _ => panic!("Invalid enum ordinal for match mode"),
+    };
+
+    let search_mode = match get_enum_ordinal(
+        env,
+        env.get_field(
+            options,
+            "searchMode",
+            "Lcom/github/tth05/jindex/SearchOptions$SearchMode;",
+        )
+        .expect("Field not found")
+        .l()
+        .unwrap()
+        .into_inner(),
+    ) {
+        0 => SearchMode::Prefix,
+        1 => SearchMode::Contains,
+        _ => panic!("Invalid enum ordinal for match mode"),
+    };
+
+    let limit = env
+        .get_field(options, "limit", "I")
+        .expect("Field not found")
+        .i()
+        .unwrap();
+
+    SearchOptions {
+        limit: limit as usize,
+        match_mode,
+        search_mode,
+    }
 }
 
 #[no_mangle]

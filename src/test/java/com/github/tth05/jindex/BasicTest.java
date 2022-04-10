@@ -31,7 +31,7 @@ public class BasicTest {
 
     @Test
     public void testFindClasses() {
-        IndexedClass[] results = index.findClasses("String", 500);
+        IndexedClass[] results = index.findClasses("String", SearchOptions.defaultOptions());
 
         assertEquals(62, results.length);
 

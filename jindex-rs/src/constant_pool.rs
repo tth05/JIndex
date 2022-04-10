@@ -2,7 +2,6 @@ use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
 use ascii::{AsciiChar, AsciiStr};
 use speedy::{Readable, Writable};
-use std::cmp::min;
 
 #[derive(Readable, Writable)]
 pub struct ClassIndexConstantPool {
@@ -147,15 +146,48 @@ impl ConstantPoolStringView {
         &self,
         constant_pool: &ClassIndexConstantPool,
         other: &AsciiStr,
-        ignore_case: bool,
+        match_mode: MatchMode,
     ) -> bool {
-        if other.len() > self.len() as usize {
+        self.starts_with_at(constant_pool, other, 0, match_mode)
+    }
+
+    pub fn starts_with_at(
+        &self,
+        constant_pool: &ClassIndexConstantPool,
+        other: &AsciiStr,
+        start_index: u8,
+        match_mode: MatchMode,
+    ) -> bool {
+        //Checks if the operation is possible
+        if (start_index as usize + other.len()) > self.len() as usize {
             return false;
         }
+        //Every string starts with empty string
+        if other.is_empty() {
+            return true;
+        }
 
-        for i in 0..other.len() as u8 {
+        let mut start = start_index;
+        let offset = start;
+        let end = start_index + other.len() as u8;
+        let ignore_case = match match_mode {
+            MatchMode::MatchCaseFirstCharOnly => {
+                //If the first char is not the same, then it is not the same
+                if self.byte_at(constant_pool, start_index) != other[0] {
+                    return false;
+                }
+
+                //We don't want to check the first char again
+                start += 1;
+                true
+            }
+            MatchMode::MatchCase => false,
+            MatchMode::IgnoreCase => true,
+        };
+
+        for i in start..end {
             let current_byte = self.byte_at(constant_pool, i);
-            let current_char = other[i as usize];
+            let current_char = other[(i - offset) as usize];
             if current_byte != current_char
                 && (!ignore_case || current_byte != switch_ascii_char_case(current_char))
             {
@@ -166,8 +198,71 @@ impl ConstantPoolStringView {
         true
     }
 
+    /// Searches for the given `query` using the given `options` and returns the matched position of
+    /// there is one.
+    pub fn search(
+        &self,
+        constant_pool: &ClassIndexConstantPool,
+        query: &AsciiStr,
+        options: SearchOptions,
+    ) -> Option<usize> {
+        match options.search_mode {
+            SearchMode::Prefix => {
+                if self.starts_with(constant_pool, query, options.match_mode) {
+                    Some(0)
+                } else {
+                    None
+                }
+            }
+            SearchMode::Contains => {
+                //We need to do this check because we cast the query length to a u8
+                if query.len() > self.len() as usize {
+                    return None;
+                }
+
+                for i in 0..=(self.len() - query.len() as u8) {
+                    if self.starts_with_at(constant_pool, query, i, options.match_mode) {
+                        return Some(i as usize);
+                    }
+                }
+
+                None
+            }
+        }
+    }
+
     pub fn len(&self) -> u8 {
         self.end - self.start
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum SearchMode {
+    Prefix,
+    Contains,
+}
+
+#[derive(Clone, Copy)]
+pub enum MatchMode {
+    IgnoreCase,
+    MatchCase,
+    MatchCaseFirstCharOnly,
+}
+
+#[derive(Clone, Copy)]
+pub struct SearchOptions {
+    pub limit: usize,
+    pub search_mode: SearchMode,
+    pub match_mode: MatchMode,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        SearchOptions {
+            limit: usize::MAX,
+            search_mode: SearchMode::Prefix,
+            match_mode: MatchMode::IgnoreCase,
+        }
     }
 }
 

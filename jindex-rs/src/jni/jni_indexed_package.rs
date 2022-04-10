@@ -1,6 +1,5 @@
 use crate::class_index::{IndexedClass, IndexedPackage};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
-use ascii::AsciiString;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jlong, jobject, jobjectArray, jstring};
 use jni::JNIEnv;

@@ -1,4 +1,4 @@
-use crate::constant_pool::ClassIndexConstantPool;
+use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
 use crate::signature::indexed_signature::ToIndexedType;
 use crate::signature::{
     IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType, RawClassSignature,
@@ -11,14 +11,12 @@ use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
 use speedy::{Readable, Writable};
-use std::borrow::Borrow;
-use std::cell::Ref;
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::lazy::OnceCell;
-use std::ops::{Deref, Div, Range};
+use std::ops::{Div, Range};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -86,58 +84,57 @@ impl ClassIndex {
         }
     }
 
-    pub fn find_classes(&self, name: &AsciiStr, limit: usize) -> Vec<(u32, &IndexedClass)> {
+    pub fn find_classes(
+        &self,
+        name: &AsciiStr,
+        options: SearchOptions,
+    ) -> Vec<(u32, &IndexedClass)> {
         if name.is_empty() {
             return Vec::default();
         }
 
-        let lower_case_iter =
-            self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte());
-        let upper_case_iter =
-            self.class_iter_for_char(name.get_ascii(0).unwrap().to_ascii_uppercase().as_byte());
-
-        let mut index = 0;
-        let mut res: Vec<(u32, &IndexedClass)> = lower_case_iter
-            .1
-            .iter()
-            .filter_map(|class| {
-                let mut result = None;
-                if self
-                    .constant_pool()
-                    .string_view_at(class.name_index)
-                    .starts_with(&self.constant_pool(), name, true)
-                {
-                    result = Some((lower_case_iter.0.start + index, class))
+        let mut iters = Vec::with_capacity(2);
+        match options.search_mode {
+            SearchMode::Prefix => match options.match_mode {
+                MatchMode::IgnoreCase => {
+                    iters.push(self.class_iter_for_char(
+                        name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte(),
+                    ));
+                    iters.push(self.class_iter_for_char(
+                        name.get_ascii(0).unwrap().to_ascii_uppercase().as_byte(),
+                    ));
                 }
-
-                index += 1;
-                result
-            })
-            .take(limit)
-            .collect();
-
-        index = 0;
-        //TODO: Duplicated code
-        upper_case_iter
-            .1
-            .iter()
-            .filter_map(|class| {
-                let mut result = None;
-                if self
-                    .constant_pool()
-                    .string_view_at(class.name_index)
-                    .starts_with(&self.constant_pool(), name, true)
-                {
-                    result = Some((upper_case_iter.0.start + index, class))
+                MatchMode::MatchCase | MatchMode::MatchCaseFirstCharOnly => {
+                    iters.push(self.class_iter_for_char(name.get_ascii(0).unwrap().as_byte()));
                 }
+            },
+            SearchMode::Contains => {
+                //We have to search all classes in contains mode
+                iters.push((0..self.classes.len() as u32, &self.classes[..]));
+            }
+        }
 
-                index += 1;
-                result
-            })
-            .take(limit.saturating_sub(res.len()))
-            .for_each(|el| res.push(el));
+        let mut result: Vec<(usize, (u32, &IndexedClass))> = Vec::new();
 
-        res
+        for x in iters {
+            let mut index = 0;
+            x.1.iter()
+                .filter_map(|class| {
+                    let result = self
+                        .constant_pool()
+                        .string_view_at(class.name_index)
+                        .search(&self.constant_pool(), name, options)
+                        .map(|r| (r, (x.0.start + index, class)));
+
+                    index += 1;
+                    result
+                })
+                .take(options.limit.saturating_sub(result.len()))
+                .for_each(|el| result.push(el))
+        }
+
+        result.sort_by_key(|el| el.0);
+        result.into_iter().map(|el| el.1).collect()
     }
 
     ///TODO: 1. Abstract the prefix_range_map into its own type
@@ -195,7 +192,7 @@ impl ClassIndex {
                         AtomicRef::map(self.constant_pool(), |p| p.package_at(*sub_index));
                     if pool
                         .string_view_at(sub_package.package_name_index)
-                        .starts_with(&pool, split_index.1, true)
+                        .starts_with(&pool, split_index.1, MatchMode::IgnoreCase)
                     {
                         results.push(sub_package);
                     }
@@ -269,7 +266,7 @@ impl ClassIndex {
             .filter(|method| {
                 self.constant_pool()
                     .string_view_at(method.name_index)
-                    .starts_with(&self.constant_pool(), name, false)
+                    .starts_with(&self.constant_pool(), name, MatchMode::MatchCase)
             })
             .take(limit)
             .collect();

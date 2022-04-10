@@ -1,6 +1,8 @@
 use crate::class_index::{ClassIndex, IndexedClass};
 use crate::signature::{IndexedSignatureType, SignatureType};
 use ascii::AsAsciiStr;
+use jni::sys::jobject;
+use jni::JNIEnv;
 
 mod cache;
 pub mod jni_class_index;
@@ -16,6 +18,13 @@ unsafe fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass
             "Object".as_ascii_str_unchecked(),
         )
         .map(|p| p.1)
+}
+
+unsafe fn get_enum_ordinal(env: JNIEnv, enum_object: jobject) -> u32 {
+    env.call_method(enum_object, "ordinal", "()I", &[])
+        .expect("Failed to call ordinal")
+        .i()
+        .unwrap() as u32
 }
 
 fn is_basic_signature_type(s: &IndexedSignatureType) -> bool {
