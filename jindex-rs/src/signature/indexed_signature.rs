@@ -164,12 +164,13 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                         .fold(String::new(), |a, b| {
                             let separator = if a.is_empty() { "" } else { "." };
 
+                            //Removes the 'L' and ';'
                             let b = &b[1..b.len() - 1];
                             let class_name_start_index = (match b.find(|c| c == '<') {
-                                Some(end) => &b[..end],
+                                Some(end) => &b[..end], //Removes the type parameters
                                 None => b,
                             })
-                            .rfind(|c| c == '/')
+                            .rfind(|c| c == '$' || c == '/') //Remove the package name and parent class name
                             .map_or(0, |u| u + 1);
 
                             a + (separator) + &b[class_name_start_index..]
