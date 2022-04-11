@@ -1,3 +1,4 @@
+use ascii::AsciiChar::q;
 use ascii::IntoAsciiString;
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jlong, jobject, jobjectArray};
@@ -308,4 +309,50 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
     } else {
         JObject::null().into_inner()
     }
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackages(
+    env: JNIEnv,
+    this: jobject,
+    query: JString,
+) -> jobject {
+    let query = java_to_ascii_string!(&env, query, |s: String| s.replace('.', "/"));
+
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedPackage")
+        .expect("Result class not found");
+
+    let (class_index_pointer, class_index) =
+        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+
+    let matching_packages = class_index.find_packages(&query);
+    let result_array = env
+        .new_object_array(
+            matching_packages.len() as i32,
+            result_class,
+            JObject::null(),
+        )
+        .expect("Failed to create result array");
+
+    for (index, package) in matching_packages.iter().enumerate() {
+        let obj = env
+            .new_object(
+                result_class,
+                "(JJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from((package.deref() as *const IndexedPackage) as jlong),
+                ],
+            )
+            .expect("Failed to create result object")
+            .into_inner();
+
+        env.set_object_array_element(result_array, index as i32, obj)
+            .expect("Failed to set result array element");
+    }
+
+    result_array
 }

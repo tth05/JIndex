@@ -11,7 +11,7 @@ public class ClassIndex {
     static {
         try {
             boolean isDev = false;
-            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("jindex_lib_0.0.18.dll");
+            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("jindex_lib_0.0.19.dll");
             if (isDev || !Files.exists(tempFilePath)) {
                 Files.copy(ClassIndex.class.getResourceAsStream("/jindex_rs.dll"), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
             }
@@ -25,10 +25,11 @@ public class ClassIndex {
     private long classIndexPointer;
     private boolean destroyed;
 
+    public native IndexedClass findClass(String packageName, String className);
     public native IndexedClass[] findClasses(String query, SearchOptions options);
 
-    public native IndexedClass findClass(String packageName, String className);
     public native IndexedPackage findPackage(String packageName);
+    public native IndexedPackage[] findPackages(String query);
 
     public List<String> findMethods(String query, int limit) {
         throw new UnsupportedOperationException();
