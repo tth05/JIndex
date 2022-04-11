@@ -162,7 +162,8 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                         .iter()
                         .map(|s| s.to_signature_string(class_index))
                         .fold(String::new(), |a, b| {
-                            let separator = if a.is_empty() { "" } else { "." };
+                            let is_first = a.is_empty();
+                            let separator = if is_first { "" } else { "." };
 
                             //Removes the 'L' and ';'
                             let b = &b[1..b.len() - 1];
@@ -170,8 +171,12 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                                 Some(end) => &b[..end], //Removes the type parameters
                                 None => b,
                             })
-                            .rfind(|c| c == '$' || c == '/') //Remove the package name and parent class name
-                            .map_or(0, |u| u + 1);
+                            //We check for is_first here to exit rfind instantly
+                            .rfind(|c| is_first || c == '$' || c == '/') //Remove the package name and parent class name
+                            .map_or(0, |u| match is_first {
+                                false => u + 1,
+                                _ => 0, //The first element needs to keep the package name
+                            });
 
                             a + (separator) + &b[class_name_start_index..]
                         })
