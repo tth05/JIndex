@@ -73,21 +73,21 @@ impl ToIndexedType for RawSignatureType {
             RawSignatureType::ObjectInnerClass(inner) => {
                 let inner = inner.as_ref();
                 let base_type_signature = inner.first().unwrap();
-                let base_type_signature_name = base_type_signature.extract_base_object_type();
-                let indexed_base_type_signature =
-                    base_type_signature.to_indexed_type(class_index, constant_pool_map);
+                let mut type_name = base_type_signature.extract_base_object_type().clone();
 
                 let mut new_vec = Vec::with_capacity(inner.len());
-                new_vec.push(indexed_base_type_signature);
+                //Add base type
+                new_vec.push(base_type_signature.to_indexed_type(class_index, constant_pool_map));
+                //Add inner classes
                 inner.iter().skip(1).for_each(|s| {
+                    //Separator
+                    type_name.push_str("$".as_ascii_str().unwrap());
                     new_vec.push(match s {
                         RawSignatureType::Object(name) => {
-                            let index_or_none = index_for_object_type(
-                                &(base_type_signature_name.clone()
-                                    + "$".as_ascii_str().unwrap()
-                                    + name),
-                                class_index,
-                            );
+                            //Add inner class name
+                            type_name.push_str(name);
+
+                            let index_or_none = index_for_object_type(&type_name, class_index);
 
                             match index_or_none {
                                 Some(i) => IndexedSignatureType::Object(i),
@@ -96,12 +96,11 @@ impl ToIndexedType for RawSignatureType {
                         }
                         RawSignatureType::ObjectTypeBounds(inner) => {
                             let (main_type, vec) = inner.as_ref();
-                            let main_type_index_or_none = index_for_object_type(
-                                &(base_type_signature_name.clone()
-                                    + "$".as_ascii_str().unwrap()
-                                    + main_type),
-                                class_index,
-                            );
+                            //Add inner class name
+                            type_name.push_str(main_type);
+
+                            let main_type_index_or_none =
+                                index_for_object_type(&type_name, class_index);
 
                             match main_type_index_or_none {
                                 Some(main_type_index) => {
