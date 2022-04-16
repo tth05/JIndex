@@ -124,11 +124,12 @@ impl PartialEq for ConstantPoolStringView {
 
 impl ConstantPoolStringView {
     pub fn into_ascii_string(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
-        AsciiStr::from_ascii(
-            &constant_pool.string_data[(self.index + self.start as u32) as usize
-                ..(self.index + self.end as u32) as usize],
-        )
-        .unwrap()
+        unsafe {
+            AsciiStr::from_ascii_unchecked(
+                &constant_pool.string_data[(self.index + self.start as u32) as usize
+                    ..(self.index + self.end as u32) as usize],
+            )
+        }
     }
 
     pub fn is_empty(&self) -> bool {

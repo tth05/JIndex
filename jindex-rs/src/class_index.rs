@@ -439,13 +439,12 @@ impl ClassIndexBuilder {
 }
 
 pub fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &AsciiStr) {
-    for i in (0..str.len()).rev() {
-        if str.get_ascii(i).unwrap() == separator {
-            return (&str[0..i], &str[(i + 1)..]);
-        }
-    }
-
-    ("".as_ascii_str().unwrap(), &str[..])
+    str.chars()
+        .enumerate()
+        .rev()
+        .find(|(_, c)| *c == separator)
+        .map(|(i, _)| (&str[0..i], &str[(i + 1)..]))
+        .unwrap_or_else(|| (unsafe { "".as_ascii_str_unchecked() }, str))
 }
 
 impl Default for ClassIndexBuilder {
@@ -712,21 +711,35 @@ impl IndexedPackage {
     }
 
     pub fn package_name_with_parents(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
-        let mut base = constant_pool
-            .string_view_at(self.package_name_index)
-            .into_ascii_string(constant_pool)
-            .to_owned();
+        let mut parts = Vec::with_capacity(3);
+        parts.push(
+            constant_pool
+                .string_view_at(self.package_name_index)
+                .into_ascii_string(constant_pool),
+        );
 
+        let mut total_length = parts.first().unwrap().len();
         let mut parent_index = self.previous_package_index;
         while parent_index != 0 {
             let parent_package = constant_pool.package_at(parent_index);
-            base = parent_package.package_name(constant_pool).to_owned()
-                + "/".as_ascii_str().unwrap()
-                + &base;
+            let package_name = parent_package.package_name(constant_pool);
+            total_length += package_name.len();
+
+            parts.push(package_name);
             parent_index = parent_package.previous_package_index;
         }
 
-        base
+        let mut result = AsciiString::with_capacity(total_length);
+        parts.iter().rev().enumerate().for_each(|(i, part)| {
+            //Add separator if we're not the last part
+            if i != 0 {
+                unsafe { result.push_str("/".as_ascii_str_unchecked()) }
+            }
+
+            result.push_str(part)
+        });
+
+        result
     }
 
     pub fn add_sub_package(&mut self, index: u32) {
