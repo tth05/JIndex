@@ -6,11 +6,14 @@ use crate::signature::{
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
-use cafebabe::attributes::{AttributeData, AttributeInfo};
+use cafebabe::attributes::{AttributeData, AttributeInfo, InnerClassEntry};
+use cafebabe::constant_pool::NameAndType;
 use cafebabe::{
-    parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
+    parse_class_with_options, ClassAccessFlags, ClassFile, FieldAccessFlags, MethodAccessFlags,
+    ParseOptions,
 };
 use speedy::{Readable, Writable};
+use std::borrow::Cow;
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
@@ -205,10 +208,6 @@ impl ClassIndex {
     }
 
     pub fn find_package(&self, name: &AsciiStr) -> Option<AtomicRef<IndexedPackage>> {
-        if name.is_empty() {
-            return Option::None;
-        }
-
         let pool = self.constant_pool();
         for sub_index in pool.package_at(0).sub_packages_indices() {
             let result = self.find_package_starting_at(name, *sub_index);
@@ -457,9 +456,18 @@ pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
     pub access_flags: ClassAccessFlags,
+    pub enclosing_type: Option<EnclosingTypeInfo>,
+    pub inner_classes: Option<Vec<AsciiString>>,
     pub signature: RawClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
+}
+
+#[derive(Debug)]
+pub struct EnclosingTypeInfo {
+    pub class_name: AsciiString,
+    pub method_name: Option<AsciiString>,
+    pub method_descriptor: Option<RawMethodSignature>,
 }
 
 pub struct FieldInfo {
@@ -844,66 +852,83 @@ pub fn create_class_index_from_jars(jar_names: Vec<String>) -> ClassIndex {
     create_class_index(class_bytes)
 }
 
+macro_rules! get_attribute_info {
+    ($attributes: expr, $match: pat_param) => {
+        $attributes.iter().find(|a| matches!(&a.data, $match))
+    };
+}
+
+macro_rules! get_attribute_data {
+    ($attributes: expr, $info_match: pat_param, $data_var: expr, $default: expr) => {
+        get_attribute_info!($attributes, $info_match).map_or($default, |a| {
+            if let $info_match = &a.data {
+                return $data_var;
+            }
+            unreachable!();
+        })
+    };
+}
+
 fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
     let mut class_info_list = Vec::new();
 
     for bytes in bytes_queue.iter() {
-        let thing =
+        let parsed_class =
             parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
 
-        if let Ok(class) = thing {
-            let parsed_signature = if let Some(attr) = get_signature_attribute(&class.attributes) {
-                RawClassSignature::from_str(match &attr.data {
-                    AttributeData::Signature(s) => s,
-                    _ => unreachable!(),
-                })
-                .expect("Invalid class signature")
-            } else {
-                RawClassSignature::new(
-                    class
-                        .super_class
-                        .map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap())),
-                    Some(
-                        class
-                            .interfaces
-                            .into_iter()
-                            .map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap()))
-                            .collect(),
-                    )
-                    .filter(|v: &Vec<RawSignatureType>| !v.is_empty()),
-                )
-            };
+        if let Ok(class) = parsed_class {
+            let (full_class_name, enclosing_type, inner_classes) =
+                convert_enclosing_type_and_inner_classes(
+                    class.this_class,
+                    get_attribute_data!(
+                        &class.attributes,
+                        AttributeData::EnclosingMethod { class_name, method },
+                        Option::Some((class_name, method)),
+                        Option::None
+                    ),
+                    get_attribute_data!(
+                        &class.attributes,
+                        AttributeData::InnerClasses(vec),
+                        Option::Some(vec),
+                        Option::None
+                    ),
+                );
 
-            let full_class_name = class.this_class;
-            let split_pair = full_class_name
-                .rsplit_once('/')
-                .unwrap_or(("", &full_class_name));
+            let parsed_signature =
+                parse_class_signature(&class.attributes, class.super_class, class.interfaces);
 
-            let package_name = split_pair.0.into_ascii_string().unwrap();
-            let class_name = split_pair.1.into_ascii_string().unwrap();
+            let (package_name, class_name) = rsplit_once(&full_class_name, AsciiChar::Slash);
+            let package_name = package_name.into_ascii_string().unwrap();
+            let class_name = class_name.into_ascii_string().unwrap();
 
             class_info_list.push(ClassInfo {
                 package_name,
                 class_name,
                 access_flags: class.access_flags,
                 signature: parsed_signature,
+                enclosing_type,
+                inner_classes,
                 fields: class
                     .fields
                     .into_iter()
-                    .filter_map(|m| {
-                        let name = m.name.into_ascii_string();
+                    .filter_map(|f| {
+                        let name = f.name.into_ascii_string();
                         if name.is_err() {
                             return None;
                         }
 
-                        let signature =
-                            get_signature_attribute_or_default(&m.attributes, &m.descriptor);
+                        let signature = get_attribute_data!(
+                            &f.attributes,
+                            AttributeData::Signature(s),
+                            s,
+                            &f.descriptor
+                        );
 
                         Some(FieldInfo {
                             field_name: name.unwrap(),
                             descriptor: SignatureType::from_str(signature)
                                 .expect("Invalid field signature"),
-                            access_flags: m.access_flags,
+                            access_flags: f.access_flags,
                         })
                     })
                     .collect(),
@@ -916,8 +941,12 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                             return None;
                         }
 
-                        let signature =
-                            get_signature_attribute_or_default(&m.attributes, &m.descriptor);
+                        let signature = get_attribute_data!(
+                            &m.attributes,
+                            AttributeData::Signature(s),
+                            s,
+                            &m.descriptor
+                        );
 
                         Some(MethodInfo {
                             method_name: name.unwrap(),
@@ -933,25 +962,133 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
     class_info_list
 }
+fn convert_enclosing_type_and_inner_classes(
+    this_name: Cow<str>,
+    enclosing_method_data: Option<(&Cow<str>, &Option<NameAndType>)>,
+    inner_class_data: Option<&Vec<InnerClassEntry>>,
+) -> (
+    AsciiString,
+    Option<EnclosingTypeInfo>,
+    Option<Vec<AsciiString>>,
+) {
+    //TODO: How to handle inner class access flags? "java/lang/ApplicationShutdownHooks$1" has FINAL | SUPER but inner class access flags are STATIC
 
-fn get_signature_attribute<'a>(
-    attributes: &'a [AttributeInfo<'a>],
-) -> Option<&'a AttributeInfo<'a>> {
-    attributes
-        .iter()
-        .find(|a| matches!(a.data, AttributeData::Signature(_)))
+    let mut new_this_name = this_name.to_owned().into_ascii_string().unwrap();
+    let mut enclosing_type_info = None;
+    let mut inner_classes = None;
+    let mut skip_first_inner_class = false;
+
+    //This blocks checks the first inner class entry which can represent this class. If so, we
+    // extract the inner and outer class names from it.
+    if let Some(vec) = inner_class_data {
+        if let Some(first) = vec.first() {
+            if first.inner_class_info.as_ref() == this_name {
+                let (outer_name, inner_name) = extract_outer_and_inner_name(first);
+
+                new_this_name = inner_name;
+                enclosing_type_info = Some(EnclosingTypeInfo {
+                    class_name: outer_name,
+                    method_name: None,
+                    method_descriptor: None,
+                });
+
+                skip_first_inner_class = true
+            }
+        }
+    }
+    if let Some((class_name, method_data)) = enclosing_method_data {
+        let (method_name, method_descriptor) = match method_data {
+            Some(NameAndType { name, descriptor }) => (
+                Some(name.to_owned().into_ascii_string().unwrap()),
+                Some(RawMethodSignature::from_str(descriptor).unwrap()),
+            ),
+            None => (None, None),
+        };
+
+        //NOTE: Anonymous class are allowed to have inner classes, but it's easier to just ignore them for now
+        enclosing_type_info = Some(EnclosingTypeInfo {
+            class_name: class_name.to_owned().into_ascii_string().unwrap(),
+            method_name,
+            method_descriptor,
+        });
+    } else if let Some(vec) = inner_class_data {
+        inner_classes = Some(
+            vec.iter()
+                .skip(skip_first_inner_class as usize)
+                .filter_map(|e| {
+                    e.inner_name
+                        .as_ref()
+                        .map(|inner_name| inner_name.to_owned().into_ascii_string().unwrap())
+                })
+                .collect(),
+        );
+    }
+
+    (new_this_name, enclosing_type_info, inner_classes)
 }
 
-fn get_signature_attribute_or_default<'a>(
-    attributes: &'a [AttributeInfo<'a>],
-    default: &'a str,
-) -> &'a str {
-    get_signature_attribute(attributes).map_or(default, |a| {
-        if let AttributeData::Signature(ref s) = a.data {
-            return s;
-        }
-        unreachable!();
-    })
+fn extract_outer_and_inner_name(e: &InnerClassEntry) -> (AsciiString, AsciiString) {
+    e.inner_name
+        .as_ref()
+        .filter(|n| !n.is_empty())
+        .filter(|n| e.outer_class_info.is_some())
+        .map(|n| {
+            (
+                e.outer_class_info
+                    .as_ref()
+                    .unwrap()
+                    .to_owned()
+                    .into_ascii_string()
+                    .unwrap(),
+                n.to_owned().into_ascii_string().unwrap(),
+            )
+        })
+        .unwrap_or_else(|| {
+            //If we don't have an inner name, we usually have an anonymous class like java/lang/Object$1.
+            match &e.outer_class_info {
+                //There might be an outer name which we can use to extract the inner name
+                Some(outer_name) => (
+                    outer_name.to_owned().into_ascii_string().unwrap(),
+                    e.inner_class_info[outer_name.len() + 1..]
+                        .to_owned()
+                        .into_ascii_string()
+                        .unwrap(),
+                ),
+                //Otherwise we trust the inner name info and split on '$'
+                None => {
+                    let split_pair = e.inner_class_info.rsplit_once('$').unwrap();
+                    (
+                        split_pair.0.to_owned().into_ascii_string().unwrap(),
+                        split_pair.1.to_owned().into_ascii_string().unwrap(),
+                    )
+                }
+            }
+        })
+}
+
+fn parse_class_signature(
+    attributes: &[AttributeInfo],
+    super_class: Option<Cow<str>>,
+    interfaces: Vec<Cow<str>>,
+) -> RawClassSignature {
+    if let Some(attr) = get_attribute_info!(attributes, AttributeData::Signature(_)) {
+        RawClassSignature::from_str(match &attr.data {
+            AttributeData::Signature(s) => s,
+            _ => unreachable!(),
+        })
+        .expect("Invalid class signature")
+    } else {
+        RawClassSignature::new(
+            super_class.map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap())),
+            Some(
+                interfaces
+                    .into_iter()
+                    .map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap()))
+                    .collect(),
+            )
+            .filter(|v: &Vec<RawSignatureType>| !v.is_empty()),
+        )
+    }
 }
 
 pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {

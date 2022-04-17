@@ -81,7 +81,7 @@ impl ToIndexedType for RawSignatureType {
                 //Add inner classes
                 inner.iter().skip(1).for_each(|s| {
                     //Separator
-                    type_name.push_str("$".as_ascii_str().unwrap());
+                    type_name.push_str(unsafe { "$".as_ascii_str_unchecked() });
                     new_vec.push(match s {
                         RawSignatureType::Object(name) => {
                             //Add inner class name
