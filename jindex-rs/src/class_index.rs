@@ -9,8 +9,7 @@ use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use cafebabe::attributes::{AttributeData, AttributeInfo, InnerClassEntry};
 use cafebabe::constant_pool::NameAndType;
 use cafebabe::{
-    parse_class_with_options, ClassAccessFlags, ClassFile, FieldAccessFlags, MethodAccessFlags,
-    ParseOptions,
+    parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
 use speedy::{Readable, Writable};
 use std::borrow::Cow;
@@ -80,6 +79,7 @@ impl ClassIndex {
             total += prefix_count;
         }
 
+        range_map.shrink_to_fit();
         Self {
             constant_pool: AtomicRefCell::new(constant_pool),
             classes,
@@ -1097,6 +1097,7 @@ pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
         do_multi_threaded(class_bytes, &process_class_bytes_worker);
 
     //Removes duplicate classes
+    //TODO: Both of these need to respect the enclosing type info
     class_info_list.sort_unstable_by(|a, b| {
         a.class_name
             .cmp(&b.class_name)
