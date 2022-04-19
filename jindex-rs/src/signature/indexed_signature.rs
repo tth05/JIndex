@@ -120,12 +120,14 @@ impl ToIndexedType for RawSignatureType {
             }
             RawSignatureType::ObjectTypeBounds(inner) => {
                 let (main_type, vec) = inner.as_ref();
-
                 let main_type_index_or_none = index_for_object_type(main_type, class_index);
+
+                let mut indexed_vec = vec.to_indexed_type(class_index, constant_pool_map);
+                indexed_vec.shrink_to_fit();
                 match main_type_index_or_none {
                     Some(main_type_index) => IndexedSignatureType::ObjectTypeBounds(Box::new((
                         main_type_index,
-                        vec.to_indexed_type(class_index, constant_pool_map),
+                        indexed_vec,
                     ))),
                     _ => IndexedSignatureType::Unresolved,
                 }
@@ -266,9 +268,15 @@ impl IndexedClassSignature {
         interfaces: Option<Vec<IndexedSignatureType>>,
     ) -> Self {
         Self {
-            generic_data,
+            generic_data: generic_data.map(|mut v| {
+                v.shrink_to_fit();
+                v
+            }),
             super_class,
-            interfaces,
+            interfaces: interfaces.map(|mut v| {
+                v.shrink_to_fit();
+                v
+            }),
         }
     }
 }
@@ -371,11 +379,15 @@ impl ToSignatureIndexedType for IndexedTypeParameterData {
 impl IndexedMethodSignature {
     pub fn new(
         generic_data: Option<Vec<IndexedTypeParameterData>>,
-        parameters: Vec<IndexedSignatureType>,
+        mut parameters: Vec<IndexedSignatureType>,
         return_type: IndexedSignatureType,
     ) -> Self {
+        parameters.shrink_to_fit();
         Self {
-            generic_data,
+            generic_data: generic_data.map(|mut v| {
+                v.shrink_to_fit();
+                v
+            }),
             parameters,
             return_type,
         }
