@@ -348,7 +348,7 @@ impl ClassIndexBuilder {
 
         let class_index = ClassIndex::new(constant_pool, classes);
 
-        //TODO: Multi thread this loop using dashmap/flurry
+        //TODO: Multi thread this loop using dashmap/flurry?
         let mut time = 0u128;
         for class_info in vec.iter() {
             let t = Instant::now();
@@ -374,7 +374,7 @@ impl ClassIndexBuilder {
             let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
 
             for field_info in class_info.fields.iter() {
-                let field_name = field_info.field_name.as_ascii_str().unwrap();
+                let field_name = &field_info.field_name;
 
                 let field_name_index = ClassIndexBuilder::get_index_from_pool(
                     field_name,
@@ -397,7 +397,7 @@ impl ClassIndexBuilder {
             let mut indexed_methods = Vec::with_capacity(class_info.methods.len());
 
             for method_info in class_info.methods.iter() {
-                let method_name = method_info.method_name.as_ascii_str().unwrap();
+                let method_name = &method_info.method_name;
 
                 let method_name_index = ClassIndexBuilder::get_index_from_pool(
                     method_name,
@@ -455,6 +455,7 @@ impl Default for ClassIndexBuilder {
 pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
+    pub class_name_start_index: usize,
     pub access_flags: ClassAccessFlags,
     pub enclosing_type: Option<EnclosingTypeInfo>,
     pub inner_classes: Option<Vec<AsciiString>>,
@@ -877,33 +878,35 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
             parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false));
 
         if let Ok(class) = parsed_class {
-            let (full_class_name, enclosing_type, inner_classes) =
-                convert_enclosing_type_and_inner_classes(
-                    class.this_class,
-                    get_attribute_data!(
-                        &class.attributes,
-                        AttributeData::EnclosingMethod { class_name, method },
-                        Option::Some((class_name, method)),
-                        Option::None
-                    ),
-                    get_attribute_data!(
-                        &class.attributes,
-                        AttributeData::InnerClasses(vec),
-                        Option::Some(vec),
-                        Option::None
-                    ),
-                );
+            let (
+                package_name,
+                full_class_name,
+                class_name_start_index,
+                enclosing_type,
+                inner_classes,
+            ) = convert_enclosing_type_and_inner_classes(
+                class.this_class,
+                get_attribute_data!(
+                    &class.attributes,
+                    AttributeData::EnclosingMethod { class_name, method },
+                    Option::Some((class_name, method)),
+                    Option::None
+                ),
+                get_attribute_data!(
+                    &class.attributes,
+                    AttributeData::InnerClasses(vec),
+                    Option::Some(vec),
+                    Option::None
+                ),
+            );
 
             let parsed_signature =
                 parse_class_signature(&class.attributes, class.super_class, class.interfaces);
 
-            let (package_name, class_name) = rsplit_once(&full_class_name, AsciiChar::Slash);
-            let package_name = package_name.into_ascii_string().unwrap();
-            let class_name = class_name.into_ascii_string().unwrap();
-
             class_info_list.push(ClassInfo {
                 package_name,
-                class_name,
+                class_name: full_class_name,
+                class_name_start_index,
                 access_flags: class.access_flags,
                 signature: parsed_signature,
                 enclosing_type,
@@ -968,12 +971,17 @@ fn convert_enclosing_type_and_inner_classes(
     inner_class_data: Option<&Vec<InnerClassEntry>>,
 ) -> (
     AsciiString,
+    AsciiString,
+    usize,
     Option<EnclosingTypeInfo>,
     Option<Vec<AsciiString>>,
 ) {
     //TODO: How to handle inner class access flags? "java/lang/ApplicationShutdownHooks$1" has FINAL | SUPER but inner class access flags are STATIC
 
-    let mut new_this_name = this_name.to_owned().into_ascii_string().unwrap();
+    let this_name = this_name.as_ascii_str().unwrap();
+    let (package_name, class_name) = rsplit_once(this_name, AsciiChar::Slash);
+    let mut class_name_start_index = 0;
+
     let mut enclosing_type_info = None;
     let mut inner_classes = None;
     let mut skip_first_inner_class = false;
@@ -983,9 +991,11 @@ fn convert_enclosing_type_and_inner_classes(
     if let Some(vec) = inner_class_data {
         if let Some(first) = vec.first() {
             if first.inner_class_info.as_ref() == this_name {
-                let (outer_name, inner_name) = extract_outer_and_inner_name(first);
+                let (outer_name, inner_name_start) =
+                    extract_outer_and_inner_name(class_name, first);
 
-                new_this_name = inner_name;
+                class_name_start_index = inner_name_start;
+
                 enclosing_type_info = Some(EnclosingTypeInfo {
                     class_name: outer_name,
                     method_name: None,
@@ -1024,10 +1034,21 @@ fn convert_enclosing_type_and_inner_classes(
         );
     }
 
-    (new_this_name, enclosing_type_info, inner_classes)
+    (
+        package_name.to_ascii_string(),
+        class_name.to_ascii_string(),
+        class_name_start_index,
+        enclosing_type_info,
+        inner_classes,
+    )
 }
 
-fn extract_outer_and_inner_name(e: &InnerClassEntry) -> (AsciiString, AsciiString) {
+/// Returns (a) the full outer class name including the package and (b) the index into the original class
+/// name from where the inner class name starts
+fn extract_outer_and_inner_name(
+    original_class_name: &AsciiStr,
+    e: &InnerClassEntry,
+) -> (AsciiString, usize) {
     e.inner_name
         .as_ref()
         .filter(|n| !n.is_empty())
@@ -1040,7 +1061,7 @@ fn extract_outer_and_inner_name(e: &InnerClassEntry) -> (AsciiString, AsciiStrin
                     .to_owned()
                     .into_ascii_string()
                     .unwrap(),
-                n.to_owned().into_ascii_string().unwrap(),
+                original_class_name.len() - n.len(),
             )
         })
         .unwrap_or_else(|| {
@@ -1049,17 +1070,14 @@ fn extract_outer_and_inner_name(e: &InnerClassEntry) -> (AsciiString, AsciiStrin
                 //There might be an outer name which we can use to extract the inner name
                 Some(outer_name) => (
                     outer_name.to_owned().into_ascii_string().unwrap(),
-                    e.inner_class_info[outer_name.len() + 1..]
-                        .to_owned()
-                        .into_ascii_string()
-                        .unwrap(),
+                    original_class_name.len() - (e.inner_class_info.len() - (outer_name.len() + 1)),
                 ),
                 //Otherwise we trust the inner name info and split on '$'
                 None => {
-                    let split_pair = e.inner_class_info.rsplit_once('$').unwrap();
+                    let index = e.inner_class_info.rfind('$').unwrap();
                     (
-                        split_pair.0.to_owned().into_ascii_string().unwrap(),
-                        split_pair.1.to_owned().into_ascii_string().unwrap(),
+                        e.inner_class_info[..index].into_ascii_string().unwrap(),
+                        original_class_name.len() - (e.inner_class_info.len() - (index + 1)),
                     )
                 }
             }
@@ -1097,7 +1115,6 @@ pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> ClassIndex {
         do_multi_threaded(class_bytes, &process_class_bytes_worker);
 
     //Removes duplicate classes
-    //TODO: Both of these need to respect the enclosing type info
     class_info_list.sort_unstable_by(|a, b| {
         a.class_name
             .cmp(&b.class_name)
