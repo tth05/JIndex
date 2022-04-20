@@ -1,7 +1,8 @@
 use crate::class_index::{rsplit_once, ClassIndex, ClassIndexBuilder};
 use crate::signature::{
-    IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType, IndexedTypeParameterData,
-    RawClassSignature, RawMethodSignature, RawSignatureType, RawTypeParameterData, SignatureType,
+    IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
+    IndexedTypeParameterData, RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature,
+    RawSignatureType, RawTypeParameterData, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use std::collections::HashMap;
@@ -440,6 +441,36 @@ impl ToDescriptorIndexedType for IndexedMethodSignature {
             + &self
                 .return_type
                 .to_descriptor_string(class_index, generic_data)
+    }
+}
+
+impl ToIndexedType for RawEnclosingTypeInfo {
+    type Out = IndexedEnclosingTypeInfo;
+
+    fn to_indexed_type<'a>(
+        &'a self,
+        class_index: &ClassIndex,
+        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+    ) -> Self::Out {
+        let class_name;
+        let method_name;
+        {
+            // This block ensures that the constant pool reference is dropped before we index the method descriptor
+            let pool = &mut class_index.constant_pool_mut();
+            class_name =
+                ClassIndexBuilder::get_index_from_pool(&self.class_name, constant_pool_map, pool);
+            method_name = self.method_name.as_ref().map(|method_name| {
+                ClassIndexBuilder::get_index_from_pool(method_name, constant_pool_map, pool)
+            });
+        }
+
+        IndexedEnclosingTypeInfo::new(
+            class_name,
+            method_name,
+            self.method_descriptor.as_ref().map(|method_signature| {
+                method_signature.to_indexed_type(class_index, constant_pool_map)
+            }),
+        )
     }
 }
 

@@ -97,6 +97,42 @@ impl<T> MethodSignature<T> {
 pub type RawMethodSignature = MethodSignature<AsciiString>;
 pub type IndexedMethodSignature = MethodSignature<u32>;
 
+#[derive(Debug)]
+pub struct EnclosingTypeInfo<T> {
+    class_name: T,
+    method_name: Option<T>,
+    method_descriptor: Option<MethodSignature<T>>,
+}
+
+impl<T> EnclosingTypeInfo<T> {
+    pub fn new(
+        class_name: T,
+        method_name: Option<T>,
+        method_descriptor: Option<MethodSignature<T>>,
+    ) -> Self {
+        EnclosingTypeInfo {
+            class_name,
+            method_name,
+            method_descriptor,
+        }
+    }
+
+    pub fn class_name(&self) -> &T {
+        &self.class_name
+    }
+
+    pub fn method_name(&self) -> Option<&T> {
+        self.method_name.as_ref()
+    }
+
+    pub fn method_descriptor(&self) -> Option<&MethodSignature<T>> {
+        self.method_descriptor.as_ref()
+    }
+}
+
+pub type RawEnclosingTypeInfo = EnclosingTypeInfo<AsciiString>;
+pub type IndexedEnclosingTypeInfo = EnclosingTypeInfo<u32>;
+
 pub enum ParseError {
     Eof,
     AsciiStringError(AsAsciiStrError),

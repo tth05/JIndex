@@ -1,8 +1,8 @@
 use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
 use crate::signature::indexed_signature::ToIndexedType;
 use crate::signature::{
-    IndexedClassSignature, IndexedMethodSignature, IndexedSignatureType, RawClassSignature,
-    RawMethodSignature, RawSignatureType, SignatureType,
+    IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
+    RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature, RawSignatureType, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
@@ -340,6 +340,7 @@ impl ClassIndexBuilder {
             let indexed_class = IndexedClass::new(
                 package_index,
                 class_name_index,
+                class_info.class_name_start_index as u8, //Name can't be longer than u8::MAX
                 class_info.access_flags.bits(),
             );
 
@@ -369,6 +370,13 @@ impl ClassIndexBuilder {
                     .signature
                     .to_indexed_type(&class_index, &mut constant_pool_map),
             );
+
+            //Enclosing type
+            if let Some(info) = &class_info.enclosing_type {
+                indexed_class.set_enclosing_type_info(
+                    info.to_indexed_type(&class_index, &mut constant_pool_map),
+                );
+            }
 
             //Fields
             let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
@@ -457,18 +465,11 @@ pub struct ClassInfo {
     pub class_name: AsciiString,
     pub class_name_start_index: usize,
     pub access_flags: ClassAccessFlags,
-    pub enclosing_type: Option<EnclosingTypeInfo>,
+    pub enclosing_type: Option<RawEnclosingTypeInfo>,
     pub inner_classes: Option<Vec<AsciiString>>,
     pub signature: RawClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
-}
-
-#[derive(Debug)]
-pub struct EnclosingTypeInfo {
-    pub class_name: AsciiString,
-    pub method_name: Option<AsciiString>,
-    pub method_descriptor: Option<RawMethodSignature>,
 }
 
 pub struct FieldInfo {
@@ -487,19 +488,28 @@ pub struct MethodInfo {
 pub struct IndexedClass {
     package_index: u32,
     name_index: u32,
+    name_start_index: u8,
     access_flags: u16,
     signature: OnceCell<IndexedClassSignature>,
+    enclosing_type_info: OnceCell<IndexedEnclosingTypeInfo>,
     fields: OnceCell<Vec<IndexedField>>,
     methods: OnceCell<Vec<IndexedMethod>>,
 }
 
 impl IndexedClass {
-    pub fn new(package_index: u32, class_name_index: u32, access_flags: u16) -> Self {
+    pub fn new(
+        package_index: u32,
+        class_name_index: u32,
+        class_name_start_index: u8,
+        access_flags: u16,
+    ) -> Self {
         Self {
             package_index,
             name_index: class_name_index,
+            name_start_index: class_name_start_index,
             access_flags,
             signature: OnceCell::new(),
+            enclosing_type_info: OnceCell::new(),
             fields: OnceCell::new(),
             methods: OnceCell::new(),
         }
@@ -526,12 +536,25 @@ impl IndexedClass {
         }
     }
 
+    pub fn enclosing_class<'a>(&self, class_index: &'a ClassIndex) -> Option<&'a IndexedClass> {
+        self.enclosing_type_info()
+            .map(|info| class_index.class_at_index(*info.class_name()))
+    }
+
     pub fn set_signature(&self, signature: IndexedClassSignature) {
         self.signature.set(signature).unwrap();
     }
 
+    pub fn set_enclosing_type_info(&self, info: IndexedEnclosingTypeInfo) {
+        self.enclosing_type_info.set(info).unwrap();
+    }
+
     pub fn class_name_index(&self) -> u32 {
         self.name_index
+    }
+
+    pub fn class_name_start_index(&self) -> u8 {
+        self.name_start_index
     }
 
     pub fn field_count(&self) -> u16 {
@@ -550,6 +573,10 @@ impl IndexedClass {
         self.signature.get().unwrap()
     }
 
+    pub fn enclosing_type_info(&self) -> Option<&IndexedEnclosingTypeInfo> {
+        self.enclosing_type_info.get()
+    }
+
     pub fn fields(&self) -> &Vec<IndexedField> {
         self.fields.get().unwrap()
     }
@@ -561,11 +588,9 @@ impl IndexedClass {
     pub fn methods(&self) -> &Vec<IndexedMethod> {
         self.methods.get().unwrap()
     }
-
     pub fn set_methods(&self, methods: Vec<IndexedMethod>) -> Result<(), Vec<IndexedMethod>> {
         self.methods.set(methods)
     }
-
     pub fn access_flags(&self) -> u16 {
         self.access_flags
     }
@@ -973,7 +998,7 @@ fn convert_enclosing_type_and_inner_classes(
     AsciiString,
     AsciiString,
     usize,
-    Option<EnclosingTypeInfo>,
+    Option<RawEnclosingTypeInfo>,
     Option<Vec<AsciiString>>,
 ) {
     //TODO: How to handle inner class access flags? "java/lang/ApplicationShutdownHooks$1" has FINAL | SUPER but inner class access flags are STATIC
@@ -995,12 +1020,7 @@ fn convert_enclosing_type_and_inner_classes(
                     extract_outer_and_inner_name(class_name, first);
 
                 class_name_start_index = inner_name_start;
-
-                enclosing_type_info = Some(EnclosingTypeInfo {
-                    class_name: outer_name,
-                    method_name: None,
-                    method_descriptor: None,
-                });
+                enclosing_type_info = Some(RawEnclosingTypeInfo::new(outer_name, None, None));
 
                 skip_first_inner_class = true
             }
@@ -1016,11 +1036,11 @@ fn convert_enclosing_type_and_inner_classes(
         };
 
         //NOTE: Anonymous class are allowed to have inner classes, but it's easier to just ignore them for now
-        enclosing_type_info = Some(EnclosingTypeInfo {
-            class_name: class_name.to_owned().into_ascii_string().unwrap(),
+        enclosing_type_info = Some(RawEnclosingTypeInfo::new(
+            class_name.to_owned().into_ascii_string().unwrap(),
             method_name,
             method_descriptor,
-        });
+        ));
     } else if let Some(vec) = inner_class_data {
         inner_classes = Some(
             vec.iter()

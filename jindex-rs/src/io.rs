@@ -1,5 +1,6 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::ptr::write;
 
 use crate::class_index::{ClassIndex, IndexedClass};
 use speedy::{Context, Readable, Reader, Writable, Writer};
@@ -7,7 +8,9 @@ use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::constant_pool::ClassIndexConstantPool;
-use crate::signature::{IndexedClassSignature, IndexedSignatureType};
+use crate::signature::{
+    IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
+};
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
     let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
@@ -67,8 +70,14 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        let class = IndexedClass::new(reader.read_u32()?, reader.read_u32()?, reader.read_u16()?);
+        let class = IndexedClass::new(
+            reader.read_u32()?,
+            reader.read_u32()?,
+            reader.read_u8()?,
+            reader.read_u16()?,
+        );
         class.set_signature(IndexedClassSignature::read_from(reader)?);
+        class.set_enclosing_type_info(IndexedEnclosingTypeInfo::read_from(reader)?);
         class.set_fields(Vec::read_from(reader)?).unwrap();
         class.set_methods(Vec::read_from(reader)?).unwrap();
         Ok(class)
@@ -82,8 +91,10 @@ where
     fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
         self.package_index().write_to(writer)?;
         self.class_name_index().write_to(writer)?;
+        self.class_name_start_index().write_to(writer)?;
         self.access_flags().write_to(writer)?;
         self.signature().write_to(writer)?;
+        self.enclosing_type_info().write_to(writer)?;
         self.fields().write_to(writer)?;
         self.methods().write_to(writer)?;
         Ok(())
@@ -175,6 +186,31 @@ where
                 b.write_to(writer)?;
             }
         }
+        Ok(())
+    }
+}
+
+impl<'a, C> Readable<'a, C> for IndexedEnclosingTypeInfo
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        Ok(IndexedEnclosingTypeInfo::new(
+            reader.read_u32()?,
+            reader.read_value::<Option<u32>>()?,
+            reader.read_value::<Option<IndexedMethodSignature>>()?,
+        ))
+    }
+}
+
+impl<C> Writable<C> for IndexedEnclosingTypeInfo
+where
+    C: Context,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        writer.write_u32(*self.class_name())?;
+        self.method_name().write_to(writer)?;
+        self.method_descriptor().write_to(writer)?;
         Ok(())
     }
 }
