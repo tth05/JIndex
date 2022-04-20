@@ -1014,19 +1014,19 @@ fn convert_enclosing_type_and_inner_classes(
     let mut inner_classes = None;
     let mut skip_first_inner_class = false;
 
-    //This blocks checks the first inner class entry which can represent this class. If so, we
-    // extract the inner and outer class names from it.
+    //This blocks checks the first inner class entry which can represent this class. If there is
+    // one, we extract the inner and outer class names from it.
     if let Some(vec) = inner_class_data {
-        if let Some(first) = vec.first() {
-            if first.inner_class_info.as_ref() == this_name {
-                let (outer_name, inner_name_start) =
-                    extract_outer_and_inner_name(class_name, first);
+        if let Some(first) = vec
+            .iter()
+            .find(|e| e.inner_class_info.as_ref() == this_name)
+        {
+            let (outer_name, inner_name_start) = extract_outer_and_inner_name(class_name, first);
 
-                class_name_start_index = inner_name_start;
-                enclosing_type_info = Some(RawEnclosingTypeInfo::new(Some(outer_name), None, None));
+            class_name_start_index = inner_name_start;
+            enclosing_type_info = Some(RawEnclosingTypeInfo::new(Some(outer_name), None, None));
 
-                skip_first_inner_class = true
-            }
+            skip_first_inner_class = true
         }
     }
     if let Some((class_name, method_data)) = enclosing_method_data {

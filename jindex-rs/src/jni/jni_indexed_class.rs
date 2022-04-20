@@ -30,6 +30,28 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourceName(
+    env: JNIEnv,
+    this: jobject,
+) -> jstring {
+    let (_, class_index) = get_class_index(env, this);
+    let indexed_class = get_field_with_id::<IndexedClass>(
+        env,
+        this,
+        &cached_field_ids().class_index_child_self_pointer,
+    );
+
+    env.new_string(
+        &indexed_class.class_name(&class_index.constant_pool())
+            [indexed_class.class_name_start_index() as usize..],
+    )
+    .unwrap()
+    .into_inner()
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPackage(
     env: JNIEnv,
     this: jobject,
