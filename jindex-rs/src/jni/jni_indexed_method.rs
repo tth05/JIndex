@@ -13,15 +13,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_method_index_pointer_id,
-    );
+    let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedMethod>(
         env,
         this,
-        &cached_field_ids().indexed_method_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     env.new_string(indexed_method.method_name(&class_index.constant_pool()))
@@ -39,7 +35,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAcce
     let indexed_method = get_field_with_id::<IndexedMethod>(
         env,
         this,
-        &cached_field_ids().indexed_method_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     indexed_method.access_flags() as jint
@@ -52,21 +48,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_method_index_pointer_id,
-    );
+    let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedMethod>(
         env,
         this,
-        &cached_field_ids().indexed_method_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
-    let indexed_class = get_field_with_id::<IndexedClass>(
-        env,
-        this,
-        &cached_field_ids().indexed_method_class_pointer_id,
-    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
     let signature = indexed_method.method_signature();
 
     let mut type_parameters = Vec::new();
@@ -93,15 +82,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_method_index_pointer_id,
-    );
+    let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedMethod>(
         env,
         this,
-        &cached_field_ids().indexed_method_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
     let signature = indexed_method.method_signature();
 

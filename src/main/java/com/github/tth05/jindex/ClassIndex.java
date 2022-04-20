@@ -6,7 +6,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 
-public class ClassIndex {
+public class ClassIndex extends ClassIndexChildObject {
 
     static {
         try {
@@ -22,8 +22,11 @@ public class ClassIndex {
         }
     }
 
-    private long classIndexPointer;
     private boolean destroyed;
+
+    private ClassIndex() {
+        super(0, 0);
+    }
 
     public native IndexedClass findClass(String packageName, String className);
     public native IndexedClass[] findClasses(String query, SearchOptions options);

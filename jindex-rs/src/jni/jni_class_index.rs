@@ -1,4 +1,3 @@
-use ascii::AsciiChar::q;
 use ascii::IntoAsciiString;
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jlong, jobject, jobjectArray};
@@ -10,7 +9,7 @@ use crate::class_index::{
 };
 use crate::constant_pool::{MatchMode, SearchMode, SearchOptions};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
-use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
+use crate::jni::cache::{get_class_index, init_field_ids};
 use crate::jni::get_enum_ordinal;
 
 #[no_mangle]
@@ -101,7 +100,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile
 ) {
     let path: String = env.get_string(path).expect("Invalid path").into();
 
-    let (_, class_index) = get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+    let (_, class_index) = get_class_index(env, this);
 
     save_class_index_to_file(class_index, path);
 }
@@ -164,8 +163,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let (class_index_pointer, class_index) =
-        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let classes: Vec<_> = class_index.find_classes(&input, convert_search_options(env, options));
 
@@ -259,8 +257,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let (class_index_pointer, class_index) =
-        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     if let Some((_, class)) = class_index.find_class(&package_name, &class_name) {
         env.new_object(
@@ -292,8 +289,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
         .find_class("com/github/tth05/jindex/IndexedPackage")
         .expect("Result class not found");
 
-    let (class_index_pointer, class_index) =
-        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     if let Some(package) = class_index.find_package(&package_name) {
         env.new_object(
@@ -325,8 +321,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
         .find_class("com/github/tth05/jindex/IndexedPackage")
         .expect("Result class not found");
 
-    let (class_index_pointer, class_index) =
-        get_class_index(env, this, &cached_field_ids().class_index_pointer_id);
+    let (class_index_pointer, class_index) = get_class_index(env, this);
 
     let matching_packages = class_index.find_packages(&query);
     let result_array = env

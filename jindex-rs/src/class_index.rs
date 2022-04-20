@@ -140,7 +140,9 @@ impl ClassIndex {
         result.into_iter().map(|el| el.1).collect()
     }
 
-    ///TODO: 1. Abstract the prefix_range_map into its own type
+    ///TODO:
+    /// 0. Benchmark if this could actually be faster
+    /// 1. Abstract the prefix_range_map into its own type
     /// 2. Use that type to fast access all root packages
     /// 3. Utilize find_package (which uses that new type) and then a binary search on the found package class_indices to make this whole find_class even faster
     /// For example, when searching for 'java/lang/S', we perform a binary search on a slice with 12k elements.
@@ -538,7 +540,8 @@ impl IndexedClass {
 
     pub fn enclosing_class<'a>(&self, class_index: &'a ClassIndex) -> Option<&'a IndexedClass> {
         self.enclosing_type_info()
-            .map(|info| class_index.class_at_index(*info.class_name()))
+            .filter(|info| info.class_name().is_some())
+            .map(|info| class_index.class_at_index(*info.class_name().unwrap()))
     }
 
     pub fn set_signature(&self, signature: IndexedClassSignature) {
@@ -1020,7 +1023,7 @@ fn convert_enclosing_type_and_inner_classes(
                     extract_outer_and_inner_name(class_name, first);
 
                 class_name_start_index = inner_name_start;
-                enclosing_type_info = Some(RawEnclosingTypeInfo::new(outer_name, None, None));
+                enclosing_type_info = Some(RawEnclosingTypeInfo::new(Some(outer_name), None, None));
 
                 skip_first_inner_class = true
             }
@@ -1037,7 +1040,7 @@ fn convert_enclosing_type_and_inner_classes(
 
         //NOTE: Anonymous class are allowed to have inner classes, but it's easier to just ignore them for now
         enclosing_type_info = Some(RawEnclosingTypeInfo::new(
-            class_name.to_owned().into_ascii_string().unwrap(),
+            Some(class_name.to_owned().into_ascii_string().unwrap()),
             method_name,
             method_descriptor,
         ));
@@ -1072,7 +1075,7 @@ fn extract_outer_and_inner_name(
     e.inner_name
         .as_ref()
         .filter(|n| !n.is_empty())
-        .filter(|n| e.outer_class_info.is_some())
+        .filter(|_| e.outer_class_info.is_some())
         .map(|n| {
             (
                 e.outer_class_info

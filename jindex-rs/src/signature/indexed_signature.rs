@@ -452,17 +452,14 @@ impl ToIndexedType for RawEnclosingTypeInfo {
         class_index: &ClassIndex,
         constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
     ) -> Self::Out {
-        let class_name;
-        let method_name;
-        {
+        let class_name = index_for_object_type(self.class_name.as_ref().unwrap(), class_index);
+        let method_name = {
             // This block ensures that the constant pool reference is dropped before we index the method descriptor
             let pool = &mut class_index.constant_pool_mut();
-            class_name =
-                ClassIndexBuilder::get_index_from_pool(&self.class_name, constant_pool_map, pool);
-            method_name = self.method_name.as_ref().map(|method_name| {
+            self.method_name.as_ref().map(|method_name| {
                 ClassIndexBuilder::get_index_from_pool(method_name, constant_pool_map, pool)
-            });
-        }
+            })
+        };
 
         IndexedEnclosingTypeInfo::new(
             class_name,

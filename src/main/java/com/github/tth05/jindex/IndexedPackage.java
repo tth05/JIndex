@@ -1,13 +1,9 @@
 package com.github.tth05.jindex;
 
-public class IndexedPackage {
-
-    private final long classIndexPointer;
-    private final long pointer;
+public class IndexedPackage extends ClassIndexChildObject{
 
     public IndexedPackage(long classIndexPointer, long pointer) {
-        this.classIndexPointer = classIndexPointer;
-        this.pointer = pointer;
+        super(classIndexPointer, pointer);
     }
 
     public native String getName();

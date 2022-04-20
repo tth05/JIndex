@@ -26,10 +26,6 @@ impl ClassIndexConstantPool {
         self.indexed_packages.get_mut(index as usize).unwrap()
     }
 
-    pub fn package_count(&self) -> usize {
-        self.indexed_packages.len()
-    }
-
     pub fn get_or_add_package_index(&mut self, name: &AsciiStr) -> u32 {
         self.get_or_add_package_index0(0, name)
     }

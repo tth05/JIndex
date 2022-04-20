@@ -11,15 +11,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_class_index_pointer_id,
-    );
+    let (_, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
         env,
         this,
-        &cached_field_ids().indexed_class_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     env.new_string(indexed_package.package_name(&class_index.constant_pool()))
@@ -34,15 +30,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_class_index_pointer_id,
-    );
+    let (_, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
         env,
         this,
-        &cached_field_ids().indexed_class_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     env.new_string(indexed_package.package_name_with_parents(&class_index.constant_pool()))
@@ -57,15 +49,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
     env: JNIEnv,
     this: jobject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_class_index_pointer_id,
-    );
+    let (_, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
         env,
         this,
-        &cached_field_ids().indexed_class_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     env.new_string(
@@ -85,15 +73,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSub
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_class_index_pointer_id,
-    );
+    let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
         env,
         this,
-        &cached_field_ids().indexed_class_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     let result_class = env
@@ -139,15 +123,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getCla
     env: JNIEnv,
     this: jobject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(
-        env,
-        this,
-        &cached_field_ids().indexed_class_index_pointer_id,
-    );
+    let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
         env,
         this,
-        &cached_field_ids().indexed_class_pointer_id,
+        &cached_field_ids().class_index_child_self_pointer,
     );
 
     let result_class = env

@@ -2,14 +2,10 @@ package com.github.tth05.jindex;
 
 import java.util.Arrays;
 
-public class IndexedClass {
-
-    private final long classIndexPointer;
-    private final long pointer;
+public class IndexedClass extends ClassIndexChildObject {
 
     public IndexedClass(long classIndexPointer, long pointer) {
-        this.classIndexPointer = classIndexPointer;
-        this.pointer = pointer;
+        super(classIndexPointer, pointer);
     }
 
     public native String getName();
@@ -20,6 +16,9 @@ public class IndexedClass {
     public native String getNameWithPackageDot();
 
     public native String getGenericSignatureString();
+
+    public native IndexedClass getEnclosingClass();
+    public native String getEnclosingMethodNameAndDesc();
     public native IndexedClass getSuperClass();
     public native IndexedClass[] getInterfaces();
 

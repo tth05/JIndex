@@ -1,6 +1,5 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
-use std::ptr::write;
 
 use crate::class_index::{ClassIndex, IndexedClass};
 use speedy::{Context, Readable, Reader, Writable, Writer};
@@ -196,7 +195,7 @@ where
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
         Ok(IndexedEnclosingTypeInfo::new(
-            reader.read_u32()?,
+            reader.read_value::<Option<u32>>()?,
             reader.read_value::<Option<u32>>()?,
             reader.read_value::<Option<IndexedMethodSignature>>()?,
         ))
@@ -208,7 +207,7 @@ where
     C: Context,
 {
     fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
-        writer.write_u32(*self.class_name())?;
+        self.class_name().write_to(writer)?;
         self.method_name().write_to(writer)?;
         self.method_descriptor().write_to(writer)?;
         Ok(())

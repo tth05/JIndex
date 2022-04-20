@@ -1,15 +1,9 @@
 package com.github.tth05.jindex;
 
-public class IndexedMethod {
-
-    private final long classIndexPointer;
-    private final long classPointer;
-    private final long pointer;
+public class IndexedMethod extends ClassChildObject {
 
     public IndexedMethod(long classIndexPointer, long classPointer, long pointer) {
-        this.classIndexPointer = classIndexPointer;
-        this.classPointer = classPointer;
-        this.pointer = pointer;
+        super(classIndexPointer, classPointer, pointer);
     }
 
     public native String getName();

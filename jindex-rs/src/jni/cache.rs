@@ -6,17 +6,9 @@ use jni::JNIEnv;
 use std::lazy::SyncOnceCell;
 
 pub struct FieldIDs {
-    pub class_index_pointer_id: JFieldID<'static>,
-    pub indexed_class_pointer_id: JFieldID<'static>,
-    pub indexed_class_index_pointer_id: JFieldID<'static>,
-    pub indexed_package_pointer_id: JFieldID<'static>,
-    pub indexed_package_index_pointer_id: JFieldID<'static>,
-    pub indexed_method_pointer_id: JFieldID<'static>,
-    pub indexed_method_class_pointer_id: JFieldID<'static>,
-    pub indexed_method_index_pointer_id: JFieldID<'static>,
-    pub indexed_field_pointer_id: JFieldID<'static>,
-    pub indexed_field_class_pointer_id: JFieldID<'static>,
-    pub indexed_field_index_pointer_id: JFieldID<'static>,
+    pub class_index_pointer: JFieldID<'static>,
+    pub class_index_child_self_pointer: JFieldID<'static>,
+    pub class_child_class_pointer: JFieldID<'static>,
 }
 unsafe impl Send for FieldIDs {}
 unsafe impl Sync for FieldIDs {}
@@ -46,33 +38,9 @@ pub unsafe fn init_field_ids(env: JNIEnv) {
     }
 
     let _ = CACHED_FIELD_IDS.set(FieldIDs {
-        class_index_pointer_id: transmute_field_id(env, "classIndexPointer", "ClassIndex"),
-        indexed_class_pointer_id: transmute_field_id(env, "pointer", "IndexedClass"),
-        indexed_class_index_pointer_id: transmute_field_id(
-            env,
-            "classIndexPointer",
-            "IndexedClass",
-        ),
-        indexed_package_pointer_id: transmute_field_id(env, "pointer", "IndexedPackage"),
-        indexed_package_index_pointer_id: transmute_field_id(
-            env,
-            "classIndexPointer",
-            "IndexedPackage",
-        ),
-        indexed_method_pointer_id: transmute_field_id(env, "pointer", "IndexedMethod"),
-        indexed_method_class_pointer_id: transmute_field_id(env, "classPointer", "IndexedMethod"),
-        indexed_method_index_pointer_id: transmute_field_id(
-            env,
-            "classIndexPointer",
-            "IndexedMethod",
-        ),
-        indexed_field_pointer_id: transmute_field_id(env, "pointer", "IndexedField"),
-        indexed_field_class_pointer_id: transmute_field_id(env, "classPointer", "IndexedField"),
-        indexed_field_index_pointer_id: transmute_field_id(
-            env,
-            "classIndexPointer",
-            "IndexedField",
-        ),
+        class_index_pointer: transmute_field_id(env, "classIndexPointer", "ClassIndexChildObject"),
+        class_index_child_self_pointer: transmute_field_id(env, "pointer", "ClassIndexChildObject"),
+        class_child_class_pointer: transmute_field_id(env, "classPointer", "ClassChildObject"),
     });
 }
 
@@ -84,13 +52,13 @@ pub unsafe fn get_field_with_id<'a, T>(env: JNIEnv, this: jobject, field_id: &JF
         .unwrap() as *mut T)
 }
 
-pub unsafe fn get_class_index(
-    env: JNIEnv,
-    this: jobject,
-    field_id: &JFieldID,
-) -> (jlong, &'static ClassIndex) {
+pub unsafe fn get_class_index(env: JNIEnv, this: jobject) -> (jlong, &'static ClassIndex) {
     let class_index_pointer = env
-        .get_field_unchecked(this, *field_id, JavaType::Primitive(Primitive::Long))
+        .get_field_unchecked(
+            this,
+            cached_field_ids().class_index_pointer,
+            JavaType::Primitive(Primitive::Long),
+        )
         .unwrap()
         .j()
         .unwrap();
