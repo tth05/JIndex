@@ -7,9 +7,7 @@ use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::constant_pool::ClassIndexConstantPool;
-use crate::signature::{
-    IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
-};
+use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
     let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
@@ -46,10 +44,7 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        Ok(ClassIndex::new(
-            ClassIndexConstantPool::read_from(reader)?,
-            Vec::read_from(reader)?,
-        ))
+        Ok(ClassIndex::new(reader.read_value()?, reader.read_value()?))
     }
 }
 
@@ -75,8 +70,14 @@ where
             reader.read_u8()?,
             reader.read_u16()?,
         );
-        class.set_signature(IndexedClassSignature::read_from(reader)?);
-        class.set_enclosing_type_info(IndexedEnclosingTypeInfo::read_from(reader)?);
+        class.set_signature(reader.read_value()?);
+        if let Some(info) = reader.read_value::<Option<IndexedEnclosingTypeInfo>>()? {
+            class.set_enclosing_type_info(info);
+        }
+        reader
+            .read_value::<Vec<u32>>()?
+            .into_iter()
+            .for_each(|c| class.add_member_class(c));
         class.set_fields(Vec::read_from(reader)?).unwrap();
         class.set_methods(Vec::read_from(reader)?).unwrap();
         Ok(class)
@@ -94,6 +95,7 @@ where
         self.access_flags().write_to(writer)?;
         self.signature().write_to(writer)?;
         self.enclosing_type_info().write_to(writer)?;
+        self.member_classes().write_to(writer)?;
         self.fields().write_to(writer)?;
         self.methods().write_to(writer)?;
         Ok(())
