@@ -15,14 +15,15 @@ public class IndexedClass extends ClassIndexChildObject {
 
     /**
      * Returns the name of the class as it appears in the source code. The name is extracted from the inner class
-     * attributes of this class. {@link #isAnonymous} can be used if anonymous classes are expected to not have a source name.
+     * attributes of this class. {@link #getInnerClassType()} can be used to check for anonymous classes if they are
+     * expected to not have a source name.
      * <br>
      * For example, all of these could be valid names that cannot always be determined using a split on the last '$'
      * <br>
      * <ul>
-     *      <li>"String" -> "String"</li>
-     *      <li>"String$1LocalClass" -> "LocalClass"</li>
-     *      <li>"String$1$2$Class" -> "2$Class"</li>
+     *      <li>"String" : "String"</li>
+     *      <li>"String$1LocalClass" : "LocalClass"</li>
+     *      <li>"String$1$2$Class" : "2$Class"</li>
      * </ul>
      *
      * @return the name of the class as it appears in the source code
