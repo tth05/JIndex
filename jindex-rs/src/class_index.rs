@@ -14,6 +14,7 @@ use cafebabe::{
 };
 use speedy::{Readable, Writable};
 use std::borrow::Cow;
+use std::cell::{Ref, RefCell};
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
@@ -381,6 +382,19 @@ impl ClassIndexBuilder {
                 );
             }
 
+            //Member classes
+            if let Some(members) = &class_info.member_classes {
+                members
+                    .iter()
+                    .filter_map(|m| {
+                        let (package_name, class_name) = rsplit_once(m, AsciiChar::Slash);
+                        class_index.find_class(package_name, class_name)
+                    })
+                    .for_each(|m| {
+                        indexed_class.add_member_class(m.0);
+                    })
+            }
+
             //Fields
             let mut indexed_fields = Vec::with_capacity(class_info.fields.len());
 
@@ -469,7 +483,7 @@ pub struct ClassInfo {
     pub class_name_start_index: usize,
     pub access_flags: ClassAccessFlags,
     pub enclosing_type: Option<RawEnclosingTypeInfo>,
-    pub inner_classes: Option<Vec<AsciiString>>,
+    pub member_classes: Option<Vec<AsciiString>>,
     pub signature: RawClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
@@ -495,6 +509,7 @@ pub struct IndexedClass {
     access_flags: u16,
     signature: OnceCell<IndexedClassSignature>,
     enclosing_type_info: OnceCell<IndexedEnclosingTypeInfo>,
+    member_classes: RefCell<Vec<u32>>,
     fields: OnceCell<Vec<IndexedField>>,
     methods: OnceCell<Vec<IndexedMethod>>,
 }
@@ -513,6 +528,7 @@ impl IndexedClass {
             access_flags,
             signature: OnceCell::new(),
             enclosing_type_info: OnceCell::new(),
+            member_classes: RefCell::default(),
             fields: OnceCell::new(),
             methods: OnceCell::new(),
         }
@@ -537,6 +553,10 @@ impl IndexedClass {
         } else {
             package_name + "/".as_ascii_str().unwrap() + class_name
         }
+    }
+
+    pub fn add_member_class(&self, class: u32) {
+        self.member_classes.borrow_mut().push(class);
     }
 
     pub fn enclosing_class<'a>(&self, class_index: &'a ClassIndex) -> Option<&'a IndexedClass> {
@@ -592,9 +612,15 @@ impl IndexedClass {
     pub fn methods(&self) -> &Vec<IndexedMethod> {
         self.methods.get().unwrap()
     }
+
     pub fn set_methods(&self, methods: Vec<IndexedMethod>) -> Result<(), Vec<IndexedMethod>> {
         self.methods.set(methods)
     }
+
+    pub fn member_classes(&self) -> Ref<Vec<u32>> {
+        self.member_classes.borrow()
+    }
+
     pub fn access_flags(&self) -> u16 {
         self.access_flags
     }
@@ -912,7 +938,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 full_class_name,
                 class_name_start_index,
                 enclosing_type,
-                inner_classes,
+                member_classes,
             ) = convert_enclosing_type_and_inner_classes(
                 class.this_class,
                 get_attribute_data!(
@@ -939,7 +965,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 access_flags: class.access_flags,
                 signature: parsed_signature,
                 enclosing_type,
-                inner_classes,
+                member_classes: member_classes,
                 fields: class
                     .fields
                     .into_iter()
@@ -1013,7 +1039,7 @@ fn convert_enclosing_type_and_inner_classes(
     let mut class_name_start_index = 0;
 
     let mut enclosing_type_info = None;
-    let mut inner_classes = None;
+    let mut member_classes = None;
     let mut self_inner_class_index = None;
 
     //This blocks checks the first inner class entry which can represent this class. If there is
@@ -1065,29 +1091,29 @@ fn convert_enclosing_type_and_inner_classes(
             self_inner_class_index = Some(first.0);
         }
     }
-    //NOTE: Anonymous class are allowed to have inner classes, but it's easier to just ignore them
-    // for now because they show some weird behavior.
-    if enclosing_type_info.is_none()
-        || *enclosing_type_info.as_ref().unwrap().inner_class_type() != InnerClassType::Anonymous
-    {
-        if let Some(vec) = inner_class_data {
-            inner_classes = Some(
-                vec.iter()
-                    .enumerate()
-                    .filter_map(|e| {
-                        if self_inner_class_index.is_some()
-                            && self_inner_class_index.unwrap() == e.0
-                        {
-                            None
-                        } else {
-                            e.1.inner_name.as_ref().map(|inner_name| {
-                                inner_name.to_owned().into_ascii_string().unwrap()
-                            })
-                        }
-                    })
-                    .collect(),
-            );
-        }
+    if let Some(vec) = inner_class_data {
+        member_classes = Some(
+            vec.iter()
+                .enumerate()
+                .filter_map(|e| {
+                    if (self_inner_class_index.is_some() && self_inner_class_index.unwrap() == e.0)
+                        || e.1.outer_class_info.is_none()
+                        || e.1.inner_name.is_none()
+                        || e.1.outer_class_info.as_ref().unwrap().as_ref() != this_name
+                    {
+                        None
+                    } else {
+                        Some(
+                            e.1.inner_class_info
+                                .as_ref()
+                                .to_owned()
+                                .into_ascii_string()
+                                .unwrap(),
+                        )
+                    }
+                })
+                .collect(),
+        );
     }
 
     (
@@ -1095,7 +1121,7 @@ fn convert_enclosing_type_and_inner_classes(
         class_name.to_ascii_string(),
         class_name_start_index,
         enclosing_type_info,
-        inner_classes,
+        member_classes,
     )
 }
 

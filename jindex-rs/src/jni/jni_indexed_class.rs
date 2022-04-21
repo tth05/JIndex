@@ -411,10 +411,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInner
     );
 
     if let Some(info) = indexed_class.enclosing_type_info() {
-        return info.inner_class_type().as_index() as jint;
+        info.inner_class_type().as_index() as jint
+    } else {
+        -1_i32
     }
-
-    unreachable!()
 }
 
 #[no_mangle]
@@ -455,4 +455,47 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
     } else {
         JObject::null().into_inner()
     }
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMemberClasses(
+    env: JNIEnv,
+    this: jobject,
+) -> jobjectArray {
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedClass")
+        .expect("Result class not found");
+
+    let (class_index_pointer, class_index) = get_class_index(env, this);
+    let indexed_class = get_field_with_id::<IndexedClass>(
+        env,
+        this,
+        &cached_field_ids().class_index_child_self_pointer,
+    );
+
+    let classes = indexed_class.member_classes();
+
+    let result_array = env
+        .new_object_array(classes.len() as i32, result_class, JObject::null())
+        .expect("Failed to create result array");
+    for (index, class) in classes.iter().enumerate() {
+        let object = env
+            .new_object(
+                result_class,
+                "(JJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from(
+                        (class_index.class_at_index(*class) as *const IndexedClass) as jlong,
+                    ),
+                ],
+            )
+            .expect("Failed to create result object");
+        env.set_object_array_element(result_array, index as i32, object)
+            .expect("Failed to set element into result array");
+    }
+
+    result_array
 }

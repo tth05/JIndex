@@ -38,13 +38,26 @@ public class IndexedClass extends ClassIndexChildObject {
     public native String getGenericSignatureString();
 
     public native IndexedClass getEnclosingClass();
+
+    /**
+     * @return The inner class type of this class, or {@code null} if this class is not an inner class.
+     */
     public InnerClassType getInnerClassType() {
-        return InnerClassType.values()[getInnerClassType0()];
+        int type = getInnerClassType0();
+        if (type < 0)
+            return null;
+
+        return InnerClassType.values()[type];
     }
 
-    public native int getInnerClassType0();
+    private native int getInnerClassType0();
 
     public native String getEnclosingMethodNameAndDesc();
+
+    /**
+     * @return All inner classes of this class with the {@link InnerClassType#MEMBER}.
+     */
+    public native IndexedClass[] getMemberClasses();
 
     public native IndexedClass getSuperClass();
 
