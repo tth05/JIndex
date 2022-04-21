@@ -14,7 +14,6 @@ use cafebabe::{
 };
 use speedy::{Readable, Writable};
 use std::borrow::Cow;
-use std::cell::{Ref, RefCell};
 use std::cmp::{min, Ordering};
 use std::collections::HashMap;
 use std::fs::File;
@@ -509,7 +508,7 @@ pub struct IndexedClass {
     access_flags: u16,
     signature: OnceCell<IndexedClassSignature>,
     enclosing_type_info: OnceCell<IndexedEnclosingTypeInfo>,
-    member_classes: RefCell<Vec<u32>>,
+    member_classes: AtomicRefCell<Vec<u32>>,
     fields: OnceCell<Vec<IndexedField>>,
     methods: OnceCell<Vec<IndexedMethod>>,
 }
@@ -528,7 +527,7 @@ impl IndexedClass {
             access_flags,
             signature: OnceCell::new(),
             enclosing_type_info: OnceCell::new(),
-            member_classes: RefCell::default(),
+            member_classes: AtomicRefCell::default(),
             fields: OnceCell::new(),
             methods: OnceCell::new(),
         }
@@ -617,7 +616,7 @@ impl IndexedClass {
         self.methods.set(methods)
     }
 
-    pub fn member_classes(&self) -> Ref<Vec<u32>> {
+    pub fn member_classes(&self) -> AtomicRef<Vec<u32>> {
         self.member_classes.borrow()
     }
 
