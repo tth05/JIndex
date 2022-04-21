@@ -38,6 +38,11 @@ public class IndexedClass extends ClassIndexChildObject {
     public native String getGenericSignatureString();
 
     public native IndexedClass getEnclosingClass();
+    public InnerClassType getInnerClassType() {
+        return InnerClassType.values()[getInnerClassType0()];
+    }
+
+    public native int getInnerClassType0();
 
     public native String getEnclosingMethodNameAndDesc();
 

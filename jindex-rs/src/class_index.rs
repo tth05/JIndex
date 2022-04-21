@@ -2,7 +2,8 @@ use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, Search
 use crate::signature::indexed_signature::ToIndexedType;
 use crate::signature::{
     IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
-    RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature, RawSignatureType, SignatureType,
+    InnerClassType, RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature, RawSignatureType,
+    SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
@@ -993,6 +994,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
     class_info_list
 }
+
 fn convert_enclosing_type_and_inner_classes(
     this_name: Cow<str>,
     enclosing_method_data: Option<(&Cow<str>, &Option<NameAndType>)>,
@@ -1012,49 +1014,80 @@ fn convert_enclosing_type_and_inner_classes(
 
     let mut enclosing_type_info = None;
     let mut inner_classes = None;
-    let mut skip_first_inner_class = false;
+    let mut self_inner_class_index = None;
 
     //This blocks checks the first inner class entry which can represent this class. If there is
     // one, we extract the inner and outer class names from it.
     if let Some(vec) = inner_class_data {
         if let Some(first) = vec
             .iter()
-            .find(|e| e.inner_class_info.as_ref() == this_name)
+            .enumerate()
+            .find(|e| e.1.inner_class_info.as_ref() == this_name)
         {
-            let (outer_name, inner_name_start) = extract_outer_and_inner_name(class_name, first);
+            let inner_class_type = if first.1.inner_name.is_none() {
+                //No source code name -> Anonymous
+                InnerClassType::Anonymous
+            } else if first.1.outer_class_info.is_none() {
+                //Enclosing method attribute will give us the outer class name
+                InnerClassType::Local
+            } else {
+                //Normal direct member inner class
+                InnerClassType::Member
+            };
 
-            class_name_start_index = inner_name_start;
-            enclosing_type_info = Some(RawEnclosingTypeInfo::new(Some(outer_name), None, None));
+            if let Some((class_name, method_data)) = enclosing_method_data {
+                let (method_name, method_descriptor) = match method_data {
+                    Some(NameAndType { name, descriptor }) => (
+                        Some(name.to_owned().into_ascii_string().unwrap()),
+                        Some(RawMethodSignature::from_str(descriptor).unwrap()),
+                    ),
+                    None => (None, None),
+                };
 
-            skip_first_inner_class = true
+                enclosing_type_info = Some(RawEnclosingTypeInfo::new(
+                    Some(class_name.to_owned().into_ascii_string().unwrap()),
+                    inner_class_type,
+                    method_name,
+                    method_descriptor,
+                ));
+            } else {
+                let (outer_name, inner_name_start) =
+                    extract_outer_and_inner_name(class_name, first.1);
+
+                class_name_start_index = inner_name_start;
+                enclosing_type_info = Some(RawEnclosingTypeInfo::new(
+                    Some(outer_name),
+                    inner_class_type,
+                    None,
+                    None,
+                ));
+            }
+            self_inner_class_index = Some(first.0);
         }
     }
-    if let Some((class_name, method_data)) = enclosing_method_data {
-        let (method_name, method_descriptor) = match method_data {
-            Some(NameAndType { name, descriptor }) => (
-                Some(name.to_owned().into_ascii_string().unwrap()),
-                Some(RawMethodSignature::from_str(descriptor).unwrap()),
-            ),
-            None => (None, None),
-        };
-
-        //NOTE: Anonymous class are allowed to have inner classes, but it's easier to just ignore them for now
-        enclosing_type_info = Some(RawEnclosingTypeInfo::new(
-            Some(class_name.to_owned().into_ascii_string().unwrap()),
-            method_name,
-            method_descriptor,
-        ));
-    } else if let Some(vec) = inner_class_data {
-        inner_classes = Some(
-            vec.iter()
-                .skip(skip_first_inner_class as usize)
-                .filter_map(|e| {
-                    e.inner_name
-                        .as_ref()
-                        .map(|inner_name| inner_name.to_owned().into_ascii_string().unwrap())
-                })
-                .collect(),
-        );
+    //NOTE: Anonymous class are allowed to have inner classes, but it's easier to just ignore them
+    // for now because they show some weird behavior.
+    if enclosing_type_info.is_none()
+        || *enclosing_type_info.as_ref().unwrap().inner_class_type() != InnerClassType::Anonymous
+    {
+        if let Some(vec) = inner_class_data {
+            inner_classes = Some(
+                vec.iter()
+                    .enumerate()
+                    .filter_map(|e| {
+                        if self_inner_class_index.is_some()
+                            && self_inner_class_index.unwrap() == e.0
+                        {
+                            None
+                        } else {
+                            e.1.inner_name.as_ref().map(|inner_name| {
+                                inner_name.to_owned().into_ascii_string().unwrap()
+                            })
+                        }
+                    })
+                    .collect(),
+            );
+        }
     }
 
     (

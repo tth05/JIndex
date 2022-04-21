@@ -97,9 +97,27 @@ impl<T> MethodSignature<T> {
 pub type RawMethodSignature = MethodSignature<AsciiString>;
 pub type IndexedMethodSignature = MethodSignature<u32>;
 
+#[derive(Readable, Writable, Eq, PartialEq, Clone, Copy, Debug)]
+pub enum InnerClassType {
+    Member,
+    Anonymous,
+    Local,
+}
+
+impl InnerClassType {
+    pub fn as_index(&self) -> u8 {
+        match *self {
+            InnerClassType::Member => 0,
+            InnerClassType::Anonymous => 1,
+            InnerClassType::Local => 2,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct EnclosingTypeInfo<T> {
     class_name: Option<T>,
+    inner_class_type: InnerClassType,
     method_name: Option<T>,
     //This is in a box because it's rarely used but would increase the size of this struct by 56 bytes
     method_descriptor: Option<Box<MethodSignature<T>>>,
@@ -109,11 +127,13 @@ impl<T> EnclosingTypeInfo<T> {
     pub fn new(
         //This is in an Option because when indexed, it might end up as unresolved
         class_name: Option<T>,
+        inner_class_type: InnerClassType,
         method_name: Option<T>,
         method_descriptor: Option<MethodSignature<T>>,
     ) -> Self {
         EnclosingTypeInfo {
             class_name,
+            inner_class_type,
             method_name,
             method_descriptor: method_descriptor.map(Box::new),
         }
@@ -123,10 +143,13 @@ impl<T> EnclosingTypeInfo<T> {
         self.class_name.as_ref()
     }
 
+    pub fn inner_class_type(&self) -> &InnerClassType {
+        &self.inner_class_type
+    }
+
     pub fn method_name(&self) -> Option<&T> {
         self.method_name.as_ref()
     }
-
     pub fn method_descriptor(&self) -> Option<&MethodSignature<T>> {
         self.method_descriptor.as_ref().map(|b| b.as_ref())
     }

@@ -7,6 +7,7 @@ use ascii::AsAsciiStr;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
 use jni::JNIEnv;
+use std::borrow::BorrowMut;
 
 #[no_mangle]
 /// # Safety
@@ -394,6 +395,26 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
     } else {
         JObject::null().into_inner()
     }
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInnerClassType0(
+    env: JNIEnv,
+    this: jobject,
+) -> jint {
+    let indexed_class = get_field_with_id::<IndexedClass>(
+        env,
+        this,
+        &cached_field_ids().class_index_child_self_pointer,
+    );
+
+    if let Some(info) = indexed_class.enclosing_type_info() {
+        return info.inner_class_type().as_index() as jint;
+    }
+
+    unreachable!()
 }
 
 #[no_mangle]

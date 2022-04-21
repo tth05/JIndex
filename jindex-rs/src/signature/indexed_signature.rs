@@ -463,6 +463,7 @@ impl ToIndexedType for RawEnclosingTypeInfo {
 
         IndexedEnclosingTypeInfo::new(
             class_name,
+            self.inner_class_type,
             method_name,
             self.method_descriptor.as_ref().map(|method_signature| {
                 method_signature.to_indexed_type(class_index, constant_pool_map)

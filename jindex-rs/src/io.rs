@@ -195,9 +195,10 @@ where
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
         Ok(IndexedEnclosingTypeInfo::new(
-            reader.read_value::<Option<u32>>()?,
-            reader.read_value::<Option<u32>>()?,
-            reader.read_value::<Option<IndexedMethodSignature>>()?,
+            reader.read_value()?,
+            reader.read_value()?,
+            reader.read_value()?,
+            reader.read_value()?,
         ))
     }
 }
@@ -208,6 +209,7 @@ where
 {
     fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
         self.class_name().write_to(writer)?;
+        self.inner_class_type().write_to(writer)?;
         self.method_name().write_to(writer)?;
         self.method_descriptor().write_to(writer)?;
         Ok(())
