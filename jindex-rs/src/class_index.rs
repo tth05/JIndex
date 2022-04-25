@@ -1,4 +1,5 @@
 use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
+use crate::package_index::PackageIndex;
 use crate::signature::indexed_signature::ToIndexedType;
 use crate::signature::{
     IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
@@ -6,12 +7,13 @@ use crate::signature::{
     SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
-use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
+use atomic_refcell::{AtomicRef, AtomicRefCell};
 use cafebabe::attributes::{AttributeData, AttributeInfo, InnerClassEntry};
 use cafebabe::constant_pool::NameAndType;
 use cafebabe::{
     parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
 };
+use rustc_hash::{FxHashMap};
 use speedy::{Readable, Writable};
 use std::borrow::Cow;
 use std::cmp::{min, Ordering};
@@ -27,32 +29,22 @@ use std::time::Instant;
 use zip::ZipArchive;
 
 pub struct ClassIndex {
-    constant_pool: AtomicRefCell<ClassIndexConstantPool>,
+    constant_pool: ClassIndexConstantPool,
     class_prefix_range_map: HashMap<u8, Range<u32>>,
+    package_index: PackageIndex,
     classes: Vec<IndexedClass>,
 }
 
 impl ClassIndex {
-    pub fn new(constant_pool: ClassIndexConstantPool, mut classes: Vec<IndexedClass>) -> Self {
+    pub fn new(
+        constant_pool: ClassIndexConstantPool,
+        package_index: PackageIndex,
+        classes: Vec<IndexedClass>,
+    ) -> Self {
         //Construct prefix range map
         let mut prefix_count_map: HashMap<u8, u32> = HashMap::new();
 
         let time = Instant::now();
-        classes.sort_by(|a, b| {
-            let a_name = a.class_name(&constant_pool);
-            let b_name = b.class_name(&constant_pool);
-            a_name.cmp(b_name).then_with(|| {
-                constant_pool
-                    .package_at(a.package_index)
-                    .package_name_with_parents_cmp(
-                        &constant_pool,
-                        &constant_pool
-                            .package_at(b.package_index)
-                            .package_name_with_parents(&constant_pool),
-                    )
-            })
-        });
-
         for class in classes.iter() {
             let count = prefix_count_map
                 .entry(
@@ -82,8 +74,9 @@ impl ClassIndex {
 
         range_map.shrink_to_fit();
         Self {
-            constant_pool: AtomicRefCell::new(constant_pool),
+            constant_pool,
             classes,
+            package_index,
             class_prefix_range_map: range_map,
         }
     }
@@ -160,12 +153,16 @@ impl ClassIndex {
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
         let index = class_iter.1.binary_search_by(|a| {
-            a.class_name(&self.constant_pool())
+            a.class_name(&self.constant_pool)
                 .cmp(class_name)
                 .then_with(|| {
-                    self.constant_pool()
+                    self.package_index
                         .package_at(a.package_index)
-                        .package_name_with_parents_cmp(&self.constant_pool(), package_name)
+                        .package_name_with_parents_cmp(
+                            &self.package_index,
+                            &self.constant_pool,
+                            package_name,
+                        )
                 })
         });
         if let Ok(i) = index {
@@ -175,7 +172,7 @@ impl ClassIndex {
         None
     }
 
-    pub fn find_packages(&self, name: &AsciiStr) -> Vec<AtomicRef<IndexedPackage>> {
+    pub fn find_packages(&self, name: &AsciiStr) -> Vec<&IndexedPackage> {
         if name.is_empty() {
             return Vec::default();
         }
@@ -184,8 +181,7 @@ impl ClassIndex {
         let split_index = rsplit_once(name, AsciiChar::Slash);
 
         let base_package = if split_index.0.is_empty() {
-            // :/
-            Some(AtomicRef::map(self.constant_pool(), |p| p.package_at(0)))
+            Some(self.package_index.package_at(0))
         } else {
             self.find_package(split_index.0)
         };
@@ -194,8 +190,7 @@ impl ClassIndex {
             Some(p) => {
                 let mut results = Vec::new();
                 for sub_index in p.sub_packages_indices() {
-                    let sub_package =
-                        AtomicRef::map(self.constant_pool(), |p| p.package_at(*sub_index));
+                    let sub_package = self.package_index.package_at(*sub_index);
                     if pool
                         .string_view_at(sub_package.package_name_index)
                         .starts_with(&pool, split_index.1, MatchMode::IgnoreCase)
@@ -210,12 +205,11 @@ impl ClassIndex {
         }
     }
 
-    pub fn find_package(&self, name: &AsciiStr) -> Option<AtomicRef<IndexedPackage>> {
-        let pool = self.constant_pool();
-        for sub_index in pool.package_at(0).sub_packages_indices() {
+    pub fn find_package(&self, name: &AsciiStr) -> Option<&IndexedPackage> {
+        for sub_index in self.package_index.package_at(0).sub_packages_indices() {
             let result = self.find_package_starting_at(name, *sub_index);
             if result.is_some() {
-                return result.map(|t| t.1);
+                return result.map(|p| p.1);
             }
         }
 
@@ -226,17 +220,15 @@ impl ClassIndex {
         &self,
         name: &AsciiStr,
         start_package_index: u32,
-    ) -> Option<(u32, AtomicRef<IndexedPackage>)> {
-        let package = AtomicRef::map(self.constant_pool(), |pool| {
-            pool.package_at(start_package_index)
-        });
+    ) -> Option<(u32, &IndexedPackage)> {
+        let package = self.package_index.package_at(start_package_index);
         let split_index = name
             .chars()
             .position(|ch| ch == AsciiChar::Slash)
             .unwrap_or(name.len());
         let part = &name[0..split_index];
 
-        if package.package_name(&self.constant_pool()) != part {
+        if package.package_name(&self.constant_pool) != part {
             return None;
         }
 
@@ -283,12 +275,12 @@ impl ClassIndex {
         &self.classes
     }
 
-    pub fn constant_pool(&self) -> AtomicRef<ClassIndexConstantPool> {
-        self.constant_pool.borrow()
+    pub fn package_index(&self) -> &PackageIndex {
+        &self.package_index
     }
 
-    pub fn constant_pool_mut(&self) -> AtomicRefMut<ClassIndexConstantPool> {
-        self.constant_pool.borrow_mut()
+    pub fn constant_pool(&self) -> &ClassIndexConstantPool {
+        &self.constant_pool
     }
 
     fn class_iter_for_char(&self, char: u8) -> (Range<u32>, &[IndexedClass]) {
@@ -298,6 +290,8 @@ impl ClassIndex {
         )
     }
 }
+
+pub type ClassToIndexMap<'a> = FxHashMap<(&'a AsciiStr, &'a AsciiStr), (u32, &'a IndexedClass)>;
 
 pub struct ClassIndexBuilder {
     expected_method_count: u32,
@@ -328,12 +322,15 @@ impl ClassIndexBuilder {
                 * 0.8) as u32,
         );
 
-        let mut classes: Vec<IndexedClass> = Vec::with_capacity(vec.len());
+        let mut package_index = PackageIndex::new();
+        let mut classes: Vec<((&AsciiStr, &AsciiStr), IndexedClass)> =
+            Vec::with_capacity(vec.len());
         let mut constant_pool_map: HashMap<&AsciiStr, u32> =
             HashMap::with_capacity(vec.len() + self.expected_method_count as usize);
 
         for class_info in vec.iter() {
-            let package_index = constant_pool.get_or_add_package_index(&class_info.package_name);
+            let package_index = package_index
+                .get_or_add_package_index(&mut constant_pool, &class_info.package_name);
             let class_name_index = ClassIndexBuilder::get_index_from_pool(
                 &class_info.class_name,
                 &mut constant_pool_map,
@@ -347,54 +344,50 @@ impl ClassIndexBuilder {
                 class_info.access_flags.bits(),
             );
 
-            classes.push(indexed_class);
+            classes.push((
+                (&class_info.package_name, &class_info.class_name),
+                indexed_class,
+            ));
         }
 
-        let class_index = ClassIndex::new(constant_pool, classes);
-
-        //TODO: Explore this more and make it work? Can't keep the pool borrow because it is later mutably borrowed -> Move packages into ClassIndex first
-        /*let t = Instant::now();
-        let pool = class_index.constant_pool();
-        let mut classes_map: HashMap<&AsciiStr, u32> =
-            HashMap::with_capacity(class_index.classes().len());
-        class_index
-            .classes()
-            .iter()
-            .enumerate()
-            .for_each(|(index, class)| {
-                classes_map.insert(class.class_name(&pool), index as u32);
-            });
-        println!("Created map in: {:?}", t.elapsed());
-        drop(classes_map);
-        drop(pool);*/
+        ClassIndexBuilder::sort_classes(&package_index, &constant_pool, &mut classes);
+        let mut classes_map: ClassToIndexMap =
+            FxHashMap::with_capacity_and_hasher(classes.len(), Default::default());
+        classes.iter().enumerate().for_each(|(index, class)| {
+            classes_map.insert(class.0, (index as u32, &class.1));
+        });
 
         //TODO: Multi thread this loop using dashmap/flurry?
         let mut time = 0u128;
         for class_info in vec.iter() {
             let t = Instant::now();
-            let (indexed_class_index, indexed_class) = class_index
-                .find_class(&class_info.package_name, &class_info.class_name)
+            let (indexed_class_index, indexed_class) = classes_map
+                .get(&(
+                    class_info.package_name.as_ref(),
+                    class_info.class_name.as_ref(),
+                ))
                 .unwrap();
             time += t.elapsed().as_nanos();
 
             //Add class to its package
-            class_index
-                .constant_pool_mut()
-                .package_at_mut(indexed_class.package_index)
-                .add_class(indexed_class_index);
+            package_index
+                .package_at(indexed_class.package_index)
+                .add_class(*indexed_class_index);
 
             //Signature
-            indexed_class.set_signature(
-                class_info
-                    .signature
-                    .to_indexed_type(&class_index, &mut constant_pool_map),
-            );
+            indexed_class.set_signature(class_info.signature.to_indexed_type(
+                &mut constant_pool,
+                &mut constant_pool_map,
+                &classes_map,
+            ));
 
             //Enclosing type
             if let Some(info) = &class_info.enclosing_type {
-                indexed_class.set_enclosing_type_info(
-                    info.to_indexed_type(&class_index, &mut constant_pool_map),
-                );
+                indexed_class.set_enclosing_type_info(info.to_indexed_type(
+                    &mut constant_pool,
+                    &mut constant_pool_map,
+                    &classes_map,
+                ));
             }
 
             //Member classes
@@ -402,8 +395,8 @@ impl ClassIndexBuilder {
                 members
                     .iter()
                     .filter_map(|m| {
-                        let (package_name, class_name) = rsplit_once(m, AsciiChar::Slash);
-                        class_index.find_class(package_name, class_name)
+                        let split_parts = rsplit_once(m, AsciiChar::Slash);
+                        classes_map.get(&split_parts)
                     })
                     .for_each(|m| {
                         indexed_class.add_member_class(m.0);
@@ -419,15 +412,17 @@ impl ClassIndexBuilder {
                 let field_name_index = ClassIndexBuilder::get_index_from_pool(
                     field_name,
                     &mut constant_pool_map,
-                    &mut class_index.constant_pool_mut(),
+                    &mut constant_pool,
                 );
 
                 indexed_fields.push(IndexedField::new(
                     field_name_index,
                     field_info.access_flags.bits(),
-                    field_info
-                        .descriptor
-                        .to_indexed_type(&class_index, &mut constant_pool_map),
+                    field_info.descriptor.to_indexed_type(
+                        &mut constant_pool,
+                        &mut constant_pool_map,
+                        &classes_map,
+                    ),
                 ));
             }
 
@@ -442,15 +437,17 @@ impl ClassIndexBuilder {
                 let method_name_index = ClassIndexBuilder::get_index_from_pool(
                     method_name,
                     &mut constant_pool_map,
-                    &mut class_index.constant_pool_mut(),
+                    &mut constant_pool,
                 );
 
                 indexed_methods.push(IndexedMethod::new(
                     method_name_index,
                     method_info.access_flags.bits(),
-                    method_info
-                        .signature
-                        .to_indexed_type(&class_index, &mut constant_pool_map),
+                    method_info.signature.to_indexed_type(
+                        &mut constant_pool,
+                        &mut constant_pool_map,
+                        &classes_map,
+                    ),
                 ));
             }
 
@@ -459,7 +456,30 @@ impl ClassIndexBuilder {
 
         println!("Time spent in findClass {:?}", time.div(1_000_000));
 
-        class_index
+        let classes = classes.into_iter().map(|class| class.1).collect();
+        ClassIndex::new(constant_pool, package_index, classes)
+    }
+
+    fn sort_classes(
+        package_index: &PackageIndex,
+        constant_pool: &ClassIndexConstantPool,
+        classes: &mut [((&AsciiStr, &AsciiStr), IndexedClass)],
+    ) {
+        classes.sort_by(|a, b| {
+            let a_name = a.1.class_name(constant_pool);
+            let b_name = b.1.class_name(constant_pool);
+            a_name.cmp(b_name).then_with(|| {
+                package_index
+                    .package_at(a.1.package_index)
+                    .package_name_with_parents_cmp(
+                        package_index,
+                        constant_pool,
+                        &package_index
+                            .package_at(b.1.package_index)
+                            .package_name_with_parents(package_index, constant_pool),
+                    )
+            })
+        });
     }
 
     pub fn get_index_from_pool<'a>(
@@ -555,10 +575,14 @@ impl IndexedClass {
             .into_ascii_string(constant_pool)
     }
 
-    pub fn class_name_with_package(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
-        let package_name = constant_pool
+    pub fn class_name_with_package(
+        &self,
+        package_index: &PackageIndex,
+        constant_pool: &ClassIndexConstantPool,
+    ) -> AsciiString {
+        let package_name = package_index
             .package_at(self.package_index)
-            .package_name_with_parents(constant_pool);
+            .package_name_with_parents(package_index, constant_pool);
         let class_name = constant_pool
             .string_view_at(self.name_index)
             .into_ascii_string(constant_pool);
@@ -707,11 +731,10 @@ impl IndexedMethod {
     }
 }
 
-#[derive(Readable, Writable)]
 pub struct IndexedPackage {
     package_name_index: u32,
     sub_packages_indices: Vec<u32>,
-    sub_classes_indices: Vec<u32>,
+    sub_classes_indices: AtomicRefCell<Vec<u32>>,
     previous_package_index: u32,
 }
 
@@ -720,13 +743,13 @@ impl IndexedPackage {
         Self {
             package_name_index,
             sub_packages_indices: Vec::new(),
-            sub_classes_indices: Vec::new(),
+            sub_classes_indices: AtomicRefCell::default(),
             previous_package_index,
         }
     }
 
-    pub fn add_class(&mut self, class_index: u32) {
-        self.sub_classes_indices.push(class_index);
+    pub fn add_class(&self, class_index: u32) {
+        self.sub_classes_indices.borrow_mut().push(class_index);
     }
 
     pub fn package_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
@@ -737,6 +760,7 @@ impl IndexedPackage {
 
     pub fn package_name_with_parents_cmp(
         &self,
+        package_index: &PackageIndex,
         constant_pool: &ClassIndexConstantPool,
         str: &AsciiStr,
     ) -> Ordering {
@@ -782,14 +806,18 @@ impl IndexedPackage {
                 break;
             }
 
-            current_package = constant_pool.package_at(current_package.previous_package_index);
+            current_package = package_index.package_at(current_package.previous_package_index);
             current_part = constant_pool.string_view_at(current_package.package_name_index);
         }
 
         Ordering::Less
     }
 
-    pub fn package_name_with_parents(&self, constant_pool: &ClassIndexConstantPool) -> AsciiString {
+    pub fn package_name_with_parents(
+        &self,
+        package_index: &PackageIndex,
+        constant_pool: &ClassIndexConstantPool,
+    ) -> AsciiString {
         let mut parts = Vec::with_capacity(3);
         parts.push(
             constant_pool
@@ -800,7 +828,7 @@ impl IndexedPackage {
         let mut total_length = parts.first().unwrap().len();
         let mut parent_index = self.previous_package_index;
         while parent_index != 0 {
-            let parent_package = constant_pool.package_at(parent_index);
+            let parent_package = package_index.package_at(parent_index);
             let package_name = parent_package.package_name(constant_pool);
             total_length += package_name.len();
 
@@ -829,8 +857,16 @@ impl IndexedPackage {
         &self.sub_packages_indices[..]
     }
 
-    pub fn sub_classes_indices(&self) -> &[u32] {
-        &self.sub_classes_indices[..]
+    pub fn sub_classes_indices(&self) -> AtomicRef<Vec<u32>> {
+        self.sub_classes_indices.borrow()
+    }
+
+    pub fn package_name_index(&self) -> u32 {
+        self.package_name_index
+    }
+
+    pub fn previous_package_index(&self) -> u32 {
+        self.previous_package_index
     }
 }
 

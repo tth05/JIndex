@@ -37,9 +37,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
         &cached_field_ids().class_index_child_self_pointer,
     );
 
-    env.new_string(indexed_package.package_name_with_parents(&class_index.constant_pool()))
-        .unwrap()
-        .into_inner()
+    env.new_string(
+        indexed_package
+            .package_name_with_parents(class_index.package_index(), class_index.constant_pool()),
+    )
+    .unwrap()
+    .into_inner()
 }
 
 #[no_mangle]
@@ -58,7 +61,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 
     env.new_string(
         indexed_package
-            .package_name_with_parents(&class_index.constant_pool())
+            .package_name_with_parents(class_index.package_index(), class_index.constant_pool())
             .to_string()
             .replace('/', "."),
     )
@@ -92,11 +95,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSub
         )
         .expect("Failed to create result array");
 
-    let constant_pool = class_index.constant_pool();
     for (index, package) in indexed_package
         .sub_packages_indices()
         .iter()
-        .map(|i| constant_pool.package_at(*i))
+        .map(|i| class_index.package_index().package_at(*i))
         .enumerate()
     {
         let object = env

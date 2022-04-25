@@ -3,7 +3,7 @@ use crate::signature::{
     MethodSignature, ParseError, ParseResultData, RawClassSignature, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignaturePrimitive, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 use std::str::FromStr;
 
 impl RawSignatureType {
@@ -52,7 +52,7 @@ impl RawSignatureType {
                 AsciiChar::T => {
                     let semi_colon_index = input
                         .chars()
-                        .position(|c| c == ';')
+                        .position(|ch| ch == ';')
                         .ok_or(ParseError::Eof)?;
                     let sig = SignatureType::Generic(input[1..semi_colon_index].to_ascii_string());
 
@@ -79,7 +79,7 @@ impl RawSignatureType {
         //Find < or ;
         let mut special_char_index = input
             .chars()
-            .position(|c| c == '<' || c == ';' || c == '.')
+            .position(|ch| ch == '<' || ch == ';' || ch == '.')
             .ok_or(ParseError::Eof)?;
         //Parse the first type, which we'll need either way
         let base_type = input[..special_char_index].to_ascii_string();

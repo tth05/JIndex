@@ -2,8 +2,7 @@ use crate::signature::{
     starts_with, ParseError, ParseResultData, RawTypeParameterData, SignatureType,
     TypeParameterData,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
-use std::str::FromStr;
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 
 /// Parses stuff like '<T:Ljava/lang/Object;:Ljava/lang/Comparable;B>'
 pub fn parse_generic_signature_data(
@@ -35,7 +34,7 @@ fn parse_generic_signature_data_single(
 ) -> Result<ParseResultData<RawTypeParameterData>, ParseError> {
     let mut separator_index = input
         .chars()
-        .position(|c| c == ':')
+        .position(|ch| ch == ':')
         .ok_or(ParseError::Eof)?;
     let name = input[..separator_index].to_ascii_string();
 

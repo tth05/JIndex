@@ -7,7 +7,6 @@ use ascii::AsAsciiStr;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
 use jni::JNIEnv;
-use std::borrow::BorrowMut;
 
 #[no_mangle]
 /// # Safety
@@ -64,8 +63,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
         &cached_field_ids().class_index_child_self_pointer,
     );
 
-    let constant_pool = class_index.constant_pool();
-    let indexed_package = constant_pool.package_at(indexed_class.package_index());
+    let indexed_package = class_index
+        .package_index()
+        .package_at(indexed_class.package_index());
 
     env.new_object(
         env.find_class("com/github/tth05/jindex/IndexedPackage")
@@ -94,9 +94,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
         &cached_field_ids().class_index_child_self_pointer,
     );
 
-    env.new_string(indexed_class.class_name_with_package(&class_index.constant_pool()))
-        .unwrap()
-        .into_inner()
+    env.new_string(
+        indexed_class
+            .class_name_with_package(class_index.package_index(), class_index.constant_pool()),
+    )
+    .unwrap()
+    .into_inner()
 }
 
 #[no_mangle]
@@ -115,7 +118,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
 
     env.new_string(
         indexed_class
-            .class_name_with_package(&class_index.constant_pool())
+            .class_name_with_package(class_index.package_index(), class_index.constant_pool())
             .to_string()
             .replace('/', "."),
     )
@@ -250,7 +253,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
     let super_class = indexed_class.signature().super_class().map_or_else(
         || {
             //Object has no super class
-            if indexed_class.class_name_with_package(&class_index.constant_pool())
+            if indexed_class
+                .class_name_with_package(class_index.package_index(), class_index.constant_pool())
                 == "java/lang/Object"
             {
                 None
@@ -353,7 +357,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
             .super_class()
             .map_or(true, is_basic_signature_type)
         //Object has no signature
-        || indexed_class.class_name_with_package(&class_index.constant_pool()) == "java/lang/Object"
+        || indexed_class.class_name_with_package(class_index.package_index(), class_index.constant_pool()) == "java/lang/Object"
     {
         return JObject::null().into_inner();
     }

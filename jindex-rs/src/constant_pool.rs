@@ -1,4 +1,3 @@
-use crate::class_index::IndexedPackage;
 use anyhow::{anyhow, Result};
 use ascii::{AsciiChar, AsciiStr};
 use speedy::{Readable, Writable};
@@ -6,75 +5,12 @@ use speedy::{Readable, Writable};
 #[derive(Readable, Writable)]
 pub struct ClassIndexConstantPool {
     string_data: Vec<u8>, //Holds Ascii Strings prefixed with their length
-    //TODO: Remove packages from constant pool, don't know why they're here anyway
-    indexed_packages: Vec<IndexedPackage>,
 }
 
 impl ClassIndexConstantPool {
     pub fn new(capacity: u32) -> Self {
         Self {
             string_data: Vec::with_capacity(capacity as usize),
-            indexed_packages: vec![IndexedPackage::new(0, 0)],
-        }
-    }
-
-    pub fn package_at(&self, index: u32) -> &IndexedPackage {
-        self.indexed_packages.get(index as usize).unwrap()
-    }
-
-    pub fn package_at_mut(&mut self, index: u32) -> &mut IndexedPackage {
-        self.indexed_packages.get_mut(index as usize).unwrap()
-    }
-
-    pub fn get_or_add_package_index(&mut self, name: &AsciiStr) -> u32 {
-        self.get_or_add_package_index0(0, name)
-    }
-
-    /// This may be the most disgusting method I've ever written, but I suck at Rust too much to fix it
-    fn get_or_add_package_index0(&mut self, indexed_package_index: u32, name: &AsciiStr) -> u32 {
-        let slash_index_or_none = name.chars().position(|char| char == '/');
-        let sub_name = match slash_index_or_none {
-            Some(dot_index) => &name[..dot_index],
-            None => name,
-        };
-
-        let possible_index = self
-            .indexed_packages
-            .get(indexed_package_index as usize)
-            .unwrap()
-            .sub_packages_indices()
-            .iter()
-            .enumerate()
-            .find(|p| {
-                self.indexed_packages
-                    .get(*p.1 as usize)
-                    .unwrap()
-                    .package_name(self)
-                    .eq(sub_name)
-            })
-            .map(|p| *p.1);
-
-        if let Some(index) = possible_index {
-            if let Some(dot_index) = slash_index_or_none {
-                self.get_or_add_package_index0(index, &name[dot_index + 1..])
-            } else {
-                index
-            }
-        } else {
-            let name_index = self.add_string(sub_name.as_bytes()).unwrap();
-            let new_index = self.indexed_packages.len();
-            self.indexed_packages
-                .push(IndexedPackage::new(name_index, indexed_package_index));
-            self.indexed_packages
-                .get_mut(indexed_package_index as usize)
-                .unwrap()
-                .add_sub_package(new_index as u32);
-
-            if let Some(index) = slash_index_or_none {
-                self.get_or_add_package_index0(new_index as u32, &name[index + 1..])
-            } else {
-                new_index as u32
-            }
         }
     }
 

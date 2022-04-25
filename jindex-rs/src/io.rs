@@ -1,13 +1,12 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
-use crate::class_index::{ClassIndex, IndexedClass};
+use crate::class_index::{ClassIndex, IndexedClass, IndexedPackage};
 use speedy::{Context, Readable, Reader, Writable, Writer};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-use crate::constant_pool::ClassIndexConstantPool;
-use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
+use crate::signature::{IndexedEnclosingTypeInfo, IndexedSignatureType};
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
     let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
@@ -44,7 +43,11 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        Ok(ClassIndex::new(reader.read_value()?, reader.read_value()?))
+        Ok(ClassIndex::new(
+            reader.read_value()?,
+            reader.read_value()?,
+            reader.read_value()?,
+        ))
     }
 }
 
@@ -54,7 +57,37 @@ where
 {
     fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
         self.constant_pool().write_to(writer)?;
+        self.package_index().write_to(writer)?;
         self.classes().write_to(writer)?;
+        Ok(())
+    }
+}
+
+impl<'a, C> Readable<'a, C> for IndexedPackage
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut package = IndexedPackage::new(reader.read_value()?, reader.read_value()?);
+        reader.read_value::<Vec<u32>>()?.iter().for_each(|index| {
+            package.add_sub_package(*index);
+        });
+        reader.read_value::<Vec<u32>>()?.iter().for_each(|index| {
+            package.add_class(*index);
+        });
+        Ok(package)
+    }
+}
+
+impl<C> Writable<C> for IndexedPackage
+where
+    C: Context,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        self.package_name_index().write_to(writer)?;
+        self.previous_package_index().write_to(writer)?;
+        self.sub_packages_indices().write_to(writer)?;
+        self.sub_classes_indices().write_to(writer)?;
         Ok(())
     }
 }
