@@ -2,7 +2,7 @@ mod generic_data_parser;
 pub mod indexed_signature;
 pub mod raw_signature;
 
-use ascii::{AsAsciiStrError, AsciiString};
+use ascii::{AsAsciiStrError, AsciiStr, AsciiString};
 use speedy::{Readable, Writable};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -158,6 +158,13 @@ impl<T> EnclosingTypeInfo<T> {
 pub type RawEnclosingTypeInfo = EnclosingTypeInfo<AsciiString>;
 pub type IndexedEnclosingTypeInfo = EnclosingTypeInfo<u32>;
 
+fn starts_with<T>(str: &AsciiStr, prefix: T) -> bool
+where
+    T: AsRef<AsciiStr>,
+{
+    str.as_bytes().starts_with(prefix.as_ref().as_bytes())
+}
+
 pub enum ParseError {
     Eof,
     AsciiStringError(AsAsciiStrError),
@@ -204,7 +211,7 @@ mod tests {
     #[test]
     fn test_signature_type_parser_object() {
         let input = "Ljava/lang/Object;";
-        let result = SignatureType::parse(input);
+        let result = SignatureType::parse_str(input);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, 18);
@@ -216,7 +223,7 @@ mod tests {
         macro_rules! test_object_prefix {
             ($prefix: literal, $type: ident) => {
                 let input = $prefix.to_owned() + "Ljava/lang/Object;";
-                let result = SignatureType::parse(&input);
+                let result = SignatureType::parse_str(&input);
                 assert!(result.is_ok());
                 let result = result.unwrap();
                 assert_eq!(result.0, 19);
@@ -244,7 +251,7 @@ mod tests {
         ];
 
         for input in data {
-            let result = SignatureType::parse(input);
+            let result = SignatureType::parse_str(input);
             assert!(result.is_ok());
             let result = result.unwrap();
             assert_eq!(result.0, input.len() as u16);
@@ -255,7 +262,7 @@ mod tests {
     #[test]
     fn test_signature_type_parser_array() {
         let input = "[[Ljava/lang/Object;";
-        let result = SignatureType::parse(input);
+        let result = SignatureType::parse_str(input);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, 20);
@@ -265,7 +272,7 @@ mod tests {
     #[test]
     fn test_signature_type_parser_generic() {
         let input = "TB;";
-        let result = SignatureType::parse(input);
+        let result = SignatureType::parse_str(input);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.0, 3);
@@ -277,7 +284,7 @@ mod tests {
         let primitives = vec!['Z', 'B', 'C', 'D', 'F', 'I', 'J', 'S', 'V'];
         for p in primitives {
             let input = p.to_string();
-            let result = SignatureType::parse(&input);
+            let result = SignatureType::parse_str(&input);
             assert!(result.is_ok());
             let result = result.unwrap();
             assert_eq!(result.0, 1);

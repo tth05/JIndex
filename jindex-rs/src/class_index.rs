@@ -352,6 +352,22 @@ impl ClassIndexBuilder {
 
         let class_index = ClassIndex::new(constant_pool, classes);
 
+        //TODO: Explore this more and make it work? Can't keep the pool borrow because it is later mutably borrowed -> Move packages into ClassIndex first
+        /*let t = Instant::now();
+        let pool = class_index.constant_pool();
+        let mut classes_map: HashMap<&AsciiStr, u32> =
+            HashMap::with_capacity(class_index.classes().len());
+        class_index
+            .classes()
+            .iter()
+            .enumerate()
+            .for_each(|(index, class)| {
+                classes_map.insert(class.class_name(&pool), index as u32);
+            });
+        println!("Created map in: {:?}", t.elapsed());
+        drop(classes_map);
+        drop(pool);*/
+
         //TODO: Multi thread this loop using dashmap/flurry?
         let mut time = 0u128;
         for class_info in vec.iter() {
@@ -550,7 +566,7 @@ impl IndexedClass {
         if package_name.is_empty() {
             class_name.to_ascii_string()
         } else {
-            package_name + "/".as_ascii_str().unwrap() + class_name
+            package_name + unsafe { "/".as_ascii_str_unchecked() } + class_name
         }
     }
 
@@ -964,7 +980,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 access_flags: class.access_flags,
                 signature: parsed_signature,
                 enclosing_type,
-                member_classes: member_classes,
+                member_classes,
                 fields: class
                     .fields
                     .into_iter()

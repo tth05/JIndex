@@ -3,23 +3,29 @@ use crate::signature::{
     MethodSignature, ParseError, ParseResultData, RawClassSignature, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignaturePrimitive, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use std::str::FromStr;
 
 impl RawSignatureType {
-    pub(super) fn parse(input: &str) -> Result<ParseResultData<RawSignatureType>, ParseError> {
-        if let Some(first_char) = input.chars().next() {
+    pub(super) fn parse_str(input: &str) -> Result<ParseResultData<RawSignatureType>, ParseError> {
+        return RawSignatureType::parse_ascii(input.as_ascii_str()?);
+    }
+
+    pub(super) fn parse_ascii(
+        input: &AsciiStr,
+    ) -> Result<ParseResultData<RawSignatureType>, ParseError> {
+        if let Some(first_char) = input.get_ascii(0) {
             let result = match first_char {
-                'Z' => (1, SignatureType::Primitive(SignaturePrimitive::Boolean)),
-                'B' => (1, SignatureType::Primitive(SignaturePrimitive::Byte)),
-                'C' => (1, SignatureType::Primitive(SignaturePrimitive::Char)),
-                'D' => (1, SignatureType::Primitive(SignaturePrimitive::Double)),
-                'F' => (1, SignatureType::Primitive(SignaturePrimitive::Float)),
-                'I' => (1, SignatureType::Primitive(SignaturePrimitive::Int)),
-                'J' => (1, SignatureType::Primitive(SignaturePrimitive::Long)),
-                'S' => (1, SignatureType::Primitive(SignaturePrimitive::Short)),
-                'V' => (1, SignatureType::Primitive(SignaturePrimitive::Void)),
-                'L' => {
+                AsciiChar::Z => (1, SignatureType::Primitive(SignaturePrimitive::Boolean)),
+                AsciiChar::B => (1, SignatureType::Primitive(SignaturePrimitive::Byte)),
+                AsciiChar::C => (1, SignatureType::Primitive(SignaturePrimitive::Char)),
+                AsciiChar::D => (1, SignatureType::Primitive(SignaturePrimitive::Double)),
+                AsciiChar::F => (1, SignatureType::Primitive(SignaturePrimitive::Float)),
+                AsciiChar::I => (1, SignatureType::Primitive(SignaturePrimitive::Int)),
+                AsciiChar::J => (1, SignatureType::Primitive(SignaturePrimitive::Long)),
+                AsciiChar::S => (1, SignatureType::Primitive(SignaturePrimitive::Short)),
+                AsciiChar::V => (1, SignatureType::Primitive(SignaturePrimitive::Void)),
+                AsciiChar::L => {
                     let object = SignatureType::parse_object(&input[1..])?;
                     let mut index = object.0 as usize;
                     if input.get_ascii(index).ok_or(ParseError::Eof)? == ';' {
@@ -38,28 +44,29 @@ impl RawSignatureType {
                         )
                     }
                 }
-                '[' => {
-                    let inner = SignatureType::parse(&input[1..])?;
+                AsciiChar::BracketOpen => {
+                    let inner = SignatureType::parse_ascii(&input[1..])?;
 
                     (1 + inner.0, SignatureType::Array(Box::new(inner.1)))
                 }
-                'T' => {
-                    let semi_colon_index = input.find(|c| c == ';').ok_or(ParseError::Eof)?;
-                    let sig = SignatureType::Generic(
-                        input[1..semi_colon_index].as_ascii_str()?.to_ascii_string(),
-                    );
+                AsciiChar::T => {
+                    let semi_colon_index = input
+                        .chars()
+                        .position(|c| c == ';')
+                        .ok_or(ParseError::Eof)?;
+                    let sig = SignatureType::Generic(input[1..semi_colon_index].to_ascii_string());
 
                     (semi_colon_index as u16 + 1, sig)
                 }
-                '-' => {
-                    let inner = SignatureType::parse(&input[1..])?;
+                AsciiChar::Minus => {
+                    let inner = SignatureType::parse_ascii(&input[1..])?;
                     (1 + inner.0, SignatureType::ObjectMinus(Box::new(inner.1)))
                 }
-                '+' => {
-                    let inner = SignatureType::parse(&input[1..])?;
+                AsciiChar::Plus => {
+                    let inner = SignatureType::parse_ascii(&input[1..])?;
                     (1 + inner.0, SignatureType::ObjectPlus(Box::new(inner.1)))
                 }
-                _ => return Err(ParseError::UnexpectedChar(first_char)),
+                _ => return Err(ParseError::UnexpectedChar(first_char.as_char())),
             };
 
             Ok(result)
@@ -68,13 +75,14 @@ impl RawSignatureType {
         }
     }
 
-    fn parse_object(input: &str) -> Result<ParseResultData<RawSignatureType>, ParseError> {
+    fn parse_object(input: &AsciiStr) -> Result<ParseResultData<RawSignatureType>, ParseError> {
         //Find < or ;
         let mut special_char_index = input
-            .find(|c| c == '<' || c == ';' || c == '.')
+            .chars()
+            .position(|c| c == '<' || c == ';' || c == '.')
             .ok_or(ParseError::Eof)?;
         //Parse the first type, which we'll need either way
-        let base_type = AsciiString::from(input[..special_char_index].as_ascii_str()?);
+        let base_type = input[..special_char_index].to_ascii_string();
 
         //Parse the generic type bounds if there are any
         let sig = match SignatureType::parse_generic_type_bounds(&input[special_char_index..]) {
@@ -89,7 +97,7 @@ impl RawSignatureType {
     }
 
     fn parse_generic_type_bounds(
-        input: &str,
+        input: &AsciiStr,
     ) -> Result<ParseResultData<Vec<Option<RawSignatureType>>>, ParseError> {
         let mut index = 0;
         let first_char = input.get_ascii(index).ok_or(ParseError::Eof)?;
@@ -106,7 +114,7 @@ impl RawSignatureType {
                 index += 1;
                 None
             } else {
-                let parse_result = SignatureType::parse(&input[index..])?;
+                let parse_result = SignatureType::parse_ascii(&input[index..])?;
                 index += parse_result.0 as usize;
                 Some(parse_result.1)
             });
@@ -123,7 +131,7 @@ impl FromStr for RawSignatureType {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(SignatureType::parse(s)?.1)
+        Ok(SignatureType::parse_str(s)?.1)
     }
 }
 
@@ -219,6 +227,8 @@ impl FromStr for RawClassSignature {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let generic_data = parse_generic_signature_data(input).ok();
+        let input = unsafe { input.as_ascii_str_unchecked() }; //parse_generic_signature_data validated the input for us
+
         let mut start_index = if let Some(ref result) = generic_data {
             result.0 as usize
         } else {
@@ -228,7 +238,7 @@ impl FromStr for RawClassSignature {
         let mut other_classes = {
             let mut parameters = Vec::new();
             while start_index < input.len() {
-                let parse_result = SignatureType::parse(&input[start_index..])?;
+                let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
                 start_index += parse_result.0 as usize;
                 parameters.push(parse_result.1);
             }
@@ -268,6 +278,8 @@ impl FromStr for RawMethodSignature {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         let generic_data = parse_generic_signature_data(input).ok();
+        let input = unsafe { input.as_ascii_str_unchecked() }; //parse_generic_signature_data validated the input for us
+
         let mut start_index = if let Some(ref result) = generic_data {
             result.0 as usize
         } else {
@@ -279,7 +291,7 @@ impl FromStr for RawMethodSignature {
 
             let mut parameters = Vec::new();
             while input.get_ascii(start_index).ok_or(ParseError::Eof)? != ')' {
-                let parse_result = SignatureType::parse(&input[start_index..])?;
+                let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
                 start_index += parse_result.0 as usize;
                 parameters.push(parse_result.1);
             }
@@ -296,7 +308,7 @@ impl FromStr for RawMethodSignature {
         Ok(MethodSignature {
             generic_data: generic_data.map(|v| v.1),
             parameters,
-            return_type: SignatureType::parse(&input[start_index..])?.1,
+            return_type: SignatureType::parse_ascii(&input[start_index..])?.1,
         })
     }
 }

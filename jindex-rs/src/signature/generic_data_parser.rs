@@ -1,20 +1,25 @@
 use crate::signature::{
-    ParseError, ParseResultData, RawTypeParameterData, SignatureType, TypeParameterData,
+    starts_with, ParseError, ParseResultData, RawTypeParameterData, SignatureType,
+    TypeParameterData,
 };
-use ascii::AsAsciiStr;
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use std::str::FromStr;
 
 /// Parses stuff like '<T:Ljava/lang/Object;:Ljava/lang/Comparable;B>'
 pub fn parse_generic_signature_data(
     input: &str,
 ) -> Result<ParseResultData<Vec<RawTypeParameterData>>, ParseError> {
-    if let Some(first_char) = input.chars().next() {
+    let input = input.as_ascii_str()?;
+    if let Some(first_char) = input.get_ascii(0) {
         if first_char != '<' {
-            return Err(ParseError::UnexpectedChar(first_char));
+            return Err(ParseError::UnexpectedChar(first_char.as_char()));
         }
 
         let mut parts = Vec::new();
         let mut current_index = 1;
-        while current_index < input.len() && !input[current_index..].starts_with('>') {
+        while current_index < input.len()
+            && !starts_with(&input[current_index..], AsciiChar::GreaterThan)
+        {
             let part = parse_generic_signature_data_single(&input[current_index..])?;
             current_index += part.0 as usize;
             parts.push(part.1);
@@ -26,13 +31,13 @@ pub fn parse_generic_signature_data(
 }
 
 fn parse_generic_signature_data_single(
-    input: &str,
+    input: &AsciiStr,
 ) -> Result<ParseResultData<RawTypeParameterData>, ParseError> {
-    let mut separator_index = input.find(|c| c == ':').ok_or(ParseError::Eof)?;
-    let name = input[..separator_index]
-        .as_ascii_str()
-        .unwrap()
-        .to_ascii_string();
+    let mut separator_index = input
+        .chars()
+        .position(|c| c == ':')
+        .ok_or(ParseError::Eof)?;
+    let name = input[..separator_index].to_ascii_string();
 
     let mut is_first = true;
     let mut type_bound = None;
@@ -42,21 +47,21 @@ fn parse_generic_signature_data_single(
             return Err(ParseError::Eof);
         }
 
-        if is_first && input[separator_index + 1..].starts_with(':') {
+        if is_first && starts_with(&input[separator_index + 1..], AsciiChar::Colon) {
             separator_index += 1;
         } else {
-            if !is_first && !input[separator_index..].starts_with(':') {
+            if !is_first && !starts_with(&input[separator_index..], AsciiChar::Colon) {
                 break;
             }
 
             separator_index += 1;
-            let t = SignatureType::parse(&input[separator_index..])?;
+            let t = SignatureType::parse_ascii(&input[separator_index..])?;
             separator_index += t.0 as usize;
 
             if is_first {
                 //Exclude Object signatures because these are the default
                 if let SignatureType::Object(str) = &t.1 {
-                    if str.eq("java/lang/Object") {
+                    if &str[..] == unsafe { "java/lang/Object".as_ascii_str_unchecked() } {
                         is_first = false;
                         continue;
                     }
