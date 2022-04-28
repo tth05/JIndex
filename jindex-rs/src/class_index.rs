@@ -10,10 +10,8 @@ use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell};
 use cafebabe::attributes::{AttributeData, AttributeInfo, InnerClassEntry};
 use cafebabe::constant_pool::NameAndType;
-use cafebabe::{
-    parse_class_with_options, ClassAccessFlags, FieldAccessFlags, MethodAccessFlags, ParseOptions,
-};
-use rustc_hash::{FxHashMap};
+use cafebabe::{parse_class_with_options, FieldAccessFlags, MethodAccessFlags, ParseOptions};
+use rustc_hash::FxHashMap;
 use speedy::{Readable, Writable};
 use std::borrow::Cow;
 use std::cmp::{min, Ordering};
@@ -21,7 +19,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::lazy::OnceCell;
-use std::ops::{Div, Range};
+use std::ops::{BitOr, Div, Range};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -341,7 +339,7 @@ impl ClassIndexBuilder {
                 package_index,
                 class_name_index,
                 class_info.class_name_start_index as u8, //Name can't be longer than u8::MAX
-                class_info.access_flags.bits(),
+                class_info.access_flags,
             );
 
             classes.push((
@@ -516,7 +514,7 @@ pub struct ClassInfo {
     pub package_name: AsciiString,
     pub class_name: AsciiString,
     pub class_name_start_index: usize,
-    pub access_flags: ClassAccessFlags,
+    pub access_flags: u16,
     pub enclosing_type: Option<RawEnclosingTypeInfo>,
     pub member_classes: Option<Vec<AsciiString>>,
     pub signature: RawClassSignature,
@@ -988,6 +986,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 package_name,
                 full_class_name,
                 class_name_start_index,
+                inner_class_access_flags,
                 enclosing_type,
                 member_classes,
             ) = convert_enclosing_type_and_inner_classes(
@@ -1013,7 +1012,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                 package_name,
                 class_name: full_class_name,
                 class_name_start_index,
-                access_flags: class.access_flags,
+                access_flags: class.access_flags.bits().bitor(inner_class_access_flags),
                 signature: parsed_signature,
                 enclosing_type,
                 member_classes,
@@ -1080,14 +1079,14 @@ fn convert_enclosing_type_and_inner_classes(
     AsciiString,
     AsciiString,
     usize,
+    u16,
     Option<RawEnclosingTypeInfo>,
     Option<Vec<AsciiString>>,
 ) {
-    //TODO: How to handle inner class access flags? "java/lang/ApplicationShutdownHooks$1" has FINAL | SUPER but inner class access flags are STATIC
-
     let this_name = this_name.as_ascii_str().unwrap();
     let (package_name, class_name) = rsplit_once(this_name, AsciiChar::Slash);
     let mut class_name_start_index = 0;
+    let mut access_flags = 0;
 
     let mut enclosing_type_info = None;
     let mut member_classes = None;
@@ -1101,6 +1100,8 @@ fn convert_enclosing_type_and_inner_classes(
             .enumerate()
             .find(|e| e.1.inner_class_info.as_ref() == this_name)
         {
+            access_flags = first.1.access_flags.bits();
+
             let inner_class_type = if first.1.inner_name.is_none() {
                 //No source code name -> Anonymous
                 InnerClassType::Anonymous
@@ -1171,6 +1172,7 @@ fn convert_enclosing_type_and_inner_classes(
         package_name.to_ascii_string(),
         class_name.to_ascii_string(),
         class_name_start_index,
+        access_flags,
         enclosing_type_info,
         member_classes,
     )
