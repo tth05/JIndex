@@ -15,10 +15,6 @@ jobs:
         with:
           toolchain: nightly
           default: true
-          profile: minimal
-      - uses: Swatinem/rust-cache@v1
-        with:
-          working-directory: jindex-rs
       - name: Build with Gradle
         env:
           PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}

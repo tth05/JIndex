@@ -4,6 +4,7 @@
 mod class_index;
 mod constant_pool;
 mod io;
+mod package_index;
 mod signature;
 
 pub mod jni;
