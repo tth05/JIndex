@@ -60,12 +60,19 @@ impl IndexedSignatureType {
                 IndexedSignatureType::Array(outer) => inner.eq_erased(outer),
                 _ => false,
             },
-            IndexedSignatureType::Unresolved => match other {
-                IndexedSignatureType::Unresolved => true,
-                _ => false,
+            IndexedSignatureType::Unresolved => matches!(other, IndexedSignatureType::Unresolved),
+            // Generics gets erased to Object
+            IndexedSignatureType::Generic(_) => true,
+            _ => match other {
+                // Generics gets erased to Object
+                IndexedSignatureType::Generic(_) => true,
+                _ => {
+                    // Compare the base object type
+                    self.extract_base_object_type()
+                        .and_then(|t| other.extract_base_object_type().map(|u| t == u))
+                        == Some(true)
+                }
             },
-            //All object types and generic params erase to java/lang/Object
-            _ => true,
         }
     }
 }
