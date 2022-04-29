@@ -1156,7 +1156,7 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
                     .into_iter()
                     .filter_map(|m| {
                         let name = m.name.into_ascii_string();
-                        if name.is_err() {
+                        if name.is_err() || m.access_flags.contains(MethodAccessFlags::SYNTHETIC) {
                             return None;
                         }
 
