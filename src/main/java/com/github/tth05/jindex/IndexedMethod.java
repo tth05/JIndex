@@ -16,7 +16,9 @@ public class IndexedMethod extends ClassChildObject {
 
     public native String getGenericSignatureString();
 
-    public native IndexedMethod[] findImplementations(boolean includeBaseMethod);
+    public native IndexedMethod[] findImplementations();
+
+    public native IndexedMethod[] findBaseMethods();
 
     @Override
     public String toString() {

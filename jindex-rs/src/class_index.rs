@@ -293,49 +293,9 @@ impl ClassIndex {
 
     pub fn find_implementations_of_method<'b>(
         &'b self,
-        mut defining_class_index: u32,
-        mut target_method: &'b IndexedMethod,
-        include_base_method: bool,
+        defining_class_index: u32,
+        target_method: &'b IndexedMethod,
     ) -> Vec<(&IndexedClass, &IndexedMethod)> {
-        fn find_method_in_super_class<'a>(
-            class_index: &'a ClassIndex,
-            class: &IndexedClass,
-            target_method: &IndexedMethod,
-        ) -> Option<(&'a IndexedClass, &'a IndexedMethod)> {
-            // Check all super types of the given class
-            all_direct_super_types!(class)
-                .filter_map(|c| c.extract_base_object_type())
-                .map(|i| class_index.class_at_index(i))
-                //TODO: Base method could be defined in multiple interfaces/classes, this just picks the first one
-                .find_map(|c| {
-                    // Find any method which matches the target method
-                    c.methods()
-                        .iter()
-                        .find(|m| target_method.overrides(m))
-                        .map(|m| (c, m))
-                })
-                .or_else(|| {
-                    // Recursively traverse the super types
-                    all_direct_super_types!(class)
-                        .filter_map(|c| c.extract_base_object_type())
-                        .map(|i| class_index.class_at_index(i))
-                        .find_map(|c| find_method_in_super_class(class_index, c, target_method))
-                })
-        }
-
-        if include_base_method {
-            // Tries to find the base method in any super class
-            let opt = find_method_in_super_class(
-                self,
-                self.class_at_index(defining_class_index),
-                target_method,
-            );
-            if let Some((class, method)) = opt {
-                defining_class_index = class.index();
-                target_method = method;
-            }
-        }
-
         self.find_implementations_of_class(defining_class_index, false)
             .iter()
             .flat_map(|class| {
@@ -344,6 +304,31 @@ impl ClassIndex {
                     .iter()
                     .filter(|m| m.overrides(target_method))
                     .map(|m| (*class, m))
+            })
+            .collect()
+    }
+
+    pub fn find_base_methods_of_method(
+        &self,
+        class: &IndexedClass,
+        target_method: &IndexedMethod,
+    ) -> Vec<(&IndexedClass, &IndexedMethod)> {
+        // Check all super types of the given class
+        all_direct_super_types!(class)
+            .filter_map(|c| c.extract_base_object_type())
+            .map(|i| self.class_at_index(i))
+            .flat_map(|c| {
+                c.methods()
+                    .iter()
+                    // Collect all methods from the current class
+                    .filter(|m| target_method.overrides(m))
+                    // We don't use `c` here directly to satisfy the borrow checker
+                    .map(|m| (self.class_at_index(c.index()), m))
+                    .chain(
+                        // Recursively search super types of current class
+                        self.find_base_methods_of_method(c, target_method)
+                            .into_iter(),
+                    )
             })
             .collect()
     }

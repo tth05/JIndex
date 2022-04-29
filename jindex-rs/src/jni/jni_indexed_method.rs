@@ -133,7 +133,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImplementations(
     env: JNIEnv,
     this: jobject,
-    include_base_method: jboolean,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
 
@@ -145,11 +144,53 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImp
     let indexed_class =
         get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
 
-    let impls = class_index.find_implementations_of_method(
-        indexed_class.index(),
-        indexed_method,
-        include_base_method != 0,
+    let impls = class_index.find_implementations_of_method(indexed_class.index(), indexed_method);
+
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedMethod")
+        .expect("Result class not found");
+
+    let result_array = env
+        .new_object_array(impls.len() as i32, result_class, JObject::null())
+        .expect("Failed to create result array");
+
+    for (index, (declaring_class, result_method)) in impls.iter().enumerate() {
+        let object = env
+            .new_object(
+                result_class,
+                "(JJJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from((*declaring_class as *const IndexedClass) as jlong),
+                    JValue::from((*result_method as *const IndexedMethod) as jlong),
+                ],
+            )
+            .expect("Failed to create result object");
+        env.set_object_array_element(result_array, index as i32, object)
+            .expect("Failed to set element into result array");
+    }
+
+    result_array
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findBaseMethods(
+    env: JNIEnv,
+    this: jobject,
+) -> jobjectArray {
+    let (class_index_pointer, class_index) = get_class_index(env, this);
+
+    let indexed_method = get_field_with_id::<IndexedMethod>(
+        env,
+        this,
+        &cached_field_ids().class_index_child_self_pointer,
     );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
+
+    let impls = class_index.find_base_methods_of_method(indexed_class, indexed_method);
 
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedMethod")
