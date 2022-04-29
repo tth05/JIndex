@@ -1,3 +1,4 @@
+use crate::all_direct_super_types;
 use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
 use crate::package_index::PackageIndex;
 use crate::signature::indexed_signature::ToIndexedType;
@@ -79,11 +80,7 @@ impl ClassIndex {
         }
     }
 
-    pub fn find_classes(
-        &self,
-        name: &AsciiStr,
-        options: SearchOptions,
-    ) -> Vec<(u32, &IndexedClass)> {
+    pub fn find_classes(&self, name: &AsciiStr, options: SearchOptions) -> Vec<&IndexedClass> {
         if name.is_empty() {
             return Vec::default();
         }
@@ -105,21 +102,21 @@ impl ClassIndex {
             },
             SearchMode::Contains => {
                 //We have to search all classes in contains mode
-                iters.push((0..self.classes.len() as u32, &self.classes[..]));
+                iters.push(&self.classes[..]);
             }
         }
 
-        let mut result: Vec<(usize, (u32, &IndexedClass))> = Vec::new();
+        let mut result: Vec<(usize, &IndexedClass)> = Vec::new();
 
         for x in iters {
             let mut index = 0;
-            x.1.iter()
+            x.iter()
                 .filter_map(|class| {
                     let result = self
                         .constant_pool()
                         .string_view_at(class.name_index)
                         .search(&self.constant_pool(), name, options)
-                        .map(|r| (r, (x.0.start + index, class)));
+                        .map(|r| (r, class));
 
                     index += 1;
                     result
@@ -143,14 +140,14 @@ impl ClassIndex {
         &self,
         package_name: &AsciiStr,
         class_name: &AsciiStr,
-    ) -> Option<(u32, &IndexedClass)> {
+    ) -> Option<&IndexedClass> {
         if class_name.is_empty() {
             return Option::None;
         }
 
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
-        let index = class_iter.1.binary_search_by(|a| {
+        let index = class_iter.binary_search_by(|a| {
             a.class_name(&self.constant_pool)
                 .cmp(class_name)
                 .then_with(|| {
@@ -164,7 +161,7 @@ impl ClassIndex {
                 })
         });
         if let Ok(i) = index {
-            return Some((class_iter.0.start + i as u32, class_iter.1.get(i).unwrap()));
+            return Some(class_iter.get(i).unwrap());
         }
 
         None
@@ -258,11 +255,97 @@ impl ClassIndex {
             .filter(|method| {
                 self.constant_pool()
                     .string_view_at(method.name_index)
-                    .starts_with(&self.constant_pool(), name, MatchMode::MatchCase)
+                    .starts_with(self.constant_pool(), name, MatchMode::MatchCase)
             })
             .take(limit)
             .collect();
         Ok(res)
+    }
+
+    pub fn find_implementations_of_class(
+        &self,
+        index: u32,
+        direct_sub_types_only: bool,
+    ) -> Vec<&IndexedClass> {
+        self.classes
+            .iter()
+            .filter(|class| {
+                if direct_sub_types_only {
+                    class.is_direct_sub_type_of(index)
+                } else {
+                    let mut optional_parent = Some(*class);
+                    while let Some(parent) = optional_parent {
+                        if parent.is_direct_sub_type_of(index) {
+                            return true;
+                        }
+                        optional_parent = parent
+                            .signature()
+                            .super_class()
+                            .and_then(|s| s.extract_base_object_type())
+                            .map(|i| self.class_at_index(i));
+                    }
+
+                    false
+                }
+            })
+            .collect()
+    }
+
+    pub fn find_implementations_of_method<'b>(
+        &'b self,
+        mut defining_class_index: u32,
+        mut target_method: &'b IndexedMethod,
+        include_base_method: bool,
+    ) -> Vec<(&IndexedClass, &IndexedMethod)> {
+        fn find_method_in_super_class<'a>(
+            class_index: &'a ClassIndex,
+            class: &IndexedClass,
+            target_method: &IndexedMethod,
+        ) -> Option<(&'a IndexedClass, &'a IndexedMethod)> {
+            // Check all super types of the given class
+            all_direct_super_types!(class)
+                .filter_map(|c| c.extract_base_object_type())
+                .map(|i| class_index.class_at_index(i))
+                //TODO: Base method could be defined in multiple interfaces/classes, this just picks the first one
+                .find_map(|c| {
+                    // Find any method which matches the target method
+                    c.methods()
+                        .iter()
+                        .find(|m| target_method.overrides(m))
+                        .map(|m| (c, m))
+                })
+                .or_else(|| {
+                    // Recursively traverse the super types
+                    all_direct_super_types!(class)
+                        .filter_map(|c| c.extract_base_object_type())
+                        .map(|i| class_index.class_at_index(i))
+                        .find_map(|c| find_method_in_super_class(class_index, c, target_method))
+                })
+        }
+
+        if include_base_method {
+            // Tries to find the base method in any super class
+            let opt = find_method_in_super_class(
+                self,
+                self.class_at_index(defining_class_index),
+                target_method,
+            );
+            if let Some((class, method)) = opt {
+                defining_class_index = class.index();
+                target_method = method;
+            }
+        }
+
+        self.find_implementations_of_class(defining_class_index, false)
+            .iter()
+            .flat_map(|class| {
+                class
+                    .methods()
+                    .iter()
+                    .filter(|m| m.overrides(target_method))
+                    .map(|m| (*class, m))
+            })
+            .collect()
     }
 
     pub fn class_at_index(&self, index: u32) -> &IndexedClass {
@@ -281,10 +364,10 @@ impl ClassIndex {
         &self.constant_pool
     }
 
-    fn class_iter_for_char(&self, char: u8) -> (Range<u32>, &[IndexedClass]) {
+    fn class_iter_for_char(&self, char: u8) -> &[IndexedClass] {
         self.class_prefix_range_map.get(&char).map_or_else(
-            || (0..0, &self.classes[0..0]),
-            |r| (r.clone(), &self.classes[r.start as usize..r.end as usize]),
+            || &self.classes[0..0],
+            |r| &self.classes[r.start as usize..r.end as usize],
         )
     }
 }
@@ -352,6 +435,7 @@ impl ClassIndexBuilder {
         let mut classes_map: ClassToIndexMap =
             FxHashMap::with_capacity_and_hasher(classes.len(), Default::default());
         classes.iter().enumerate().for_each(|(index, class)| {
+            class.1.set_index(index as u32);
             classes_map.insert(class.0, (index as u32, &class.1));
         });
 
@@ -534,8 +618,8 @@ pub struct MethodInfo {
     pub access_flags: MethodAccessFlags,
 }
 
-// #[derive(Readable, Writable)]
 pub struct IndexedClass {
+    index: OnceCell<u32>,
     package_index: u32,
     name_index: u32,
     name_start_index: u8,
@@ -547,6 +631,16 @@ pub struct IndexedClass {
     methods: OnceCell<Vec<IndexedMethod>>,
 }
 
+#[macro_export]
+macro_rules! all_direct_super_types {
+    ($ref: ident) => {
+        $ref.signature()
+            .super_class()
+            .into_iter()
+            .chain($ref.signature().interfaces().iter().flat_map(|v| v.iter()))
+    };
+}
+
 impl IndexedClass {
     pub fn new(
         package_index: u32,
@@ -555,6 +649,7 @@ impl IndexedClass {
         access_flags: u16,
     ) -> Self {
         Self {
+            index: OnceCell::new(),
             package_index,
             name_index: class_name_index,
             name_start_index: class_name_start_index,
@@ -600,6 +695,20 @@ impl IndexedClass {
         self.enclosing_type_info()
             .filter(|info| info.class_name().is_some())
             .map(|info| class_index.class_at_index(*info.class_name().unwrap()))
+    }
+
+    pub fn is_direct_sub_type_of(&self, other_class: u32) -> bool {
+        all_direct_super_types!(self)
+            .filter_map(|s| s.extract_base_object_type())
+            .any(|o| o == other_class)
+    }
+
+    pub fn index(&self) -> u32 {
+        *self.index.get().unwrap()
+    }
+
+    pub fn set_index(&self, index: u32) {
+        self.index.set(index).unwrap();
     }
 
     pub fn set_signature(&self, signature: IndexedClassSignature) {
@@ -718,6 +827,23 @@ impl IndexedMethod {
         constant_pool
             .string_view_at(self.name_index)
             .into_ascii_string(constant_pool)
+    }
+
+    pub fn overrides(&self, base_method: &IndexedMethod) -> bool {
+        // If the target method is private, we can't override it
+        if MethodAccessFlags::PRIVATE.bits() & base_method.access_flags != 0 {
+            return false;
+        }
+
+        self.name_index == base_method.name_index
+            && self.method_signature.parameters().len()
+                == base_method.method_signature.parameters().len()
+            && self
+                .method_signature
+                .parameters()
+                .iter()
+                .zip(base_method.method_signature.parameters().iter())
+                .all(|(a, b)| a.eq_erased(b))
     }
 
     pub fn access_flags(&self) -> u16 {

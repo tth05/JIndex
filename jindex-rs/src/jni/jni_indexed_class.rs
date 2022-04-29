@@ -5,7 +5,7 @@ use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIn
 use crate::signature::SignatureType;
 use ascii::AsAsciiStr;
 use jni::objects::{JObject, JValue};
-use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
+use jni::sys::{jboolean, jint, jlong, jobject, jobjectArray, jsize, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -264,7 +264,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
         },
         |s| match s {
             SignatureType::Unresolved => None,
-            _ => Some(class_index.class_at_index(*s.extract_base_object_type())),
+            _ => Some(class_index.class_at_index(s.extract_base_object_type().unwrap())),
         },
     );
 
@@ -313,8 +313,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
         .new_object_array(array_length as jsize, result_class, JObject::null())
         .expect("Failed to create result array");
 
-    for (index, interface_index) in interface_indicies.as_ref().unwrap().iter().enumerate() {
-        let class = class_index.class_at_index(*interface_index.extract_base_object_type());
+    for (index, interface_index) in interface_indicies
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter_map(|i| i.extract_base_object_type())
+        .enumerate()
+    {
+        let class = class_index.class_at_index(interface_index);
 
         let object = env
             .new_object(
@@ -494,6 +500,49 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMembe
                     JValue::from(
                         (class_index.class_at_index(*class) as *const IndexedClass) as jlong,
                     ),
+                ],
+            )
+            .expect("Failed to create result object");
+        env.set_object_array_element(result_array, index as i32, object)
+            .expect("Failed to set element into result array");
+    }
+
+    result_array
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_findImplementations(
+    env: JNIEnv,
+    this: jobject,
+    direct_sub_types_only: jboolean,
+) -> jobjectArray {
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedClass")
+        .expect("Result class not found");
+
+    let indexed_class = get_field_with_id::<IndexedClass>(
+        env,
+        this,
+        &cached_field_ids().class_index_child_self_pointer,
+    );
+    let (class_index_pointer, class_index) = get_class_index(env, this);
+
+    let classes: Vec<_> = class_index
+        .find_implementations_of_class(indexed_class.index(), direct_sub_types_only != 0);
+
+    let result_array = env
+        .new_object_array(classes.len() as i32, result_class, JObject::null())
+        .expect("Failed to create result array");
+    for (index, class) in classes.into_iter().enumerate() {
+        let object = env
+            .new_object(
+                result_class,
+                "(JJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from((class as *const IndexedClass) as jlong),
                 ],
             )
             .expect("Failed to create result object");

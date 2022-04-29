@@ -32,16 +32,40 @@ pub trait ToDescriptorIndexedType {
 }
 
 impl<T> SignatureType<T> {
-    pub fn extract_base_object_type(&self) -> &T {
+    pub fn extract_base_object_type(&self) -> Option<T>
+    where
+        T: Clone,
+    {
         match &self {
-            SignatureType::Object(t) => t,
+            SignatureType::Object(t) => Some(t.clone()),
             SignatureType::ObjectPlus(t) => t.extract_base_object_type(),
             SignatureType::ObjectMinus(t) => t.extract_base_object_type(),
-            SignatureType::ObjectTypeBounds(t) => &t.as_ref().0,
+            SignatureType::ObjectTypeBounds(t) => Some(t.as_ref().0.clone()),
             SignatureType::ObjectInnerClass(parts) => {
                 parts.last().unwrap().extract_base_object_type()
             }
-            _ => panic!("Not an object type"),
+            _ => None,
+        }
+    }
+}
+
+impl IndexedSignatureType {
+    pub fn eq_erased(&self, other: &IndexedSignatureType) -> bool {
+        match self {
+            IndexedSignatureType::Primitive(p) => match other {
+                IndexedSignatureType::Primitive(q) => p == q,
+                _ => false,
+            },
+            IndexedSignatureType::Array(inner) => match other {
+                IndexedSignatureType::Array(outer) => inner.eq_erased(outer),
+                _ => false,
+            },
+            IndexedSignatureType::Unresolved => match other {
+                IndexedSignatureType::Unresolved => true,
+                _ => false,
+            },
+            //All object types and generic params erase to java/lang/Object
+            _ => true,
         }
     }
 }
@@ -73,7 +97,7 @@ impl ToIndexedType for RawSignatureType {
             RawSignatureType::ObjectInnerClass(inner) => {
                 let inner = inner.as_ref();
                 let base_type_signature = inner.first().unwrap();
-                let mut type_name = base_type_signature.extract_base_object_type().clone();
+                let mut type_name = base_type_signature.extract_base_object_type().unwrap();
 
                 let mut new_vec = Vec::with_capacity(inner.len());
                 //Add base type
@@ -227,6 +251,7 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
         generic_data: &[&IndexedTypeParameterData],
     ) -> String {
         match &self {
+            SignatureType::Unresolved => String::from("!unresolved!"),
             SignatureType::Object(_)
             | SignatureType::ObjectPlus(_)
             | SignatureType::ObjectMinus(_)
@@ -234,7 +259,7 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
             | SignatureType::ObjectInnerClass(_) => {
                 String::from('L')
                     + class_index
-                        .class_at_index(*self.extract_base_object_type())
+                        .class_at_index(self.extract_base_object_type().unwrap())
                         .class_name_with_package(
                             class_index.package_index(),
                             class_index.constant_pool(),
@@ -263,7 +288,6 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
                 String::from('[') + &inner.to_descriptor_string(class_index, generic_data)
             }
             SignatureType::Primitive(p) => p.to_string(),
-            SignatureType::Unresolved => String::from("!unresolved!"),
         }
     }
 }

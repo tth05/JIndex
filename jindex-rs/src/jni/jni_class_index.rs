@@ -170,7 +170,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     let result_array = env
         .new_object_array(classes.len() as i32, result_class, JObject::null())
         .expect("Failed to create result array");
-    for (index, (_, class)) in classes.into_iter().enumerate() {
+    for (index, class) in classes.into_iter().enumerate() {
         let object = env
             .new_object(
                 result_class,
@@ -259,7 +259,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
 
     let (class_index_pointer, class_index) = get_class_index(env, this);
 
-    if let Some((_, class)) = class_index.find_class(&package_name, &class_name) {
+    if let Some(class) = class_index.find_class(&package_name, &class_name) {
         env.new_object(
             result_class,
             "(JJ)V",

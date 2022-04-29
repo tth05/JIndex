@@ -6,6 +6,8 @@ public class IndexedMethod extends ClassChildObject {
         super(classIndexPointer, classPointer, pointer);
     }
 
+    public native IndexedClass getDeclaringClass();
+
     public native String getName();
 
     public native int getAccessFlags();
@@ -13,6 +15,8 @@ public class IndexedMethod extends ClassChildObject {
     public native String getDescriptorString();
 
     public native String getGenericSignatureString();
+
+    public native IndexedMethod[] findImplementations(boolean includeBaseMethod);
 
     @Override
     public String toString() {

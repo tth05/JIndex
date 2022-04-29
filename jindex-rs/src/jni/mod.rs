@@ -12,12 +12,10 @@ pub mod jni_indexed_method;
 pub mod jni_indexed_package;
 
 unsafe fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass> {
-    class_index
-        .find_class(
-            "java/lang".as_ascii_str_unchecked(),
-            "Object".as_ascii_str_unchecked(),
-        )
-        .map(|p| p.1)
+    class_index.find_class(
+        "java/lang".as_ascii_str_unchecked(),
+        "Object".as_ascii_str_unchecked(),
+    )
 }
 
 unsafe fn get_enum_ordinal(env: JNIEnv, enum_object: jobject) -> u32 {

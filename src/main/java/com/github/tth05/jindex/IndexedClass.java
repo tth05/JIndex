@@ -60,6 +60,8 @@ public class IndexedClass extends ClassIndexChildObject {
      */
     public native IndexedClass[] getMemberClasses();
 
+    public native IndexedClass[] findImplementations(boolean directSubTypesOnly);
+
     public native IndexedClass getSuperClass();
 
     public native IndexedClass[] getInterfaces();
