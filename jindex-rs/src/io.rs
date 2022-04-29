@@ -103,6 +103,7 @@ where
             reader.read_u8()?,
             reader.read_u16()?,
         );
+        class.set_index(reader.read_value()?);
         class.set_signature(reader.read_value()?);
         if let Some(info) = reader.read_value::<Option<IndexedEnclosingTypeInfo>>()? {
             class.set_enclosing_type_info(info);
@@ -126,6 +127,7 @@ where
         self.class_name_index().write_to(writer)?;
         self.class_name_start_index().write_to(writer)?;
         self.access_flags().write_to(writer)?;
+        self.index().write_to(writer)?;
         self.signature().write_to(writer)?;
         self.enclosing_type_info().write_to(writer)?;
         self.member_classes().write_to(writer)?;
