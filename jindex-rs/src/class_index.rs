@@ -1343,7 +1343,9 @@ fn parse_class_signature(
         .expect("Invalid class signature")
     } else {
         RawClassSignature::new(
-            super_class.map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap())),
+            super_class
+                .filter(|s| s != "java/lang/Object")
+                .map(|s| RawSignatureType::Object(s.into_ascii_string().unwrap())),
             Some(
                 interfaces
                     .into_iter()
