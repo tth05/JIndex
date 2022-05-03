@@ -1,9 +1,10 @@
-use crate::class_index::{IndexedClass, IndexedMethod};
+use crate::class_index::{ClassIndex, IndexedClass, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::{collect_type_parameters, is_basic_signature_type};
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
+use crate::signature::{IndexedMethodSignature, IndexedSignatureType, TypeParameterData};
 use jni::objects::{JObject, JValue};
-use jni::sys::{jboolean, jint, jlong, jobject, jobjectArray, jstring};
+use jni::sys::{jboolean, jint, jlong, jobject, jobjectArray, jsize, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -82,11 +83,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
         get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
     let signature = indexed_method.method_signature();
 
-    let mut type_parameters = Vec::new();
-    if let Some(vec) = signature.generic_data() {
-        type_parameters.extend(vec);
-    }
-    collect_type_parameters(indexed_class, class_index, &mut type_parameters);
+    let type_parameters = collect_method_type_parameters(class_index, indexed_class, signature);
 
     env.new_string(signature.to_descriptor_string(
         class_index,
@@ -95,6 +92,20 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     ))
     .expect("Unable to create generic signature String")
     .into_inner()
+}
+
+unsafe fn collect_method_type_parameters<'a>(
+    class_index: &'a ClassIndex,
+    indexed_class: &'a IndexedClass,
+    signature: &'a IndexedMethodSignature,
+) -> Vec<&'a TypeParameterData<u32>> {
+    let mut type_parameters = Vec::new();
+    if let Some(vec) = signature.generic_data() {
+        type_parameters.extend(vec);
+    }
+
+    collect_type_parameters(indexed_class, class_index, &mut type_parameters);
+    type_parameters
 }
 
 #[no_mangle]
@@ -114,7 +125,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
 
     //No generic signature available
     if signature.generic_data().is_none()
-        && signature.parameters().iter().all(is_basic_signature_type)
+        && signature
+            .parameters()
+            .map(|v| v.iter().all(is_basic_signature_type))
+            .unwrap_or(true)
         && is_basic_signature_type(signature.return_type())
     {
         return JObject::null().into_inner();
@@ -123,6 +137,81 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
     env.new_string(signature.to_signature_string(class_index))
         .expect("Unable to create generic signature String")
         .into_inner()
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExceptions(
+    env: JNIEnv,
+    this: jobject,
+) -> jobjectArray {
+    let (class_index_pointer, class_index) = get_class_index(env, this);
+
+    let indexed_method = get_field_with_id::<IndexedMethod>(
+        env,
+        this,
+        &cached_field_ids().class_index_child_self_pointer,
+    );
+    let indexed_class =
+        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
+
+    let exceptions = indexed_method.method_signature().exceptions();
+    let array_length = exceptions.map_or(0, |v| v.len());
+
+    let result_class = env
+        .find_class("com/github/tth05/jindex/IndexedClass")
+        .expect("Result class not found");
+
+    let result_array = env
+        .new_object_array(array_length as jsize, result_class, JObject::null())
+        .expect("Failed to create result array");
+
+    if array_length == 0 {
+        return result_array;
+    }
+
+    for (index, exception_signature) in exceptions.unwrap().iter().enumerate() {
+        let exception_class_index = exception_signature
+            .extract_base_object_type()
+            // Not sure if there's a cleaner way to do this
+            .map(Some)
+            .or_else(|| match exception_signature {
+                IndexedSignatureType::Generic(name) => {
+                    let generic_data = collect_method_type_parameters(
+                        class_index,
+                        indexed_class,
+                        indexed_method.method_signature(),
+                    );
+
+                    exception_signature
+                        .resolve_generic_type_bound(class_index, &generic_data)
+                        .map(|s| s.extract_base_object_type())
+                }
+                _ => Option::None,
+            })
+            .unwrap();
+        if exception_class_index.is_none() {
+            continue;
+        }
+
+        let class = class_index.class_at_index(exception_class_index.unwrap());
+
+        let object = env
+            .new_object(
+                result_class,
+                "(JJ)V",
+                &[
+                    JValue::from(class_index_pointer as jlong),
+                    JValue::from((class as *const IndexedClass) as jlong),
+                ],
+            )
+            .expect("Failed to create result object");
+        env.set_object_array_element(result_array, index as i32, object)
+            .expect("Failed to set element into result array");
+    }
+
+    result_array
 }
 
 #[no_mangle]

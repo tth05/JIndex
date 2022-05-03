@@ -73,24 +73,37 @@ impl<T> ClassSignature<T> {
     }
 }
 
-#[derive(Readable, Writable, Debug)]
+#[derive(Debug)]
+/// Some fields here are in an extra Box because they blow up the size of the struct otherwise.
+/// This makes sense because a lot of these are created and without the Boxes the size of this
+/// struct would be doubled, even though generic data, exceptions and parameters are used for less
+/// than half of all methods
 pub struct MethodSignature<T> {
-    generic_data: Option<Vec<TypeParameterData<T>>>,
-    parameters: Vec<SignatureType<T>>,
+    generic_data: Option<Box<Vec<TypeParameterData<T>>>>,
+    parameters: Option<Box<Vec<SignatureType<T>>>>,
     return_type: SignatureType<T>,
+    exceptions: Option<Box<Vec<SignatureType<T>>>>,
 }
 
 impl<T> MethodSignature<T> {
     pub fn generic_data(&self) -> Option<&Vec<TypeParameterData<T>>> {
-        self.generic_data.as_ref()
+        self.generic_data.as_ref().map(|b| b.as_ref())
     }
 
-    pub fn parameters(&self) -> &Vec<SignatureType<T>> {
-        &self.parameters
+    pub fn parameters(&self) -> Option<&Vec<SignatureType<T>>> {
+        self.parameters.as_ref().map(|b| b.as_ref())
+    }
+
+    pub fn parameter_count(&self) -> usize {
+        self.parameters.as_ref().map(|b| b.len()).unwrap_or(0)
     }
 
     pub fn return_type(&self) -> &SignatureType<T> {
         &self.return_type
+    }
+
+    pub fn exceptions(&self) -> Option<&Vec<SignatureType<T>>> {
+        self.exceptions.as_ref().map(|b| b.as_ref())
     }
 }
 
@@ -328,7 +341,7 @@ mod tests {
     #[test]
     fn test_parse_method_generic_signature() {
         let input = "<T:Ljava/lang/String;:Ljava/lang/Comparable;B::Ljava/lang/Comparable;>(-Ljava/util/List<Ljava/lang/String;>;)V";
-        let result = MethodSignature::from_str(input);
+        let result = MethodSignature::from_data(input, &|| Option::None);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(input, result.to_string());
@@ -337,7 +350,7 @@ mod tests {
     #[test]
     fn test_parse_class_generic_signature() {
         let input = "<T:Ljava/lang/String;:Ljava/lang/Comparable;B::Ljava/lang/Comparable;>(-Ljava/util/List<Ljava/lang/String;>;)V";
-        let result = MethodSignature::from_str(input);
+        let result = MethodSignature::from_data(input, &|| Option::None);
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(input, result.to_string());

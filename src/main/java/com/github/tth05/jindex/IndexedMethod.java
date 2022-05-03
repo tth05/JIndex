@@ -16,6 +16,8 @@ public class IndexedMethod extends ClassChildObject {
 
     public native String getGenericSignatureString();
 
+    public native IndexedClass[] getExceptions();
+
     public native IndexedMethod[] findImplementations();
 
     public native IndexedMethod[] findBaseMethods();

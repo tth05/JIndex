@@ -75,6 +75,29 @@ impl IndexedSignatureType {
             },
         }
     }
+
+    pub fn resolve_generic_type_bound<'a>(
+        &self,
+        class_index: &ClassIndex,
+        generic_data: &[&'a IndexedTypeParameterData],
+    ) -> Option<&'a Self> {
+        match self {
+            IndexedSignatureType::Generic(name) => {
+                let generic_param_name = class_index.constant_pool().string_view_at(*name);
+                match generic_data
+                    .iter()
+                    .find(|g| {
+                        class_index.constant_pool().string_view_at(g.name) == generic_param_name
+                    })
+                    .filter(|p| p.type_bound.is_some())
+                {
+                    Some(param) => param.type_bound.as_ref(),
+                    None => Option::None, //If there's no type bound or the parameter was not found
+                }
+            }
+            _ => Option::None,
+        }
+    }
 }
 
 impl ToIndexedType for RawSignatureType {
@@ -274,23 +297,10 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
                         .as_str()
                     + ";"
             }
-            SignatureType::Generic(name) => {
-                let generic_param_name = class_index.constant_pool().string_view_at(*name);
-                match generic_data
-                    .iter()
-                    .find(|g| {
-                        class_index.constant_pool().string_view_at(g.name) == generic_param_name
-                    })
-                    .filter(|p| p.type_bound.is_some())
-                {
-                    Some(param) => param
-                        .type_bound
-                        .as_ref()
-                        .unwrap()
-                        .to_descriptor_string(class_index, generic_data),
-                    None => "Ljava/lang/Object;".to_owned(), //If there's no type bound or the parameter was not found
-                }
-            }
+            SignatureType::Generic(_) => self
+                .resolve_generic_type_bound(class_index, generic_data)
+                .map(|s| s.to_descriptor_string(class_index, generic_data))
+                .unwrap_or_else(|| "Ljava/lang/Object;".to_owned()),
             SignatureType::Array(inner) => {
                 String::from('[') + &inner.to_descriptor_string(class_index, generic_data)
             }
@@ -424,17 +434,24 @@ impl ToSignatureIndexedType for IndexedTypeParameterData {
 impl IndexedMethodSignature {
     pub fn new(
         generic_data: Option<Vec<IndexedTypeParameterData>>,
-        mut parameters: Vec<IndexedSignatureType>,
+        parameters: Option<Vec<IndexedSignatureType>>,
         return_type: IndexedSignatureType,
+        exceptions: Option<Vec<IndexedSignatureType>>,
     ) -> Self {
-        parameters.shrink_to_fit();
         Self {
             generic_data: generic_data.map(|mut v| {
                 v.shrink_to_fit();
-                v
+                Box::new(v)
             }),
-            parameters,
+            parameters: parameters.map(|mut v| {
+                v.shrink_to_fit();
+                Box::new(v)
+            }),
             return_type,
+            exceptions: exceptions.map(|mut v| {
+                v.shrink_to_fit();
+                Box::new(v)
+            }),
         }
     }
 }
@@ -454,6 +471,8 @@ impl ToIndexedType for RawMethodSignature {
             self.parameters
                 .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
             self.return_type
+                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
+            self.exceptions
                 .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
         )
     }
@@ -543,6 +562,23 @@ where
     }
 }
 
+impl<T, X> ToIndexedType for Box<T>
+where
+    T: ToIndexedType<Out = X>,
+{
+    type Out = X;
+
+    fn to_indexed_type<'a>(
+        &'a self,
+        constant_pool: &mut ClassIndexConstantPool,
+        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        class_to_index_map: &ClassToIndexMap,
+    ) -> Self::Out {
+        self.as_ref()
+            .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)
+    }
+}
+
 impl<T, X> ToIndexedType for Vec<T>
 where
     T: ToIndexedType<Out = X>,
@@ -572,6 +608,15 @@ where
     }
 }
 
+impl<T> ToSignatureIndexedType for Box<T>
+where
+    T: ToSignatureIndexedType,
+{
+    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+        self.as_ref().to_signature_string(class_index)
+    }
+}
+
 impl<T> ToSignatureIndexedType for Vec<T>
 where
     T: ToSignatureIndexedType,
@@ -580,6 +625,35 @@ where
         self.iter().fold(String::new(), |a, b| {
             a + &b.to_signature_string(class_index)
         })
+    }
+}
+
+impl<T> ToDescriptorIndexedType for Option<T>
+where
+    T: ToDescriptorIndexedType,
+{
+    fn to_descriptor_string(
+        &self,
+        class_index: &ClassIndex,
+        generic_data: &[&IndexedTypeParameterData],
+    ) -> String {
+        self.as_ref()
+            .map(|t| t.to_descriptor_string(class_index, generic_data))
+            .unwrap_or_default()
+    }
+}
+
+impl<T> ToDescriptorIndexedType for Box<T>
+where
+    T: ToDescriptorIndexedType,
+{
+    fn to_descriptor_string(
+        &self,
+        class_index: &ClassIndex,
+        generic_data: &[&IndexedTypeParameterData],
+    ) -> String {
+        self.as_ref()
+            .to_descriptor_string(class_index, generic_data)
     }
 }
 

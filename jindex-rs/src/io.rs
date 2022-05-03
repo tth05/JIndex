@@ -6,7 +6,7 @@ use speedy::{Context, Readable, Reader, Writable, Writer};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-use crate::signature::{IndexedEnclosingTypeInfo, IndexedSignatureType};
+use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
 pub fn load_class_index_from_file(path: String) -> ClassIndex {
     let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
@@ -222,6 +222,33 @@ where
                 b.write_to(writer)?;
             }
         }
+        Ok(())
+    }
+}
+
+impl<'a, C> Readable<'a, C> for IndexedMethodSignature
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        Ok(IndexedMethodSignature::new(
+            reader.read_value()?,
+            reader.read_value()?,
+            reader.read_value()?,
+            reader.read_value()?,
+        ))
+    }
+}
+
+impl<C> Writable<C> for IndexedMethodSignature
+where
+    C: Context,
+{
+    fn write_to<T: ?Sized + Writer<C>>(&self, writer: &mut T) -> Result<(), C::Error> {
+        self.generic_data().write_to(writer)?;
+        self.parameters().write_to(writer)?;
+        self.return_type().write_to(writer)?;
+        self.exceptions().write_to(writer)?;
         Ok(())
     }
 }

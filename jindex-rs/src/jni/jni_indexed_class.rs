@@ -305,13 +305,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
     let interface_indicies = indexed_class.signature().interfaces();
 
     let array_length = interface_indicies.map_or(0, |v| v.len());
-    if array_length == 0 {
-        return JObject::null().into_inner();
-    }
 
     let result_array = env
         .new_object_array(array_length as jsize, result_class, JObject::null())
         .expect("Failed to create result array");
+    
+    if array_length == 0 {
+        return result_array;
+    }
 
     for (index, interface_index) in interface_indicies
         .as_ref()

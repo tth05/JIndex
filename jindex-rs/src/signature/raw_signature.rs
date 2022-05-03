@@ -3,7 +3,10 @@ use crate::signature::{
     MethodSignature, ParseError, ParseResultData, RawClassSignature, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignaturePrimitive, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, IntoAsciiString};
+use cafebabe::attributes::AttributeData;
+use cafebabe::attributes::AttributeData::Signature;
+use std::borrow::Cow;
 use std::str::FromStr;
 
 impl RawSignatureType {
@@ -263,20 +266,21 @@ impl FromStr for RawClassSignature {
 impl ToString for RawMethodSignature {
     fn to_string(&self) -> String {
         (if self.generic_data.is_some() {
-            String::from('<') + &join_vec(self.generic_data.as_ref()) + ">"
+            String::from('<') + &join_vec(self.generic_data()) + ">"
         } else {
             String::new()
         }) + "("
-            + &join_vec(Some(&self.parameters))
+            + &join_vec(self.parameters())
             + ")"
             + &self.return_type.to_string()
     }
 }
 
-impl FromStr for RawMethodSignature {
-    type Err = ParseError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
+impl RawMethodSignature {
+    pub fn from_data<'a>(
+        input: &'a str,
+        exception_attribute_supplier: &dyn Fn() -> Option<&'a Vec<Cow<'a, str>>>,
+    ) -> Result<Self, ParseError> {
         let generic_data = parse_generic_signature_data(input).ok();
         let input = unsafe { input.as_ascii_str_unchecked() }; //parse_generic_signature_data validated the input for us
 
@@ -305,10 +309,33 @@ impl FromStr for RawMethodSignature {
             ));
         };
 
+        let return_type = SignatureType::parse_ascii(&input[start_index..])?;
+        start_index += return_type.0 as usize;
+
+        let mut exceptions = Vec::new();
+        while input.get_ascii(start_index).map_or(false, |c| c == '^') {
+            start_index += 1; //Skip '^'
+
+            let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
+            start_index += parse_result.0 as usize;
+            exceptions.push(parse_result.1);
+        }
+
+        if exceptions.is_empty() {
+            if let Some(vec) = exception_attribute_supplier() {
+                exceptions.extend(vec.iter().filter_map(|s| {
+                    s.as_ascii_str()
+                        .ok()
+                        .map(|a| RawSignatureType::Object(a.to_ascii_string()))
+                }));
+            }
+        }
+
         Ok(MethodSignature {
-            generic_data: generic_data.map(|v| v.1),
-            parameters,
-            return_type: SignatureType::parse_ascii(&input[start_index..])?.1,
+            generic_data: generic_data.map(|v| Box::new(v.1)),
+            parameters: Some(parameters).filter(|v| !v.is_empty()).map(Box::new),
+            return_type: return_type.1,
+            exceptions: Some(exceptions).filter(|v| !v.is_empty()).map(Box::new),
         })
     }
 }

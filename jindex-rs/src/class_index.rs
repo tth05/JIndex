@@ -821,14 +821,20 @@ impl IndexedMethod {
         }
 
         self.name_index == base_method.name_index
-            && self.method_signature.parameters().len()
-                == base_method.method_signature.parameters().len()
+            && self.method_signature.parameter_count()
+                == base_method.method_signature.parameter_count()
             && self
                 .method_signature
                 .parameters()
-                .iter()
-                .zip(base_method.method_signature.parameters().iter())
-                .all(|(a, b)| a.eq_erased(b))
+                .map(|a| {
+                    a.iter()
+                        // Safety: We know that the parameter count is equal, so we know that the
+                        //  other method must have parameters
+                        .zip(base_method.method_signature.parameters().unwrap().iter())
+                        .all(|(a, b)| a.eq_erased(b))
+                })
+                // If we don't have any parameters, the count is 0, so we automatically match
+                .unwrap_or(true)
     }
 
     pub fn access_flags(&self) -> u16 {
@@ -1169,8 +1175,15 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> Vec<ClassInfo> {
 
                         Some(MethodInfo {
                             method_name: name.unwrap(),
-                            signature: RawMethodSignature::from_str(signature)
-                                .expect("Invalid method signature"),
+                            signature: RawMethodSignature::from_data(signature, &|| {
+                                get_attribute_data!(
+                                    &m.attributes,
+                                    AttributeData::Exceptions(vec),
+                                    Option::Some(vec),
+                                    Option::None
+                                )
+                            })
+                            .expect("Invalid method signature"),
                             access_flags: m.access_flags,
                         })
                     })
@@ -1228,7 +1241,7 @@ fn convert_enclosing_type_and_inner_classes(
                 let (method_name, method_descriptor) = match method_data {
                     Some(NameAndType { name, descriptor }) => (
                         Some(name.to_owned().into_ascii_string().unwrap()),
-                        Some(RawMethodSignature::from_str(descriptor).unwrap()),
+                        Some(RawMethodSignature::from_data(descriptor, &|| Option::None).unwrap()),
                     ),
                     None => (None, None),
                 };
