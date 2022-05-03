@@ -1,6 +1,8 @@
 use crate::class_index::{ClassIndex, IndexedClass};
-use crate::signature::{IndexedSignatureType, SignatureType};
+use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, SignatureType};
 use ascii::AsAsciiStr;
+use cafebabe::attributes::InnerClassAccessFlags;
+use cafebabe::ClassAccessFlags;
 use jni::sys::jobject;
 use jni::JNIEnv;
 
@@ -30,5 +32,24 @@ fn is_basic_signature_type(s: &IndexedSignatureType) -> bool {
         SignatureType::Array(inner) => is_basic_signature_type(inner),
         SignatureType::Unresolved | SignatureType::Primitive(_) | SignatureType::Object(_) => true,
         _ => false,
+    }
+}
+
+fn collect_type_parameters<'a>(
+    current_class: &'a IndexedClass,
+    class_index: &'a ClassIndex,
+    type_parameters: &mut Vec<&'a IndexedTypeParameterData>,
+) {
+    if let Some(vec) = current_class.signature().generic_data() {
+        type_parameters.extend(vec);
+    }
+
+    // Don't check enclosing classes for static inner classes
+    if current_class.access_flags() & InnerClassAccessFlags::STATIC.bits() != 0 {
+        return;
+    }
+
+    if let Some(enclosing_class) = current_class.enclosing_class(class_index) {
+        collect_type_parameters(enclosing_class, class_index, type_parameters);
     }
 }

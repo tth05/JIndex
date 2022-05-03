@@ -4,7 +4,7 @@ use jni::JNIEnv;
 
 use crate::class_index::{IndexedClass, IndexedField};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
-use crate::jni::is_basic_signature_type;
+use crate::jni::{collect_type_parameters, is_basic_signature_type};
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
 
 #[no_mangle]
@@ -60,9 +60,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescr
     let signature = indexed_field.field_signature();
 
     let mut type_parameters = Vec::new();
-    if let Some(vec) = indexed_class.signature().generic_data() {
-        type_parameters.extend(vec);
-    }
+    collect_type_parameters(indexed_class, class_index, &mut type_parameters);
 
     env.new_string(signature.to_descriptor_string(
         class_index,

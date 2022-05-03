@@ -46,7 +46,7 @@ pub struct TypeParameterData<T> {
 }
 
 type RawTypeParameterData = TypeParameterData<AsciiString>;
-type IndexedTypeParameterData = TypeParameterData<u32>;
+pub type IndexedTypeParameterData = TypeParameterData<u32>;
 
 #[derive(Readable, Writable, Debug)]
 pub struct ClassSignature<T> {

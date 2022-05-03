@@ -1,6 +1,6 @@
 use crate::class_index::{IndexedClass, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
-use crate::jni::is_basic_signature_type;
+use crate::jni::{collect_type_parameters, is_basic_signature_type};
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
 use jni::objects::{JObject, JValue};
 use jni::sys::{jboolean, jint, jlong, jobject, jobjectArray, jstring};
@@ -86,9 +86,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     if let Some(vec) = signature.generic_data() {
         type_parameters.extend(vec);
     }
-    if let Some(vec) = indexed_class.signature().generic_data() {
-        type_parameters.extend(vec);
-    }
+    collect_type_parameters(indexed_class, class_index, &mut type_parameters);
 
     env.new_string(signature.to_descriptor_string(
         class_index,
