@@ -11,7 +11,7 @@ public class ClassIndex extends ClassIndexChildObject {
     static {
         try {
             boolean isDev = false;
-            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("jindex_lib_0.0.33.dll");
+            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("jindex_lib_0.0.34.dll");
             if (isDev || !Files.exists(tempFilePath)) {
                 Files.copy(ClassIndex.class.getResourceAsStream("/jindex_rs.dll"), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
             }
