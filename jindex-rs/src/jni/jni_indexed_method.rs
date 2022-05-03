@@ -127,9 +127,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
     if signature.generic_data().is_none()
         && signature
             .parameters()
-            .map(|v| v.iter().all(is_basic_signature_type))
+            .map(|v| !v.iter().any(|s| !is_basic_signature_type(s)))
             .unwrap_or(true)
         && is_basic_signature_type(signature.return_type())
+        && signature
+            .exceptions()
+            .map_or(true, |v| !v.iter().any(|s| !is_basic_signature_type(s)))
     {
         return JObject::null().into_inner();
     }

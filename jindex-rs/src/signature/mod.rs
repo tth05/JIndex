@@ -348,6 +348,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_method_generic_signature_with_exceptions() {
+        let input = "<T:Ljava/lang/String;:Ljava/lang/Comparable;B::Ljava/lang/Comparable;>(-Ljava/util/List<Ljava/lang/String;>;)V^Ljava/lang/Exception;^Ljava/lang/RuntimeException;^TB;";
+        let result = MethodSignature::from_data(input, &|| Option::None);
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(input, result.to_string());
+    }
+
+    #[test]
     fn test_parse_class_generic_signature() {
         let input = "<T:Ljava/lang/String;:Ljava/lang/Comparable;B::Ljava/lang/Comparable;>(-Ljava/util/List<Ljava/lang/String;>;)V";
         let result = MethodSignature::from_data(input, &|| Option::None);

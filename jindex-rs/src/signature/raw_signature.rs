@@ -273,6 +273,15 @@ impl ToString for RawMethodSignature {
             + &join_vec(self.parameters())
             + ")"
             + &self.return_type.to_string()
+            + &self
+                .exceptions()
+                .map(|v| {
+                    v.iter()
+                        .map(|e| String::from('^') + &e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("")
+                })
+                .unwrap_or_default()
     }
 }
 

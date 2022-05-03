@@ -488,6 +488,19 @@ impl ToSignatureIndexedType for IndexedMethodSignature {
             + &self.parameters.to_signature_string(class_index)
             + ")"
             + &self.return_type.to_signature_string(class_index)
+            + &self
+                .exceptions()
+                .filter(|v| {
+                    v.iter()
+                        .any(|e| matches!(e, IndexedSignatureType::Generic(_)))
+                })
+                .map(|v| {
+                    v.iter()
+                        .map(|e| String::from('^') + &e.to_signature_string(class_index))
+                        .collect::<Vec<_>>()
+                        .join("")
+                })
+                .unwrap_or_default()
     }
 }
 
