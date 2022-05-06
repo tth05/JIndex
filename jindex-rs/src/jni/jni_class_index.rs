@@ -9,7 +9,7 @@ use crate::class_index::{
 };
 use crate::constant_pool::{MatchMode, SearchMode, SearchOptions};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
-use crate::jni::cache::{get_class_index, init_field_ids};
+use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
 use crate::jni::get_enum_ordinal;
 
 #[no_mangle]
@@ -19,15 +19,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
     env: JNIEnv,
     this: jobject,
 ) {
-    let _class_index = Box::from_raw(
-        env.get_field(this, "classIndexPointer", "J")
-            .unwrap()
-            .j()
-            .unwrap() as *mut ClassIndex,
-    );
+    let _class_index = Box::from_raw(get_class_index(env, this).0 as *mut ClassIndex);
 
-    env.set_field(this, "classIndexPointer", "J", JValue::Long(0i64))
-        .expect("Unable to set field");
+    env.set_field_unchecked(
+        this,
+        cached_field_ids().class_index_pointer,
+        JValue::Long(0i64),
+    )
+    .expect("Unable to set field");
     env.set_field(this, "destroyed", "Z", JValue::Bool(1))
         .expect("Unable to set field");
 }
