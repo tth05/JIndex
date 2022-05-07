@@ -1,16 +1,18 @@
+use crate::builder::workers::{create_class_index, create_class_index_from_jars};
+use anyhow::anyhow;
 use ascii::IntoAsciiString;
 use jni::objects::{JObject, JString, JValue};
 use jni::sys::{jlong, jobject, jobjectArray};
 use jni::JNIEnv;
 use std::ops::Deref;
 
-use crate::class_index::{
-    create_class_index, create_class_index_from_jars, ClassIndex, IndexedClass, IndexedPackage,
-};
+use crate::class_index::ClassIndex;
+use crate::class_index_members::IndexedClass;
 use crate::constant_pool::{MatchMode, SearchMode, SearchOptions};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
-use crate::jni::get_enum_ordinal;
+use crate::jni::{get_enum_ordinal, propagate_error};
+use crate::package_index::IndexedPackage;
 
 #[no_mangle]
 /// # Safety
@@ -39,7 +41,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     this: jobject,
     byte_array_list: jobject,
 ) {
-    init_field_ids(env);
+    propagate_error!(env, init_field_ids(env));
 
     let java_list = env.get_list(byte_array_list.into()).unwrap();
     let mut class_bytes = Vec::with_capacity(java_list.size().unwrap() as usize);
@@ -66,7 +68,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     this: jobject,
     jar_names_list: jobject,
 ) {
-    init_field_ids(env);
+    propagate_error!(env, init_field_ids(env));
 
     let java_list = env.get_list(jar_names_list.into()).unwrap();
     let mut jar_names = Vec::with_capacity(java_list.size().unwrap() as usize);
@@ -78,7 +80,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
         );
     }
 
-    let class_index = create_class_index_from_jars(jar_names);
+    let class_index = propagate_error!(env, create_class_index_from_jars(jar_names));
 
     env.set_field(
         this,
@@ -101,7 +103,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile
 
     let (_, class_index) = get_class_index(env, this);
 
-    save_class_index_to_file(class_index, path);
+    propagate_error!(env, save_class_index_to_file(class_index, path));
 }
 
 #[no_mangle]
@@ -112,10 +114,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
     this: jobject,
     path: JString,
 ) {
-    init_field_ids(env);
+    propagate_error!(env, init_field_ids(env));
 
     let path: String = env.get_string(path).expect("Invalid path").into();
-    let class_index = load_class_index_from_file(path);
+    let class_index = propagate_error!(env, load_class_index_from_file(path));
 
     env.set_field(
         this,
@@ -164,7 +166,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
 
     let (class_index_pointer, class_index) = get_class_index(env, this);
 
-    let classes: Vec<_> = class_index.find_classes(&input, convert_search_options(env, options));
+    let classes: Vec<_> = class_index.find_classes(
+        &input,
+        propagate_error!(
+            env,
+            convert_search_options(env, options),
+            JObject::null().into_inner()
+        ),
+    );
 
     let result_array = env
         .new_object_array(classes.len() as i32, result_class, JObject::null())
@@ -187,9 +196,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     result_array
 }
 
-unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> SearchOptions {
+unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> anyhow::Result<SearchOptions> {
     if options.is_null() {
-        return SearchOptions::default();
+        return Ok(SearchOptions::default());
     }
 
     let match_mode = match get_enum_ordinal(
@@ -207,7 +216,7 @@ unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> SearchOptions
         0 => MatchMode::IgnoreCase,
         1 => MatchMode::MatchCase,
         2 => MatchMode::MatchCaseFirstCharOnly,
-        _ => panic!("Invalid enum ordinal for match mode"),
+        _ => return Err(anyhow!("Invalid enum ordinal for match mode")),
     };
 
     let search_mode = match get_enum_ordinal(
@@ -224,7 +233,7 @@ unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> SearchOptions
     ) {
         0 => SearchMode::Prefix,
         1 => SearchMode::Contains,
-        _ => panic!("Invalid enum ordinal for match mode"),
+        _ => return Err(anyhow!("Invalid enum ordinal for search mode")),
     };
 
     let limit = env
@@ -233,11 +242,11 @@ unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> SearchOptions
         .i()
         .unwrap();
 
-    SearchOptions {
+    Ok(SearchOptions {
         limit: limit as usize,
         match_mode,
         search_mode,
-    }
+    })
 }
 
 #[no_mangle]

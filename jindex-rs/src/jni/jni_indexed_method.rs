@@ -1,10 +1,11 @@
-use crate::class_index::{ClassIndex, IndexedClass, IndexedMethod};
+use crate::class_index::ClassIndex;
+use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::{collect_type_parameters, is_basic_signature_type};
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
 use crate::signature::{IndexedMethodSignature, IndexedSignatureType, TypeParameterData};
 use jni::objects::{JObject, JValue};
-use jni::sys::{jboolean, jint, jlong, jobject, jobjectArray, jsize, jstring};
+use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
@@ -21,7 +22,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
         &cached_field_ids().class_index_child_self_pointer,
     );
 
-    env.new_string(indexed_method.method_name(&class_index.constant_pool()))
+    env.new_string(indexed_method.method_name(class_index.constant_pool()))
         .unwrap()
         .into_inner()
 }
@@ -175,25 +176,23 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExce
     }
 
     for (index, exception_signature) in exceptions.unwrap().iter().enumerate() {
-        let exception_class_index = exception_signature
-            .extract_base_object_type()
-            // Not sure if there's a cleaner way to do this
-            .map(Some)
-            .or_else(|| match exception_signature {
-                IndexedSignatureType::Generic(name) => {
-                    let generic_data = collect_method_type_parameters(
-                        class_index,
-                        indexed_class,
-                        indexed_method.method_signature(),
-                    );
+        let exception_class_index =
+            exception_signature
+                .extract_base_object_type()
+                .or_else(|| match exception_signature {
+                    IndexedSignatureType::Generic(_) => {
+                        let generic_data = collect_method_type_parameters(
+                            class_index,
+                            indexed_class,
+                            indexed_method.method_signature(),
+                        );
 
-                    exception_signature
-                        .resolve_generic_type_bound(class_index, &generic_data)
-                        .map(|s| s.extract_base_object_type())
-                }
-                _ => Option::None,
-            })
-            .unwrap();
+                        exception_signature
+                            .resolve_generic_type_bound(class_index, &generic_data)
+                            .and_then(|s| s.extract_base_object_type())
+                    }
+                    _ => Option::None,
+                });
         if exception_class_index.is_none() {
             continue;
         }

@@ -24,7 +24,8 @@ pub enum SignatureType<T> {
     ObjectPlus(Box<SignatureType<T>>),
     /// Lit/unimi/dsi/fastutil/ints/AbstractInt2ObjectSortedMap<TV;>.KeySet;
     ObjectInnerClass(Box<Vec<SignatureType<T>>>),
-    /// Lsome/type<Lsome/type/bound;>; --- If any parameter is Option::None, that parameter is *
+    /// Lsome/type<Lsome/type/bound;>; --- If any parameter is Option::None,
+    /// that parameter is *
     ObjectTypeBounds(Box<(T, Vec<Option<SignatureType<T>>>)>),
     /// [L/some/type;
     Array(Box<SignatureType<T>>),
@@ -36,8 +37,8 @@ pub type IndexedSignatureType = SignatureType<u32>;
 /// Contains number of consumed characters and result object
 type ParseResultData<T> = (u16, T);
 
-/// Maps generic parameter names to their bound types. If the associated Option is None,
-/// java/lang/Object should be implied as the only bound.
+/// Maps generic parameter names to their bound types. If the associated Option
+/// is None, java/lang/Object should be implied as the only bound.
 #[derive(Readable, Writable, Debug)]
 pub struct TypeParameterData<T> {
     name: T,
@@ -74,10 +75,11 @@ impl<T> ClassSignature<T> {
 }
 
 #[derive(Debug)]
-/// Some fields here are in an extra Box because they blow up the size of the struct otherwise.
-/// This makes sense because a lot of these are created and without the Boxes the size of this
-/// struct would be doubled, even though generic data, exceptions and parameters are used for less
-/// than half of all methods
+/// Some fields here are in an extra Box because they blow up the size of the
+/// struct otherwise. This makes sense because a lot of these are created and
+/// without the Boxes the size of this struct would be doubled, even though
+/// generic data, exceptions and parameters are used for less than half of all
+/// methods
 pub struct MethodSignature<T> {
     generic_data: Option<Box<Vec<TypeParameterData<T>>>>,
     parameters: Option<Box<Vec<SignatureType<T>>>>,
@@ -132,7 +134,8 @@ pub struct EnclosingTypeInfo<T> {
     class_name: Option<T>,
     inner_class_type: InnerClassType,
     method_name: Option<T>,
-    //This is in a box because it's rarely used but would increase the size of this struct by 56 bytes
+    //This is in a box because it's rarely used but would increase the size of this struct by 56
+    // bytes
     method_descriptor: Option<Box<MethodSignature<T>>>,
 }
 

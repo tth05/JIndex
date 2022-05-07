@@ -1,8 +1,8 @@
-use crate::class_index::{ClassIndex, IndexedClass};
+use crate::class_index::ClassIndex;
+use crate::class_index_members::IndexedClass;
 use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, SignatureType};
 use ascii::AsAsciiStr;
 use cafebabe::attributes::InnerClassAccessFlags;
-use cafebabe::ClassAccessFlags;
 use jni::sys::jobject;
 use jni::JNIEnv;
 
@@ -26,6 +26,27 @@ unsafe fn get_enum_ordinal(env: JNIEnv, enum_object: jobject) -> u32 {
         .i()
         .unwrap() as u32
 }
+
+macro_rules! propagate_error {
+    ($env:ident, $result:expr) => {
+        propagate_error!($env, $result, ())
+    };
+    ($env:ident, $result:expr, $return_value:expr) => {
+        match $result {
+            Ok(value) => value,
+            Err(error) => {
+                $env.throw_new(
+                    "com/github/tth05/jindex/ClassIndexBuildingException",
+                    error.to_string(),
+                )
+                .expect("Failed to throw exception");
+                return $return_value;
+            }
+        }
+    };
+}
+
+pub(crate) use propagate_error;
 
 fn is_basic_signature_type(s: &IndexedSignatureType) -> bool {
     match s {

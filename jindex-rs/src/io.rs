@@ -1,41 +1,43 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
-use crate::class_index::{ClassIndex, IndexedClass, IndexedPackage};
+use crate::class_index::ClassIndex;
+use crate::class_index_members::IndexedClass;
+use crate::package_index::IndexedPackage;
+use anyhow::Context as AnyhowContext;
 use speedy::{Context, Readable, Reader, Writable, Writer};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
-pub fn load_class_index_from_file(path: String) -> ClassIndex {
-    let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path).unwrap()).unwrap();
-    let mut file = archive.by_index(0).unwrap();
+pub fn load_class_index_from_file(path: String) -> anyhow::Result<ClassIndex> {
+    let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path)?)?;
+    let mut file = archive
+        .by_index(0)
+        .with_context(|| "File with index 0 not found")?;
     let file_size = file.size();
 
     let mut output_buf = Vec::with_capacity(file_size as usize);
     file.read_to_end(&mut output_buf)
-        .expect("Unable to read from zip file");
+        .with_context(|| "Failed to read first file")?;
 
-    ClassIndex::read_from_buffer(&output_buf).expect("Deserialization failed")
+    ClassIndex::read_from_buffer(&output_buf).with_context(|| "Failed to deserialize ClassIndex")
 }
 
-pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) {
-    let mut file = ZipWriter::new(
-        OpenOptions::new()
-            .write(true)
-            .create(true)
-            .open(path)
-            .unwrap(),
-    );
+pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) -> anyhow::Result<()> {
+    let mut file = ZipWriter::new(OpenOptions::new().write(true).create(true).open(path)?);
 
-    let serialized_buf = class_index.write_to_vec().expect("Serialization failed");
+    let serialized_buf = class_index
+        .write_to_vec()
+        .with_context(|| "ClassIndex serialization failed")?;
 
     file.start_file("index", FileOptions::default())
-        .expect("Unable to start file");
+        .with_context(|| "Failed to start file")?;
     file.write_all(&serialized_buf)
-        .expect("Unable to write file contents");
-    file.finish().expect("Failed to write zip file");
+        .with_context(|| "Unable to write file contents")?;
+    file.finish().with_context(|| "Failed to finish zip file")?;
+    Ok(())
 }
 
 impl<'a, C> Readable<'a, C> for ClassIndex

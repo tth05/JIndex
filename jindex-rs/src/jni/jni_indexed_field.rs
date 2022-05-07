@@ -1,8 +1,8 @@
+use crate::class_index_members::{IndexedClass, IndexedField};
 use jni::objects::JObject;
 use jni::sys::{jint, jobject, jstring};
 use jni::JNIEnv;
 
-use crate::class_index::{IndexedClass, IndexedField};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::{collect_type_parameters, is_basic_signature_type};
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
@@ -21,7 +21,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
         &cached_field_ids().class_index_child_self_pointer,
     );
 
-    env.new_string(indexed_field.field_name(&class_index.constant_pool()))
+    env.new_string(indexed_field.field_name(class_index.constant_pool()))
         .unwrap()
         .into_inner()
 }

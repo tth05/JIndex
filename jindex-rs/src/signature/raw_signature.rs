@@ -3,9 +3,7 @@ use crate::signature::{
     MethodSignature, ParseError, ParseResultData, RawClassSignature, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignaturePrimitive, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, IntoAsciiString};
-use cafebabe::attributes::AttributeData;
-use cafebabe::attributes::AttributeData::Signature;
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 use std::borrow::Cow;
 use std::str::FromStr;
 
@@ -322,7 +320,7 @@ impl RawMethodSignature {
         start_index += return_type.0 as usize;
 
         let mut exceptions = Vec::new();
-        while input.get_ascii(start_index).map_or(false, |c| c == '^') {
+        while input.get_ascii(start_index).map_or(false, |ch| ch == '^') {
             start_index += 1; //Skip '^'
 
             let parse_result = SignatureType::parse_ascii(&input[start_index..])?;

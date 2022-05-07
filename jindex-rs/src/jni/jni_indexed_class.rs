@@ -1,6 +1,7 @@
-use crate::class_index::{IndexedClass, IndexedField, IndexedMethod, IndexedPackage};
+use crate::class_index_members::{IndexedClass, IndexedField, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::{get_java_lang_object, is_basic_signature_type};
+use crate::package_index::IndexedPackage;
 use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
 use crate::signature::SignatureType;
 use ascii::AsAsciiStr;
@@ -22,7 +23,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
         &cached_field_ids().class_index_child_self_pointer,
     );
 
-    env.new_string(indexed_class.class_name(&class_index.constant_pool()))
+    env.new_string(indexed_class.class_name(class_index.constant_pool()))
         .unwrap()
         .into_inner()
 }
@@ -42,7 +43,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourc
     );
 
     env.new_string(
-        &indexed_class.class_name(&class_index.constant_pool())
+        &indexed_class.class_name(class_index.constant_pool())
             [indexed_class.class_name_start_index() as usize..],
     )
     .unwrap()
@@ -309,7 +310,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
     let result_array = env
         .new_object_array(array_length as jsize, result_class, JObject::null())
         .expect("Failed to create result array");
-    
+
     if array_length == 0 {
         return result_array;
     }
@@ -450,7 +451,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
         let mut name = class_index
             .constant_pool()
             .string_view_at(*info.method_name().unwrap())
-            .into_ascii_string(&class_index.constant_pool())
+            .into_ascii_string(class_index.constant_pool())
             .to_ascii_string();
         name.push_str(
             info.method_descriptor()

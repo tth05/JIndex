@@ -1,12 +1,14 @@
-use crate::class_index::{rsplit_once, ClassIndex, ClassIndexBuilder, ClassToIndexMap};
+use crate::builder::{get_index_from_pool, ClassToIndexMap};
+use crate::class_index::ClassIndex;
 use crate::constant_pool::ClassIndexConstantPool;
+use crate::rsplit_once;
 use crate::signature::{
     IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
     IndexedTypeParameterData, RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 pub trait ToIndexedType {
     type Out;
@@ -14,9 +16,9 @@ pub trait ToIndexedType {
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out;
+    ) -> anyhow::Result<Self::Out>;
 }
 
 pub trait ToSignatureIndexedType {
@@ -106,23 +108,25 @@ impl ToIndexedType for RawSignatureType {
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
-        match &self {
+    ) -> anyhow::Result<Self::Out> {
+        Ok(match &self {
             RawSignatureType::Primitive(p) => IndexedSignatureType::Primitive(*p),
-            RawSignatureType::Generic(name) => IndexedSignatureType::Generic(
-                ClassIndexBuilder::get_index_from_pool(name, constant_pool_map, constant_pool),
-            ),
+            RawSignatureType::Generic(name) => IndexedSignatureType::Generic(get_index_from_pool(
+                name,
+                constant_pool_map,
+                constant_pool,
+            )?),
             RawSignatureType::Array(inner) => IndexedSignatureType::Array(Box::new(
-                inner.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
+                inner.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)?,
             )),
             RawSignatureType::Object(name) => index_object_type(name, class_to_index_map),
             RawSignatureType::ObjectPlus(inner) => IndexedSignatureType::ObjectPlus(Box::new(
-                inner.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
+                inner.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)?,
             )),
             RawSignatureType::ObjectMinus(inner) => IndexedSignatureType::ObjectMinus(Box::new(
-                inner.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
+                inner.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)?,
             )),
             RawSignatureType::ObjectInnerClass(inner) => {
                 let inner = inner.as_ref();
@@ -135,7 +139,7 @@ impl ToIndexedType for RawSignatureType {
                     constant_pool,
                     constant_pool_map,
                     class_to_index_map,
-                ));
+                )?);
                 //Add inner classes
                 inner.iter().skip(1).for_each(|s| {
                     //Separator
@@ -162,16 +166,20 @@ impl ToIndexedType for RawSignatureType {
                                 index_for_object_type(&type_name, class_to_index_map);
 
                             match main_type_index_or_none {
-                                Some(main_type_index) => {
-                                    IndexedSignatureType::ObjectTypeBounds(Box::new((
-                                        main_type_index,
-                                        vec.to_indexed_type(
-                                            constant_pool,
-                                            constant_pool_map,
-                                            class_to_index_map,
-                                        ),
-                                    )))
-                                }
+                                Some(main_type_index) => vec
+                                    .to_indexed_type(
+                                        constant_pool,
+                                        constant_pool_map,
+                                        class_to_index_map,
+                                    )
+                                    .ok()
+                                    .map(|params| {
+                                        IndexedSignatureType::ObjectTypeBounds(Box::new((
+                                            main_type_index,
+                                            params,
+                                        )))
+                                    })
+                                    .unwrap_or(IndexedSignatureType::Unresolved),
                                 _ => IndexedSignatureType::Unresolved,
                             }
                         }
@@ -186,7 +194,7 @@ impl ToIndexedType for RawSignatureType {
                 let main_type_index_or_none = index_for_object_type(main_type, class_to_index_map);
 
                 let mut indexed_vec =
-                    vec.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map);
+                    vec.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)?;
                 indexed_vec.shrink_to_fit();
                 match main_type_index_or_none {
                     Some(main_type_index) => IndexedSignatureType::ObjectTypeBounds(Box::new((
@@ -197,7 +205,7 @@ impl ToIndexedType for RawSignatureType {
                 }
             }
             _ => unreachable!(),
-        }
+        })
     }
 }
 
@@ -256,7 +264,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                     + class_index
                         .constant_pool()
                         .string_view_at(*index)
-                        .into_ascii_string(&class_index.constant_pool())
+                        .into_ascii_string(class_index.constant_pool())
                         .as_str()
                     + ";"
             }
@@ -341,17 +349,26 @@ impl ToIndexedType for RawClassSignature {
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
-        IndexedClassSignature::new(
-            self.generic_data
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-            self.super_class
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-            self.interfaces
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-        )
+    ) -> anyhow::Result<Self::Out> {
+        Ok(IndexedClassSignature::new(
+            self.generic_data.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+            self.super_class.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+            self.interfaces.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+        ))
     }
 }
 
@@ -388,24 +405,22 @@ impl ToIndexedType for RawTypeParameterData {
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
-        //Force compiler to drop &mut to constant pool
-        let index = {
-            ClassIndexBuilder::get_index_from_pool(&self.name, constant_pool_map, constant_pool)
-        };
-
-        IndexedTypeParameterData::new(
-            index,
-            self.type_bound
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
+    ) -> anyhow::Result<Self::Out> {
+        Ok(IndexedTypeParameterData::new(
+            get_index_from_pool(&self.name, constant_pool_map, constant_pool)?,
+            self.type_bound.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
             self.interface_bounds.to_indexed_type(
                 constant_pool,
                 constant_pool_map,
                 class_to_index_map,
-            ),
-        )
+            )?,
+        ))
     }
 }
 
@@ -414,7 +429,7 @@ impl ToSignatureIndexedType for IndexedTypeParameterData {
         class_index
             .constant_pool()
             .string_view_at(self.name)
-            .into_ascii_string(&class_index.constant_pool())
+            .into_ascii_string(class_index.constant_pool())
             .to_string()
             + ":"
             + &(match &self.type_bound {
@@ -462,19 +477,31 @@ impl ToIndexedType for RawMethodSignature {
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
-        IndexedMethodSignature::new(
-            self.generic_data
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-            self.parameters
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-            self.return_type
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-            self.exceptions
-                .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map),
-        )
+    ) -> anyhow::Result<Self::Out> {
+        Ok(IndexedMethodSignature::new(
+            self.generic_data.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+            self.parameters.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+            self.return_type.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+            self.exceptions.to_indexed_type(
+                constant_pool,
+                constant_pool_map,
+                class_to_index_map,
+            )?,
+        ))
     }
 }
 
@@ -527,34 +554,32 @@ impl ToIndexedType for RawEnclosingTypeInfo {
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
+    ) -> anyhow::Result<Self::Out> {
         let class_name =
             index_for_object_type(self.class_name.as_ref().unwrap(), class_to_index_map);
-        let method_name = {
-            // This block ensures that the constant pool reference is dropped before we index the method descriptor
-            self.method_name.as_ref().map(|method_name| {
-                ClassIndexBuilder::get_index_from_pool(
+
+        Ok(IndexedEnclosingTypeInfo::new(
+            class_name,
+            self.inner_class_type,
+            match self.method_name.as_ref() {
+                Some(method_name) => Some(get_index_from_pool(
                     method_name,
                     constant_pool_map,
                     constant_pool,
-                )
-            })
-        };
-
-        IndexedEnclosingTypeInfo::new(
-            class_name,
-            self.inner_class_type,
-            method_name,
-            self.method_descriptor.as_ref().map(|method_signature| {
-                method_signature.to_indexed_type(
+                )?),
+                None => None,
+            },
+            match self.method_descriptor.as_ref() {
+                Some(method_signature) => Some(method_signature.to_indexed_type(
                     constant_pool,
                     constant_pool_map,
                     class_to_index_map,
-                )
-            }),
-        )
+                )?),
+                None => None,
+            },
+        ))
     }
 }
 
@@ -567,11 +592,15 @@ where
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
-        self.as_ref()
-            .map(|t| t.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map))
+    ) -> anyhow::Result<Self::Out> {
+        Ok(match self.as_ref() {
+            Some(t) => {
+                Some(t.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)?)
+            }
+            None => None,
+        })
     }
 }
 
@@ -584,9 +613,9 @@ where
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
+    ) -> anyhow::Result<Self::Out> {
         self.as_ref()
             .to_indexed_type(constant_pool, constant_pool_map, class_to_index_map)
     }
@@ -601,9 +630,9 @@ where
     fn to_indexed_type<'a>(
         &'a self,
         constant_pool: &mut ClassIndexConstantPool,
-        constant_pool_map: &mut HashMap<&'a AsciiStr, u32>,
+        constant_pool_map: &mut FxHashMap<&'a AsciiStr, u32>,
         class_to_index_map: &ClassToIndexMap,
-    ) -> Self::Out {
+    ) -> anyhow::Result<Self::Out> {
         self.iter()
             .map(|s| s.to_indexed_type(constant_pool, constant_pool_map, class_to_index_map))
             .collect()

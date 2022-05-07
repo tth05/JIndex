@@ -20,28 +20,33 @@ pub fn cached_field_ids() -> &'static FieldIDs {
     CACHED_FIELD_IDS.get().unwrap()
 }
 
-pub unsafe fn init_field_ids(env: JNIEnv) {
+pub unsafe fn init_field_ids(env: JNIEnv) -> anyhow::Result<()> {
     if CACHED_FIELD_IDS.get().is_some() {
-        return;
+        return Ok(());
     }
 
-    unsafe fn transmute_field_id(env: JNIEnv, name: &str, class_name: &str) -> JFieldID<'static> {
-        std::mem::transmute::<_, _>(
-            env.get_field_id(
-                env.find_class("com/github/tth05/jindex/".to_owned() + class_name)
-                    .unwrap(),
-                name,
-                "J",
-            )
-            .unwrap(),
-        )
+    unsafe fn transmute_field_id(
+        env: JNIEnv,
+        name: &str,
+        class_name: &str,
+    ) -> anyhow::Result<JFieldID<'static>> {
+        Ok(std::mem::transmute::<_, _>(env.get_field_id(
+            env.find_class("com/github/tth05/jindex/".to_owned() + class_name)?,
+            name,
+            "J",
+        )?))
     }
 
     let _ = CACHED_FIELD_IDS.set(FieldIDs {
-        class_index_pointer: transmute_field_id(env, "classIndexPointer", "ClassIndexChildObject"),
-        class_index_child_self_pointer: transmute_field_id(env, "pointer", "ClassIndexChildObject"),
-        class_child_class_pointer: transmute_field_id(env, "classPointer", "ClassChildObject"),
+        class_index_pointer: transmute_field_id(env, "classIndexPointer", "ClassIndexChildObject")?,
+        class_index_child_self_pointer: transmute_field_id(
+            env,
+            "pointer",
+            "ClassIndexChildObject",
+        )?,
+        class_child_class_pointer: transmute_field_id(env, "classPointer", "ClassChildObject")?,
     });
+    Ok(())
 }
 
 pub unsafe fn get_field_with_id<'a, T>(env: JNIEnv, this: jobject, field_id: &JFieldID) -> &'a T {

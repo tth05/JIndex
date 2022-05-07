@@ -8,16 +8,17 @@ pub struct ClassIndexConstantPool {
 }
 
 impl ClassIndexConstantPool {
-    pub fn new(capacity: u32) -> Self {
+    pub(crate) fn new(capacity: u32) -> Self {
         Self {
             string_data: Vec::with_capacity(capacity as usize),
         }
     }
 
-    pub fn add_string(&mut self, str: &[u8]) -> Result<u32> {
+    pub(crate) fn add_string(&mut self, str: &[u8]) -> Result<u32> {
         let index = self.string_data.len();
         let length = str.len();
         if length > u8::MAX as usize {
+            println!("String too long");
             return Err(anyhow!(
                 "The string {} exceeds the maximum size of {}",
                 AsciiStr::from_ascii(str).unwrap(),
@@ -131,8 +132,8 @@ impl ConstantPoolStringView {
         true
     }
 
-    /// Searches for the given `query` using the given `options` and returns the matched position of
-    /// there is one.
+    /// Searches for the given `query` using the given `options` and returns the
+    /// matched position of there is one.
     pub fn search(
         &self,
         constant_pool: &ClassIndexConstantPool,
