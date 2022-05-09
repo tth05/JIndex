@@ -138,19 +138,10 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> anyhow::Result<Vec<Cla
     let mut class_info_list = Vec::new();
 
     for bytes in bytes_queue.iter() {
-        let class_file = match parse_class_with_options(
-            &bytes[..],
-            ParseOptions::default().parse_bytecode(false),
-        )
-        .map_err(|parse_error| anyhow!("{}", parse_error))
-        .with_context(|| format!("Failed to parse class file {:?}", bytes))
-        {
-            Ok(c) => c,
-            //TODO: Propagate this with '?' once cafebabe #16 is fixed
-            Err(_) => {
-                continue;
-            }
-        };
+        let class_file =
+            parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false))
+                .map_err(|parse_error| anyhow!("{}", parse_error))
+                .with_context(|| format!("Failed to parse class file {:?}", bytes))?;
 
         let ConvertedInnerClassInfo {
             package_name,
