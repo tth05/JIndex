@@ -316,9 +316,8 @@ fn convert_enclosing_type_and_inner_classes(
     let mut member_classes = None;
     let mut self_inner_class_index = None;
 
-    // This blocks checks the first inner class entry which can represent this
-    // class. If there is one, we extract the inner and outer class names from
-    // it.
+    // This blocks checks the first inner class entry which can represent this class. If there is
+    // one, we extract the inner and outer class names from it.
     if let Some(vec) = inner_class_data {
         if let Some(first) = vec
             .iter()
@@ -399,8 +398,8 @@ fn convert_enclosing_type_and_inner_classes(
     })
 }
 
-/// Returns (0) the full outer class name including the package and (1) the
-/// index into the original class name from where the inner class name starts
+/// Returns (0) the full outer class name including the package and (1) the index into the original
+/// class name from where the inner class name starts
 fn extract_outer_and_inner_name(
     original_class_name: &AsciiStr,
     e: &InnerClassEntry,

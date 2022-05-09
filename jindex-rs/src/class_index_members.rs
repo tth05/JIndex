@@ -243,7 +243,7 @@ impl IndexedMethod {
                 .map(|a| {
                     a.iter()
                         // Safety: We know that the parameter count is equal, so we know that the
-                        //  other method must have parameters
+                        // other method must have parameters
                         .zip(base_method.method_signature.parameters().unwrap().iter())
                         .all(|(a, b)| a.eq_erased(b))
                 })

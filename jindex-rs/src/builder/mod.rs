@@ -75,8 +75,8 @@ impl ClassIndexBuilder {
             ));
         }
 
-        // Sort classes to finalize their order, this allows us to refer to them by
-        // index from now on
+        // Sort classes to finalize their order, this allows us to refer to them by index from now
+        // on
         ClassIndexBuilder::sort_classes(&package_index, &constant_pool, &mut classes);
         let mut classes_map: ClassToIndexMap =
             FxHashMap::with_capacity_and_hasher(classes.len(), Default::default());

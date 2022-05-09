@@ -24,8 +24,8 @@ impl PackageIndex {
         self.get_or_add_package_index0(0, constant_pool, name)
     }
 
-    /// This may be the most disgusting method I've ever written, but I suck at
-    /// Rust too much to fix it
+    /// This may be the most disgusting method I've ever written, but I suck at Rust too much to fix
+    /// it
     fn get_or_add_package_index0(
         &mut self,
         indexed_package_index: u32,
