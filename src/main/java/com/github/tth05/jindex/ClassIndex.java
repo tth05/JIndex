@@ -1,22 +1,41 @@
 package com.github.tth05.jindex;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.net.URL;
+import java.nio.file.*;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Stream;
 
 public class ClassIndex extends ClassIndexChildObject {
 
     static {
-        try {
-            boolean isDev = false;
-            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve("jindex_lib_0.0.36.dll");
-            if (isDev || !Files.exists(tempFilePath)) {
-                Files.copy(ClassIndex.class.getResourceAsStream("/jindex_rs.dll"), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
+        URL resource = ClassIndex.class.getResource("/lib");
+        if (resource == null)
+            throw new RuntimeException("Could not find lib directory");
+
+        // Sanitize URL
+        boolean isOnDisk = resource.getProtocol().equals("file");
+        String actualPath = resource.toString().split("!")[0];
+        actualPath = actualPath.substring(actualPath.indexOf("file:") + 6);
+
+        // Either use the default file system (dev environment) or mount the jar file as a file system
+        try (FileSystem fileSystem = isOnDisk ? FileSystems.getDefault() : FileSystems.newFileSystem(Paths.get(actualPath), null);
+             Stream<Path> fileStream = Files.list(isOnDisk ? fileSystem.getPath(actualPath) : fileSystem.getPath("/"))
+        ) {
+            // Search for the lib file
+            Optional<Path> libFile = fileStream.filter(p -> p.getFileName().toString().startsWith("jindex")).findFirst();
+            if (!libFile.isPresent())
+                throw new RuntimeException("Could not find jindex lib");
+
+            // Copy it to the temp directory
+            Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve(libFile.get().getFileName().toString());
+            if (System.getenv("JINDEX_DEV") != null || !Files.exists(tempFilePath)) {
+                Files.copy(ClassIndex.class.getResourceAsStream("/lib/" + libFile.get().getFileName()), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
             }
 
             System.load(tempFilePath.toAbsolutePath().toString());
+        } catch (UnsupportedOperationException ignored) {
+            // Closing might be unsupported
         } catch (Exception e) {
             throw new RuntimeException("Unable to load native library", e);
         }
@@ -29,9 +48,11 @@ public class ClassIndex extends ClassIndexChildObject {
     }
 
     public native IndexedClass findClass(String packageName, String className);
+
     public native IndexedClass[] findClasses(String query, SearchOptions options);
 
     public native IndexedPackage findPackage(String packageName);
+
     public native IndexedPackage[] findPackages(String query);
 
     public List<String> findMethods(String query, int limit) {

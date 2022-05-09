@@ -4,16 +4,16 @@ plugins {
 }
 
 group 'com.github.tth05'
-version '0.0.36'
+version System.getenv("GITHUB_REF").replaceAll("^refs/tags/v", "")
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    testImplementation 'io.github.classgraph:classgraph:4.8.123'
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+    testImplementation 'io.github.classgraph:classgraph:4.8.146'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.2'
 }
 
 test {
@@ -31,8 +31,9 @@ task copyNativeLibrary {
     }
     copy {
         from "${projectDir}/jindex-rs/target/release"
-        into "${projectDir}/src/main/resources"
+        into "${projectDir}/src/main/resources/lib"
         include "jindex_rs.dll"
+        rename "jindex_rs.dll", "jindex_rs_${version}.dll"
     }
 }
 
