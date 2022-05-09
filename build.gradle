@@ -4,7 +4,8 @@ plugins {
 }
 
 group 'com.github.tth05'
-version System.getenv("GITHUB_REF").replaceAll("^refs/tags/v", "")
+var ver = System.getenv("GITHUB_REF") ?: "dev"
+version ver.replaceAll("^refs/tags/v", "")
 
 repositories {
     mavenCentral()
