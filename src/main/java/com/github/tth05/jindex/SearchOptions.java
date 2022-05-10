@@ -40,13 +40,28 @@ public class SearchOptions {
     }
 
     public enum SearchMode {
+        /**
+         * The match has to occur at the start of the string.
+         */
         PREFIX,
+        /**
+         * The match can occur anywhere in the string.
+         */
         CONTAINS
     }
 
     public enum MatchMode {
+        /**
+         * The match is case-insensitive.
+         */
         IGNORE_CASE,
+        /**
+         * The match is case-sensitive.
+         */
         MATCH_CASE,
+        /**
+         * The match is case-sensitive, but only for the first character of where the match occurs.
+         */
         MATCH_CASE_FIRST_CHAR_ONLY,
     }
 }

@@ -1,6 +1,8 @@
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
+use std::time::Instant;
 
+use crate::builder::BuildTimeInfo;
 use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
 use crate::package_index::IndexedPackage;
@@ -11,7 +13,8 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
-pub fn load_class_index_from_file(path: String) -> anyhow::Result<ClassIndex> {
+pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
+    let now = Instant::now();
     let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path)?)?;
     let mut file = archive
         .by_index(0)
@@ -22,7 +25,17 @@ pub fn load_class_index_from_file(path: String) -> anyhow::Result<ClassIndex> {
     file.read_to_end(&mut output_buf)
         .with_context(|| "Failed to read first file")?;
 
-    ClassIndex::read_from_buffer(&output_buf).with_context(|| "Failed to deserialize ClassIndex")
+    let mut info = BuildTimeInfo {
+        file_reading_time: now.elapsed().as_millis(),
+        ..Default::default()
+    };
+
+    let now = Instant::now();
+    let result = ClassIndex::read_from_buffer(&output_buf)
+        .with_context(|| "Failed to deserialize ClassIndex")?;
+    info.deserialization_time = now.elapsed().as_millis();
+
+    Ok((info, result))
 }
 
 pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) -> anyhow::Result<()> {

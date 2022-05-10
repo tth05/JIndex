@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use ascii::{AsciiChar, AsciiStr, AsciiString};
 use cafebabe::{FieldAccessFlags, MethodAccessFlags};
 use rustc_hash::FxHashMap;
+use std::time::Instant;
 
 pub mod workers;
 
@@ -36,7 +37,8 @@ impl ClassIndexBuilder {
         self
     }
 
-    fn build(self, vec: Vec<ClassInfo>) -> anyhow::Result<ClassIndex> {
+    fn build(self, vec: Vec<ClassInfo>) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
+        let start_time = Instant::now();
         let element_count = vec.len() as u32;
 
         let mut constant_pool = ClassIndexConstantPool::new(
@@ -187,7 +189,14 @@ impl ClassIndexBuilder {
         }
 
         let classes = classes.into_iter().map(|class| class.1).collect();
-        Ok(ClassIndex::new(constant_pool, package_index, classes))
+
+        Ok((
+            BuildTimeInfo {
+                indexing_time: start_time.elapsed().as_millis(),
+                ..Default::default()
+            },
+            ClassIndex::new(constant_pool, package_index, classes),
+        ))
     }
 
     fn sort_classes(
@@ -258,4 +267,41 @@ struct MethodInfo {
     pub method_name: AsciiString,
     pub signature: RawMethodSignature,
     pub access_flags: MethodAccessFlags,
+}
+
+#[derive(Default)]
+pub struct BuildTimeInfo {
+    pub deserialization_time: u128,
+    pub file_reading_time: u128,
+    pub class_reading_time: u128,
+    pub indexing_time: u128,
+}
+
+impl BuildTimeInfo {
+    fn merge(&mut self, other: BuildTimeInfo) {
+        self.deserialization_time += other.deserialization_time;
+        self.file_reading_time += other.file_reading_time;
+        self.class_reading_time += other.class_reading_time;
+        self.indexing_time += other.indexing_time;
+    }
+
+    pub fn total_time_millis(&self) -> u128 {
+        self.deserialization_time
+            + self.file_reading_time
+            + self.class_reading_time
+            + self.indexing_time
+    }
+}
+
+impl ToString for BuildTimeInfo {
+    fn to_string(&self) -> String {
+        format!(
+            "Deserialization: {}ms\nFile reading: {}ms\nClass reading: {}ms\nIndexing: {}ms\nTotal: {}ms",
+            self.deserialization_time,
+            self.file_reading_time,
+            self.class_reading_time,
+            self.indexing_time,
+            self.total_time_millis()
+        )
+    }
 }

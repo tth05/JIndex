@@ -26,7 +26,6 @@ impl ClassIndex {
         //Construct prefix range map
         let mut prefix_count_map: FxHashMap<u8, u32> = FxHashMap::default();
 
-        let time = Instant::now();
         for class in classes.iter() {
             let count = prefix_count_map
                 .entry(
@@ -39,7 +38,6 @@ impl ClassIndex {
                 .or_insert(0);
             *count += 1;
         }
-        println!("Sort {}", time.elapsed().as_millis());
 
         let mut range_map: FxHashMap<u8, Range<u32>> = FxHashMap::default();
         let mut total = 0u32;
@@ -116,8 +114,9 @@ impl ClassIndex {
     /// 0. Benchmark if this could actually be faster
     /// 1. Abstract the prefix_range_map into its own type
     /// 2. Use that type to fast access all root packages
-    /// 3. Utilize find_package (which uses that new type) and then a binary search on the found package class_indices to make this whole find_class even faster
-    /// For example, when searching for 'java/lang/S', we perform a binary search on a slice with 12k elements.
+    /// 3. Utilize find_package (which uses that new type) and then a binary search on the found
+    /// package class_indices to make this whole find_class even faster For example, when
+    /// searching for 'java/lang/S', we perform a binary search on a slice with 12k elements.
     /// Instead we could find java/lang extremely fast and then binary search ~200 classes.
     pub fn find_class(
         &self,

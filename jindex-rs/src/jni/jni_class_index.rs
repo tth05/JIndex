@@ -1,4 +1,5 @@
-use crate::builder::workers::{create_class_index, create_class_index_from_jars};
+use crate::builder::workers::{create_class_index_from_bytes, create_class_index_from_jars};
+use crate::builder::BuildTimeInfo;
 use anyhow::anyhow;
 use ascii::IntoAsciiString;
 use jni::objects::{JObject, JString, JValue};
@@ -40,8 +41,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     env: JNIEnv,
     this: jobject,
     byte_array_list: jobject,
-) {
-    propagate_error!(env, init_field_ids(env));
+) -> jobject {
+    propagate_error!(env, init_field_ids(env), JObject::null().into_inner());
 
     let java_list = env.get_list(byte_array_list.into()).unwrap();
     let mut class_bytes = Vec::with_capacity(java_list.size().unwrap() as usize);
@@ -49,7 +50,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
         class_bytes.push(env.convert_byte_array(ar.cast()).unwrap());
     }
 
-    let class_index = create_class_index(class_bytes);
+    let (info, class_index) = propagate_error!(
+        env,
+        create_class_index_from_bytes(class_bytes),
+        JObject::null().into_inner()
+    );
 
     env.set_field(
         this,
@@ -58,6 +63,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
         JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
     .expect("Unable to set field");
+
+    convert_build_time_info(env, info)
 }
 
 #[no_mangle]
@@ -67,8 +74,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     env: JNIEnv,
     this: jobject,
     jar_names_list: jobject,
-) {
-    propagate_error!(env, init_field_ids(env));
+) -> jobject {
+    propagate_error!(env, init_field_ids(env), JObject::null().into_inner());
 
     let java_list = env.get_list(jar_names_list.into()).unwrap();
     let mut jar_names = Vec::with_capacity(java_list.size().unwrap() as usize);
@@ -80,7 +87,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
         );
     }
 
-    let class_index = propagate_error!(env, create_class_index_from_jars(jar_names));
+    let (info, class_index) = propagate_error!(
+        env,
+        create_class_index_from_jars(jar_names),
+        JObject::null().into_inner()
+    );
 
     env.set_field(
         this,
@@ -89,6 +100,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
         JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
     .expect("Unable to set field");
+
+    convert_build_time_info(env, info)
 }
 
 #[no_mangle]
@@ -113,11 +126,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
     env: JNIEnv,
     this: jobject,
     path: JString,
-) {
-    propagate_error!(env, init_field_ids(env));
+) -> jobject {
+    propagate_error!(env, init_field_ids(env), JObject::null().into_inner());
 
     let path: String = env.get_string(path).expect("Invalid path").into();
-    let class_index = propagate_error!(env, load_class_index_from_file(path));
+    let (info, class_index) = propagate_error!(
+        env,
+        load_class_index_from_file(path),
+        JObject::null().into_inner()
+    );
 
     env.set_field(
         this,
@@ -126,6 +143,24 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassI
         JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
     )
     .expect("Unable to set field");
+
+    convert_build_time_info(env, info)
+}
+
+unsafe fn convert_build_time_info(env: JNIEnv, info: BuildTimeInfo) -> jobject {
+    env.new_object(
+        env.find_class("com/github/tth05/jindex/BuildTimeInfo")
+            .expect("Unable to find class"),
+        "(JJJJ)V",
+        &[
+            JValue::Long(info.deserialization_time as jlong),
+            JValue::Long(info.file_reading_time as jlong),
+            JValue::Long(info.class_reading_time as jlong),
+            JValue::Long(info.indexing_time as jlong),
+        ],
+    )
+    .expect("Unable to create object")
+    .into_inner()
 }
 
 macro_rules! java_to_ascii_string {

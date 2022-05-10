@@ -1,4 +1,4 @@
-use crate::builder::{ClassIndexBuilder, ClassInfo, FieldInfo, MethodInfo};
+use crate::builder::{BuildTimeInfo, ClassIndexBuilder, ClassInfo, FieldInfo, MethodInfo};
 use crate::class_index::ClassIndex;
 use crate::rsplit_once;
 use crate::signature::{
@@ -104,17 +104,20 @@ fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(output)
 }
 
-pub fn create_class_index_from_jars(jar_names: Vec<String>) -> anyhow::Result<ClassIndex> {
+pub fn create_class_index_from_jars(
+    jar_names: Vec<String>,
+) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
     let class_bytes = do_multi_threaded(jar_names, &process_jar_worker)?;
 
-    println!(
-        "read {} classes into ram in {}ms",
-        class_bytes.len(),
-        now.elapsed().as_millis()
-    );
+    let mut info = BuildTimeInfo {
+        file_reading_time: now.elapsed().as_millis(),
+        ..Default::default()
+    };
 
-    create_class_index(class_bytes)
+    let (other_info, class_index) = create_class_index_from_bytes(class_bytes)?;
+    info.merge(other_info);
+    Ok((info, class_index))
 }
 
 macro_rules! get_attribute_info {
@@ -258,8 +261,11 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> anyhow::Result<Vec<Cla
     Ok(class_info_list)
 }
 
-pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> anyhow::Result<ClassIndex> {
-    let mut now = Instant::now();
+pub fn create_class_index_from_bytes(
+    class_bytes: Vec<Vec<u8>>,
+) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
+    let now = Instant::now();
+
     let mut class_info_list: Vec<ClassInfo> =
         do_multi_threaded(class_bytes, &process_class_bytes_worker)?;
 
@@ -272,25 +278,19 @@ pub fn create_class_index(class_bytes: Vec<Vec<u8>>) -> anyhow::Result<ClassInde
     class_info_list
         .dedup_by(|a, b| a.class_name.eq(&b.class_name) && a.package_name.eq(&b.package_name));
 
-    println!(
-        "Reading {} classes took {:?}",
-        class_info_list.len(),
-        now.elapsed().as_nanos().div(1_000_000)
-    );
-    now = Instant::now();
+    let mut build_time_info = BuildTimeInfo {
+        class_reading_time: now.elapsed().as_millis(),
+        ..Default::default()
+    };
 
     let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
 
-    let class_index = ClassIndexBuilder::default()
+    let (other_info, class_index) = ClassIndexBuilder::default()
         .with_expected_method_count(method_count)
         .build(class_info_list)?;
 
-    println!(
-        "Building took {:?}",
-        now.elapsed().as_nanos().div(1_000_000)
-    );
-
-    Ok(class_index)
+    build_time_info.merge(other_info);
+    Ok((build_time_info, class_index))
 }
 
 struct ConvertedInnerClassInfo {
