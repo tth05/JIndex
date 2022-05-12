@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use std::cmp::min;
 use std::fs::File;
 use std::io::Read;
-use std::ops::{BitOr, Div};
+use std::ops::BitOr;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;

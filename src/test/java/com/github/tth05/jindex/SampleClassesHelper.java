@@ -27,20 +27,7 @@ public class SampleClassesHelper {
         if (!USE_SAMPLE_JAR_CACHE)
             return readSampleClasses();
 
-        URL resource = SampleClassesHelper.class.getResource("/Samples.jar");
-        if (resource == null) {
-            try (ZipOutputStream zipFile = new ZipOutputStream(Files.newOutputStream(Paths.get("src/test/resources/Samples.jar")))) {
-                int i = 0;
-                for (byte[] b : readSampleClasses()) {
-                    zipFile.putNextEntry(new ZipEntry("Class" + i + ".class"));
-                    zipFile.write(b);
-                    zipFile.closeEntry();
-                    i++;
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
+        createSamplesJar();
 
         List<byte[]> classes = new ArrayList<>();
 
@@ -59,6 +46,23 @@ public class SampleClassesHelper {
         }
 
         return null;
+    }
+
+    public static void createSamplesJar() {
+        URL resource = SampleClassesHelper.class.getResource("/Samples.jar");
+        if (resource == null) {
+            try (ZipOutputStream zipFile = new ZipOutputStream(Files.newOutputStream(Paths.get("src/test/resources/Samples.jar")))) {
+                int i = 0;
+                for (byte[] b : readSampleClasses()) {
+                    zipFile.putNextEntry(new ZipEntry("Class" + i + ".class"));
+                    zipFile.write(b);
+                    zipFile.closeEntry();
+                    i++;
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private static List<byte[]> readSampleClasses() {

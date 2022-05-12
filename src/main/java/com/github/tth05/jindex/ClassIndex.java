@@ -78,13 +78,12 @@ public class ClassIndex extends ClassIndexChildObject {
     /**
      * <p>Returns an array of packages which start with the given query. The query is case sensitive. Both '/' and '.'
      * may be used as package separators.</p>
-     * <p>Examples:
+     * Examples:
      * <blockquote><pre>
-     *     findPackages("java") -> ["java"]
-     *     findPackages("java.a") -> ["java.awt", "java.applet"]
-     *     findPackages("java.") -> ["java.awt", "java.applet", "java.beans", ..., "java.util"]
+     *     findPackages("java") - ["java"]
+     *     findPackages("java.a") - ["java.awt", "java.applet"]
+     *     findPackages("java.") - ["java.awt", "java.applet", "java.beans", ..., "java.util"]
      * </pre></blockquote>
-     * </p>
      *
      * @param query The query to search for
      * @return An array of packages, or an empty array if no packages were found

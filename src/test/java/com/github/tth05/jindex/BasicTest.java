@@ -1,10 +1,13 @@
 package com.github.tth05.jindex;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.lang.reflect.Modifier;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 
@@ -17,35 +20,43 @@ public class BasicTest {
 
     @BeforeAll
     public void init() {
-        long t = System.nanoTime();
-        index = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
-        System.out.println((System.nanoTime() - t) / 1_000_000.0);
+        SampleClassesHelper.createSamplesJar();
+        ClassIndex tempIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
+        tempIndex.saveToFile("index");
+        this.index = ClassIndex.fromFile("index");
+
+        System.out.println(tempIndex.getBuildTimeInfo().toFormattedString());
+    }
+
+    @AfterAll
+    public void cleanup() {
+        assertDoesNotThrow(() -> Files.deleteIfExists(Paths.get("index")));
     }
 
     @Test
     public void testFindClass() {
-        IndexedClass singleClass = index.findClass("com/sun/org/apache/xpath/internal/operations", "String");
+        IndexedClass singleClass = index.findClass("java/lang", "String");
         assertNotNull(singleClass);
-        assertEquals("com/sun/org/apache/xpath/internal/operations/String", singleClass.getNameWithPackage());
+        assertEquals("java/lang/String", singleClass.getNameWithPackage());
     }
 
     @Test
     public void testFindClasses() {
         IndexedClass[] results = index.findClasses("String", SearchOptions.defaultOptions());
+        for (IndexedClass result : results)
+            assertTrue(result.getName().startsWith("String"));
 
-        assertEquals(62, results.length);
-
-        IndexedClass resultClass = Arrays.stream(results).filter(c -> c.getNameWithPackage().equals("com/sun/org/apache/xpath/internal/operations/String")).findFirst().get();
-        assertEquals(1, resultClass.getFields().length);
-        assertEquals(2, resultClass.getMethods().length);
-        assertEquals("com/sun/org/apache/xpath/internal/operations/String", resultClass.getNameWithPackage());
+        IndexedClass resultClass = Arrays.stream(results).filter(c -> c.getNameWithPackage().equals("java/lang/String")).findFirst().get();
+        assertEquals(5, resultClass.getFields().length);
+        assertTrue(resultClass.getMethods().length >= 93);
+        assertEquals("java/lang/String", resultClass.getNameWithPackage());
         assertTrue(Modifier.isPublic(resultClass.getAccessFlags()));
 
-        assertEquals("serialVersionUID", resultClass.getFields()[0].getName());
-        assertTrue(Modifier.isStatic(resultClass.getFields()[0].getAccessFlags()));
-        assertTrue(Modifier.isFinal(resultClass.getFields()[0].getAccessFlags()));
+        assertEquals("serialVersionUID", resultClass.getFields()[2].getName());
+        assertTrue(Modifier.isStatic(resultClass.getFields()[2].getAccessFlags()));
+        assertTrue(Modifier.isFinal(resultClass.getFields()[2].getAccessFlags()));
 
-        assertEquals("operate", resultClass.getMethods()[1].getName());
-        assertTrue(Modifier.isPublic(resultClass.getMethods()[1].getAccessFlags()));
+        assertEquals("lastIndexOfSupplementary", resultClass.getMethods()[48].getName());
+        assertTrue(Modifier.isPrivate(resultClass.getMethods()[48].getAccessFlags()));
     }
 }

@@ -456,7 +456,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
         name.push_str(
             info.method_descriptor()
                 .unwrap()
-                //This signature was already a descriptor, meaning no generic param replacement is needed
+                //This signature was already a descriptor, meaning no generic param replacement is
+                // needed
                 .to_descriptor_string(class_index, &Vec::new())
                 .as_ascii_str_unchecked(),
         );
