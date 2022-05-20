@@ -33,6 +33,15 @@ The current implementation supports indexing of the following data:
         - Name
         - Generic signature and descriptor
 
+The following global operations are supported: 
+- Find a class
+- Find classes by name matching a query
+- Find a package
+- Find packages by prefix
+- Find implementations of a class
+- Find implementations of a method
+- Find base methods of a method
+
 After the indexing operation is complete, no further modifications to the class index are possible. The whole library
 only works with ASCII strings. Supplying a non ASCII string will result in an error, or it will be ignored.
 
