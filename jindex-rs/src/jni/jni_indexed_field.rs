@@ -12,7 +12,7 @@ use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIn
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_field = get_field_with_id::<IndexedField>(
@@ -23,7 +23,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
 
     env.new_string(indexed_field.field_name(class_index.constant_pool()))
         .unwrap()
-        .into_inner()
+        .into_raw()
 }
 
 #[no_mangle]
@@ -31,7 +31,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAccessFlags(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jint {
     let indexed_field = get_field_with_id::<IndexedField>(
         env,
@@ -47,7 +47,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAcces
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescriptorString(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_field = get_field_with_id::<IndexedField>(
@@ -68,7 +68,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescr
         &type_parameters,
     ))
     .expect("Unable to create generic signature String")
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -76,7 +76,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescr
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getGenericSignatureString(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedField>(
@@ -88,10 +88,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getGener
 
     //No generic signature available
     if is_basic_signature_type(signature) {
-        return JObject::null().into_inner();
+        return JObject::null().into_raw();
     }
 
     env.new_string(signature.to_signature_string(class_index))
         .expect("Unable to create descriptor String")
-        .into_inner()
+        .into_raw()
 }

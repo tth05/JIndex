@@ -7,7 +7,7 @@ use crate::signature::{
     RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature, RawSignatureType,
 };
 use anyhow::anyhow;
-use ascii::{AsciiChar, AsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use cafebabe::{FieldAccessFlags, MethodAccessFlags};
 use rustc_hash::FxHashMap;
 use std::time::Instant;
@@ -83,7 +83,7 @@ impl ClassIndexBuilder {
         let mut classes_map: ClassToIndexMap =
             FxHashMap::with_capacity_and_hasher(classes.len(), Default::default());
         // Build a name to index map and give each class its index
-        classes.iter().enumerate().for_each(|(index, class)| {
+        classes.iter_mut().enumerate().for_each(|(index, class)| {
             class.1.set_index(index as u32);
             classes_map.insert(class.0, (index as u32, &class.1));
         });
@@ -190,13 +190,16 @@ impl ClassIndexBuilder {
 
         let classes = classes.into_iter().map(|class| class.1).collect();
 
-        Ok((
+        println!("Class index built in {:?}", start_time.elapsed());
+        let res = Ok((
             BuildTimeInfo {
                 indexing_time: start_time.elapsed().as_millis(),
                 ..Default::default()
             },
             ClassIndex::new(constant_pool, package_index, classes),
-        ))
+        ));
+        println!("Class index built in {:?}", start_time.elapsed());
+        res
     }
 
     fn sort_classes(
@@ -269,7 +272,7 @@ struct MethodInfo {
     pub access_flags: MethodAccessFlags,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct BuildTimeInfo {
     pub deserialization_time: u128,
     pub file_reading_time: u128,

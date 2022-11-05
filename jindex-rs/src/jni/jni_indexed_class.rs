@@ -14,7 +14,7 @@ use jni::JNIEnv;
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -25,7 +25,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
 
     env.new_string(indexed_class.class_name(class_index.constant_pool()))
         .unwrap()
-        .into_inner()
+        .into_raw()
 }
 
 #[no_mangle]
@@ -33,7 +33,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourceName(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -47,7 +47,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourc
             [indexed_class.class_name_start_index() as usize..],
     )
     .unwrap()
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -55,7 +55,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourc
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPackage(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobject {
     let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -78,7 +78,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
         ],
     )
     .expect("Unable to create object")
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -86,7 +86,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameWithPackage(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -100,7 +100,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
             .class_name_with_package(class_index.package_index(), class_index.constant_pool()),
     )
     .unwrap()
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -108,7 +108,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameWithPackageDot(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -124,7 +124,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
             .replace('/', "."),
     )
     .unwrap()
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -132,7 +132,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAccessFlags(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jint {
     let indexed_class = get_field_with_id::<IndexedClass>(
         env,
@@ -148,7 +148,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAcces
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getFields(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, _) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -193,7 +193,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getField
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMethods(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, _) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -238,7 +238,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMetho
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuperClass(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobject {
     let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -279,9 +279,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
             ],
         )
         .expect("Failed to create result object")
-        .into_inner()
+        .into_raw()
     } else {
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     }
 }
 
@@ -290,7 +290,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInterfaces(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -346,7 +346,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGenericSignatureString(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_class = get_field_with_id::<IndexedClass>(
@@ -367,12 +367,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
         //Object has no signature
         || indexed_class.class_name_with_package(class_index.package_index(), class_index.constant_pool()) == "java/lang/Object"
     {
-        return JObject::null().into_inner();
+        return JObject::null().into_raw();
     }
 
     env.new_string(signature.to_signature_string(class_index))
         .expect("Unable to create descriptor String")
-        .into_inner()
+        .into_raw()
 }
 
 #[no_mangle]
@@ -380,7 +380,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclosingClass(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobject {
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -403,9 +403,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
             ],
         )
         .expect("Failed to create result object")
-        .into_inner()
+        .into_raw()
     } else {
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     }
 }
 
@@ -414,7 +414,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInnerClassType0(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jint {
     let indexed_class = get_field_with_id::<IndexedClass>(
         env,
@@ -434,7 +434,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInner
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclosingMethodNameAndDesc(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let indexed_class = get_field_with_id::<IndexedClass>(
         env,
@@ -445,7 +445,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
 
     if let Some(info) = indexed_class.enclosing_type_info() {
         if info.method_name().is_none() || info.method_descriptor().is_none() {
-            return JObject::null().into_inner();
+            return JObject::null().into_raw();
         }
 
         let mut name = class_index
@@ -464,9 +464,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
 
         env.new_string(name)
             .expect("Unable to create descriptor String")
-            .into_inner()
+            .into_raw()
     } else {
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     }
 }
 
@@ -475,7 +475,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMemberClasses(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let result_class = env
         .find_class("com/github/tth05/jindex/IndexedClass")
@@ -518,7 +518,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMembe
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_findImplementations(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     direct_sub_types_only: jboolean,
 ) -> jobjectArray {
     let result_class = env

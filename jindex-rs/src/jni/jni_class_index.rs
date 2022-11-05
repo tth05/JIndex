@@ -20,7 +20,7 @@ use crate::package_index::IndexedPackage;
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) {
     let _class_index = Box::from_raw(get_class_index(env, this).0 as *mut ClassIndex);
 
@@ -39,12 +39,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
     env: JNIEnv,
-    this: jobject,
-    byte_array_list: jobject,
+    this: JObject,
+    byte_array_list: JObject,
 ) -> jobject {
-    propagate_error!(env, init_field_ids(env), JObject::null().into_inner());
+    propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
 
-    let java_list = env.get_list(byte_array_list.into()).unwrap();
+    let java_list = env.get_list(byte_array_list).unwrap();
     let mut class_bytes = Vec::with_capacity(java_list.size().unwrap() as usize);
     for ar in java_list.iter().unwrap() {
         class_bytes.push(env.convert_byte_array(ar.cast()).unwrap());
@@ -53,7 +53,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     let (info, class_index) = propagate_error!(
         env,
         create_class_index_from_bytes(class_bytes),
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     );
 
     env.set_field(
@@ -72,12 +72,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromJars(
     env: JNIEnv,
-    this: jobject,
-    jar_names_list: jobject,
+    this: JObject,
+    jar_names_list: JObject,
 ) -> jobject {
-    propagate_error!(env, init_field_ids(env), JObject::null().into_inner());
+    propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
 
-    let java_list = env.get_list(jar_names_list.into()).unwrap();
+    let java_list = env.get_list(jar_names_list).unwrap();
     let mut jar_names = Vec::with_capacity(java_list.size().unwrap() as usize);
     for ar in java_list.iter().unwrap() {
         jar_names.push(
@@ -90,7 +90,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     let (info, class_index) = propagate_error!(
         env,
         create_class_index_from_jars(jar_names),
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     );
 
     env.set_field(
@@ -109,7 +109,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     path: JString,
 ) {
     let path: String = env.get_string(path).expect("Invalid path").into();
@@ -124,16 +124,16 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_loadClassIndexFromFile(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     path: JString,
 ) -> jobject {
-    propagate_error!(env, init_field_ids(env), JObject::null().into_inner());
+    propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
 
     let path: String = env.get_string(path).expect("Invalid path").into();
     let (info, class_index) = propagate_error!(
         env,
         load_class_index_from_file(path),
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     );
 
     env.set_field(
@@ -160,7 +160,7 @@ unsafe fn convert_build_time_info(env: JNIEnv, info: BuildTimeInfo) -> jobject {
         ],
     )
     .expect("Unable to create object")
-    .into_inner()
+    .into_raw()
 }
 
 macro_rules! java_to_ascii_string {
@@ -178,7 +178,7 @@ macro_rules! java_to_ascii_string {
                     format!("'{}' is not an ASCII string", e.into_source()),
                 )
                 .expect("Unable to throw exception");
-                return JObject::null().into_inner();
+                return JObject::null().into_raw();
             }
         }
     }};
@@ -189,9 +189,9 @@ macro_rules! java_to_ascii_string {
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasses(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     input: JString,
-    options: jobject,
+    options: JObject,
 ) -> jobjectArray {
     let input = java_to_ascii_string!(&env, input);
 
@@ -206,7 +206,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
         propagate_error!(
             env,
             convert_search_options(env, options),
-            JObject::null().into_inner()
+            JObject::null().into_raw()
         ),
     );
 
@@ -231,7 +231,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     result_array
 }
 
-unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> anyhow::Result<SearchOptions> {
+unsafe fn convert_search_options(env: JNIEnv, options: JObject) -> anyhow::Result<SearchOptions> {
     if options.is_null() {
         return Ok(SearchOptions::default());
     }
@@ -245,8 +245,7 @@ unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> anyhow::Resul
         )
         .expect("Field not found")
         .l()
-        .unwrap()
-        .into_inner(),
+        .unwrap(),
     ) {
         0 => MatchMode::IgnoreCase,
         1 => MatchMode::MatchCase,
@@ -263,8 +262,7 @@ unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> anyhow::Resul
         )
         .expect("Field not found")
         .l()
-        .unwrap()
-        .into_inner(),
+        .unwrap(),
     ) {
         0 => SearchMode::Prefix,
         1 => SearchMode::Contains,
@@ -289,7 +287,7 @@ unsafe fn convert_search_options(env: JNIEnv, options: jobject) -> anyhow::Resul
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     i_package_name: JString,
     i_class_name: JString,
 ) -> jobject {
@@ -312,9 +310,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
             ],
         )
         .expect("Failed to create result object")
-        .into_inner()
+        .into_raw()
     } else {
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     }
 }
 
@@ -323,7 +321,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackage(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     i_package_name: JString,
 ) -> jobject {
     let package_name = java_to_ascii_string!(&env, i_package_name, |s: String| s.replace('.', "/"));
@@ -344,9 +342,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
             ],
         )
         .expect("Failed to create result object")
-        .into_inner()
+        .into_raw()
     } else {
-        JObject::null().into_inner()
+        JObject::null().into_raw()
     }
 }
 
@@ -355,7 +353,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackages(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
     query: JString,
 ) -> jobject {
     let query = java_to_ascii_string!(&env, query, |s: String| s.replace('.', "/"));
@@ -385,8 +383,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
                     JValue::from((package.deref() as *const IndexedPackage) as jlong),
                 ],
             )
-            .expect("Failed to create result object")
-            .into_inner();
+            .expect("Failed to create result object");
 
         env.set_object_array_element(result_array, index as i32, obj)
             .expect("Failed to set result array element");

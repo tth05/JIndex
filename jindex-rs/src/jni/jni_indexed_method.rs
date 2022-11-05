@@ -13,7 +13,7 @@ use jni::JNIEnv;
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedMethod>(
@@ -24,7 +24,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
 
     env.new_string(indexed_method.method_name(class_index.constant_pool()))
         .unwrap()
-        .into_inner()
+        .into_raw()
 }
 
 #[no_mangle]
@@ -32,7 +32,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDeclaringClass(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobject {
     let indexed_class =
         get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
@@ -48,7 +48,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDecl
         ],
     )
     .expect("Failed to create result object")
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -56,7 +56,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDecl
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAccessFlags(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jint {
     let indexed_method = get_field_with_id::<IndexedMethod>(
         env,
@@ -72,7 +72,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAcce
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDescriptorString(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedMethod>(
@@ -92,7 +92,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
         &type_parameters,
     ))
     .expect("Unable to create generic signature String")
-    .into_inner()
+    .into_raw()
 }
 
 unsafe fn collect_method_type_parameters<'a>(
@@ -114,7 +114,7 @@ unsafe fn collect_method_type_parameters<'a>(
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGenericSignatureString(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_method = get_field_with_id::<IndexedMethod>(
@@ -135,12 +135,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
             .exceptions()
             .map_or(true, |v| !v.iter().any(|s| !is_basic_signature_type(s)))
     {
-        return JObject::null().into_inner();
+        return JObject::null().into_raw();
     }
 
     env.new_string(signature.to_signature_string(class_index))
         .expect("Unable to create generic signature String")
-        .into_inner()
+        .into_raw()
 }
 
 #[no_mangle]
@@ -148,7 +148,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExceptions(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
 
@@ -221,7 +221,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExce
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImplementations(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
 
@@ -267,7 +267,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImp
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findBaseMethods(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
 

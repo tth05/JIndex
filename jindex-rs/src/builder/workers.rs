@@ -285,9 +285,12 @@ pub fn create_class_index_from_bytes(
 
     let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
 
-    let (other_info, class_index) = ClassIndexBuilder::default()
-        .with_expected_method_count(method_count)
-        .build(class_info_list)?;
+    let mut a = ClassIndexBuilder::default();
+    a = a.with_expected_method_count(method_count);
+
+    let now = Instant::now();
+    let (other_info, class_index) = a.build(class_info_list)?;
+    println!("Build time info: {:?}", now.elapsed());
 
     build_time_info.merge(other_info);
     Ok((build_time_info, class_index))

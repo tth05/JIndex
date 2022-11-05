@@ -3,6 +3,7 @@ use crate::class_index_members::IndexedClass;
 use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, SignatureType};
 use ascii::AsAsciiStr;
 use cafebabe::attributes::InnerClassAccessFlags;
+use jni::objects::JObject;
 use jni::sys::jobject;
 use jni::JNIEnv;
 
@@ -20,7 +21,7 @@ unsafe fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass
     )
 }
 
-unsafe fn get_enum_ordinal(env: JNIEnv, enum_object: jobject) -> u32 {
+unsafe fn get_enum_ordinal(env: JNIEnv, enum_object: JObject) -> u32 {
     env.call_method(enum_object, "ordinal", "()I", &[])
         .expect("Failed to call ordinal")
         .i()

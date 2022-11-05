@@ -7,8 +7,8 @@ use crate::signature::{
 use ascii::{AsAsciiStr, AsciiStr, AsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell};
 use cafebabe::MethodAccessFlags;
+use once_cell::unsync::OnceCell;
 use speedy::{Readable, Writable};
-use std::lazy::OnceCell;
 
 pub struct IndexedClass {
     index: OnceCell<u32>,
@@ -99,7 +99,7 @@ impl IndexedClass {
         *self.index.get().unwrap()
     }
 
-    pub(crate) fn set_index(&self, index: u32) {
+    pub(crate) fn set_index(&mut self, index: u32) {
         self.index.set(index).unwrap();
     }
 

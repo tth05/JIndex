@@ -10,7 +10,7 @@ use jni::JNIEnv;
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getName(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
@@ -21,7 +21,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 
     env.new_string(indexed_package.package_name(class_index.constant_pool()))
         .unwrap()
-        .into_inner()
+        .into_raw()
 }
 
 #[no_mangle]
@@ -29,7 +29,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameWithParents(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
@@ -43,7 +43,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
             .package_name_with_parents(class_index.package_index(), class_index.constant_pool()),
     )
     .unwrap()
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -51,7 +51,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameWithParentsDot(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jstring {
     let (_, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
@@ -67,7 +67,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
             .replace('/', "."),
     )
     .unwrap()
-    .into_inner()
+    .into_raw()
 }
 
 #[no_mangle]
@@ -75,7 +75,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSubPackages(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(
@@ -124,7 +124,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSub
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getClasses(
     env: JNIEnv,
-    this: jobject,
+    this: JObject,
 ) -> jobjectArray {
     let (class_index_pointer, class_index) = get_class_index(env, this);
     let indexed_package = get_field_with_id::<IndexedPackage>(

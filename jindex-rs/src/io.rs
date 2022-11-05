@@ -112,7 +112,7 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        let class = IndexedClass::new(
+        let mut class = IndexedClass::new(
             reader.read_u32()?,
             reader.read_u32()?,
             reader.read_u8()?,
