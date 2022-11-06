@@ -451,7 +451,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
         let mut name = class_index
             .constant_pool()
             .string_view_at(*info.method_name().unwrap())
-            .into_ascii_string(class_index.constant_pool())
+            .into_ascii_str(class_index.constant_pool())
             .to_ascii_string();
         name.push_str(
             info.method_descriptor()

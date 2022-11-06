@@ -264,7 +264,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                     + class_index
                         .constant_pool()
                         .string_view_at(*index)
-                        .into_ascii_string(class_index.constant_pool())
+                        .into_ascii_str(class_index.constant_pool())
                         .as_str()
                     + ";"
             }
@@ -429,7 +429,7 @@ impl ToSignatureIndexedType for IndexedTypeParameterData {
         class_index
             .constant_pool()
             .string_view_at(self.name)
-            .into_ascii_string(class_index.constant_pool())
+            .into_ascii_str(class_index.constant_pool())
             .to_string()
             + ":"
             + &(match &self.type_bound {

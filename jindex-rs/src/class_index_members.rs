@@ -57,7 +57,7 @@ impl IndexedClass {
     pub fn class_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
-            .into_ascii_string(constant_pool)
+            .into_ascii_str(constant_pool)
     }
 
     pub fn class_name_with_package(
@@ -70,7 +70,7 @@ impl IndexedClass {
             .package_name_with_parents(package_index, constant_pool);
         let class_name = constant_pool
             .string_view_at(self.name_index)
-            .into_ascii_string(constant_pool);
+            .into_ascii_str(constant_pool);
 
         if package_name.is_empty() {
             class_name.to_ascii_string()
@@ -190,7 +190,7 @@ impl IndexedField {
     pub fn field_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
-            .into_ascii_string(constant_pool)
+            .into_ascii_str(constant_pool)
     }
 
     pub fn access_flags(&self) -> u16 {
@@ -225,7 +225,7 @@ impl IndexedMethod {
     pub fn method_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         constant_pool
             .string_view_at(self.name_index)
-            .into_ascii_string(constant_pool)
+            .into_ascii_str(constant_pool)
     }
 
     pub fn overrides(&self, base_method: &IndexedMethod) -> bool {

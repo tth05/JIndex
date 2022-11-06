@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use ascii::{AsciiChar, AsciiStr, AsciiString};
 use cafebabe::{FieldAccessFlags, MethodAccessFlags};
 use rustc_hash::FxHashMap;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::time::Instant;
 
 pub mod workers;
@@ -227,12 +228,14 @@ pub fn get_index_from_pool<'a>(
     map: &mut FxHashMap<&'a AsciiStr, u32>,
     pool: &mut ClassIndexConstantPool,
 ) -> anyhow::Result<u32> {
-    Ok(if let Some(i) = map.get(value) {
-        *i
-    } else {
-        let index = pool.add_string(value.as_bytes())?;
-        map.insert(value, index);
-        index
+    let entry = map.entry(value);
+    Ok(match entry {
+        Occupied(o) => *o.get(),
+        Vacant(v) => {
+            let index = pool.add_string(value.as_bytes())?;
+            v.insert(index);
+            index
+        }
     })
 }
 
