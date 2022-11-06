@@ -35,7 +35,6 @@ impl ClassIndexConstantPool {
     pub fn string_view_at(&self, index: u32) -> ConstantPoolStringView {
         ConstantPoolStringView {
             index,
-            start: 1,
             end: 1 + /* Add the length */ self.string_data.get(index as usize).unwrap(),
         }
     }
@@ -44,34 +43,32 @@ impl ClassIndexConstantPool {
 #[derive(Debug, Eq)]
 pub struct ConstantPoolStringView {
     index: u32,
-    start: u8,
     end: u8,
 }
 
 impl PartialEq for ConstantPoolStringView {
     fn eq(&self, other: &Self) -> bool {
-        self.index == other.index && self.start == other.start && self.end == other.end
+        self.index == other.index && self.end == other.end
     }
 }
 
 impl ConstantPoolStringView {
-    pub fn into_ascii_string(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
+    pub fn into_ascii_str(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
         unsafe {
             AsciiStr::from_ascii_unchecked(
-                &constant_pool.string_data[(self.index + self.start as u32) as usize
-                    ..(self.index + self.end as u32) as usize],
+                &constant_pool.string_data[(self.index + 1) as usize..][..self.end as usize],
             )
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.end == self.start
+        self.end as u32 == self.index + 1
     }
 
     pub fn byte_at(&self, constant_pool: &ClassIndexConstantPool, index: u8) -> u8 {
         *constant_pool
             .string_data
-            .get(self.index as usize + self.start as usize + index as usize)
+            .get(self.index as usize + 1 + index as usize)
             .unwrap()
     }
 
@@ -165,7 +162,7 @@ impl ConstantPoolStringView {
     }
 
     pub fn len(&self) -> u8 {
-        self.end - self.start
+        self.end - 1
     }
 }
 

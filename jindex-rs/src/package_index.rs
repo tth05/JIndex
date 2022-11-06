@@ -107,7 +107,7 @@ impl IndexedPackage {
     pub fn package_name<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
         constant_pool
             .string_view_at(self.package_name_index)
-            .into_ascii_string(constant_pool)
+            .into_ascii_str(constant_pool)
     }
 
     pub fn package_name_with_parents_cmp(
@@ -174,7 +174,7 @@ impl IndexedPackage {
         parts.push(
             constant_pool
                 .string_view_at(self.package_name_index)
-                .into_ascii_string(constant_pool),
+                .into_ascii_str(constant_pool),
         );
 
         let mut total_length = parts.first().unwrap().len();
