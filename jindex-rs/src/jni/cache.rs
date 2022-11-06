@@ -1,7 +1,7 @@
 use crate::class_index::ClassIndex;
 use jni::objects::{JFieldID, JObject};
-use jni::signature::{JavaType, Primitive, ReturnType};
-use jni::sys::{jlong, jobject};
+use jni::signature::{Primitive, ReturnType};
+use jni::sys::jlong;
 use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 
@@ -28,11 +28,11 @@ pub unsafe fn init_field_ids(env: JNIEnv) -> anyhow::Result<()> {
         name: &str,
         class_name: &str,
     ) -> anyhow::Result<JFieldID> {
-        Ok(std::mem::transmute::<_, _>(env.get_field_id(
+        Ok(env.get_field_id(
             env.find_class("com/github/tth05/jindex/".to_owned() + class_name)?,
             name,
             "J",
-        )?))
+        )?)
     }
 
     let _ = CACHED_FIELD_IDS.set(FieldIDs {

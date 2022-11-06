@@ -1,6 +1,6 @@
 use crate::class_index_members::{IndexedClass, IndexedField};
 use jni::objects::JObject;
-use jni::sys::{jint, jobject, jstring};
+use jni::sys::{jint, jstring};
 use jni::JNIEnv;
 
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};

@@ -12,7 +12,7 @@ use cafebabe::{parse_class_with_options, MethodAccessFlags, ParseOptions};
 use std::borrow::Cow;
 use std::cmp::min;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::ops::BitOr;
 use std::path::Path;
 use std::str::FromStr;
@@ -20,56 +20,51 @@ use std::sync::Arc;
 use std::time::Instant;
 use zip::ZipArchive;
 
-fn do_multi_threaded<I, O>(
-    queue: Vec<I>,
-    func: &'static (dyn Fn(&[I]) -> anyhow::Result<Vec<O>> + Sync),
-) -> anyhow::Result<Vec<O>>
+fn do_multi_threaded<I, F, O>(queue: Vec<I>, func: &F) -> anyhow::Result<Vec<O>>
 where
-    O: std::marker::Send,
-    I: Sync + std::marker::Send,
+    O: Send,
+    F: (Fn(&[I]) -> anyhow::Result<Vec<O>>) + Sync,
+    I: Sync + Send,
 {
-    do_multi_threaded_with_config(queue, num_cpus::get(), func)
-}
+    let mut r: Vec<anyhow::Result<Vec<O>>> = Vec::new();
 
-fn do_multi_threaded_with_config<I, O>(
-    queue: Vec<I>,
-    thread_count: usize,
-    func: &'static (dyn Fn(&[I]) -> anyhow::Result<Vec<O>> + Sync),
-) -> anyhow::Result<Vec<O>>
-where
-    O: std::marker::Send,
-    I: Sync + std::marker::Send,
-{
-    let mut threads = Vec::with_capacity(min(queue.len(), thread_count));
+    std::thread::scope(|scope| {
+        let mut threads = Vec::with_capacity(min(queue.len(), num_cpus::get()));
 
-    let split_size = queue.len() / threads.capacity();
-    let queue_arc = Arc::new(queue);
-    for i in 0..threads.capacity() {
-        let queue = Arc::clone(&queue_arc);
+        let split_size = queue.len() / threads.capacity();
+        let queue = Arc::new(queue);
 
-        let start = i * split_size;
-        let end = if i == threads.capacity() - 1 {
-            queue.len()
-        } else {
-            start + split_size
-        };
-        threads.push(
-            std::thread::Builder::new()
-                .name(format!("JIndex Thread {}", i))
-                .spawn(move || func(&queue[start..end]))
-                .unwrap(),
-        )
-    }
+        for i in 0..threads.capacity() {
+            let queue = queue.clone();
 
-    let mut r = Vec::new();
-    for x in threads.into_iter().map(|t| t.join().unwrap()) {
-        r.extend(x?);
-    }
+            let start = i * split_size;
+            let end = if i == threads.capacity() - 1 {
+                queue.len()
+            } else {
+                start + split_size
+            };
+            threads.push(
+                std::thread::Builder::new()
+                    .name(format!("JIndex Thread {}", i))
+                    .spawn_scoped(scope, move || func(&queue[start..end]))
+                    .unwrap(),
+            )
+        }
 
-    Ok(r)
+        for x in threads.into_iter().map(|t| t.join().unwrap()) {
+            r.push(x);
+        }
+    });
+
+    Ok(r.into_iter()
+        .collect::<anyhow::Result<Vec<Vec<O>>>>()?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
 fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<Vec<u8>>> {
+    let mut file_buf = Vec::new();
     let mut output = Vec::new();
     for file_name in queue.iter() {
         let file_path = Path::new(&file_name)
@@ -79,10 +74,13 @@ fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<Vec<u8>>> {
             return Err(anyhow!("File {} does not exist", file_name));
         }
 
-        let mut archive = ZipArchive::new(
-            File::open(file_path).with_context(|| format!("Failed to open file {}", file_name))?,
-        )
-        .with_context(|| format!("Failed to read zip file {}", file_name))?;
+        file_buf.clear();
+        let mut file =
+            File::open(file_path).with_context(|| format!("Failed to open file {}", file_name))?;
+        file.read_to_end(&mut file_buf)?;
+
+        let mut archive = ZipArchive::new(Cursor::new(&file_buf))
+            .with_context(|| format!("Failed to read zip file {}", file_name))?;
 
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i)?;
@@ -285,12 +283,9 @@ pub fn create_class_index_from_bytes(
 
     let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
 
-    let mut a = ClassIndexBuilder::default();
-    a = a.with_expected_method_count(method_count);
-
-    let now = Instant::now();
-    let (other_info, class_index) = a.build(class_info_list)?;
-    println!("Build time info: {:?}", now.elapsed());
+    let (other_info, class_index) = ClassIndexBuilder::default()
+        .with_expected_method_count(method_count)
+        .build(class_info_list)?;
 
     build_time_info.merge(other_info);
     Ok((build_time_info, class_index))

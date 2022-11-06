@@ -4,7 +4,6 @@ use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, Signature
 use ascii::AsAsciiStr;
 use cafebabe::attributes::InnerClassAccessFlags;
 use jni::objects::JObject;
-use jni::sys::jobject;
 use jni::JNIEnv;
 
 mod cache;

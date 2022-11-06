@@ -18,7 +18,6 @@ impl ClassIndexConstantPool {
         let index = self.string_data.len();
         let length = str.len();
         if length > u8::MAX as usize {
-            println!("String too long");
             return Err(anyhow!(
                 "The string {} exceeds the maximum size of {}",
                 AsciiStr::from_ascii(str).unwrap(),

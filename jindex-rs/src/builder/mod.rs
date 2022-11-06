@@ -7,7 +7,7 @@ use crate::signature::{
     RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature, RawSignatureType,
 };
 use anyhow::anyhow;
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use ascii::{AsciiChar, AsciiStr, AsciiString};
 use cafebabe::{FieldAccessFlags, MethodAccessFlags};
 use rustc_hash::FxHashMap;
 use std::time::Instant;
@@ -190,16 +190,13 @@ impl ClassIndexBuilder {
 
         let classes = classes.into_iter().map(|class| class.1).collect();
 
-        println!("Class index built in {:?}", start_time.elapsed());
-        let res = Ok((
+        Ok((
             BuildTimeInfo {
                 indexing_time: start_time.elapsed().as_millis(),
                 ..Default::default()
             },
             ClassIndex::new(constant_pool, package_index, classes),
-        ));
-        println!("Class index built in {:?}", start_time.elapsed());
-        res
+        ))
     }
 
     fn sort_classes(

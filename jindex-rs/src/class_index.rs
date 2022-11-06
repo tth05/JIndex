@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::time::Instant;
 
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 use rustc_hash::FxHashMap;

@@ -2,7 +2,7 @@ use crate::class_index_members::IndexedClass;
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::package_index::IndexedPackage;
 use jni::objects::{JObject, JValue};
-use jni::sys::{jlong, jobject, jobjectArray, jstring};
+use jni::sys::{jlong, jobjectArray, jstring};
 use jni::JNIEnv;
 
 #[no_mangle]
