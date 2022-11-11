@@ -16,6 +16,7 @@ zip = { version = "0.6.2", features = ["deflate"], default-features = false}
 num_cpus = "1.13.1"
 once_cell = "1.16.0"
 atomic_refcell = "0.1.8"
+mimalloc = { version = "*", default-features = false }
 
 [lib]
 crate_type = ["cdylib"]

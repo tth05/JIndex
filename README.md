@@ -54,7 +54,7 @@ JIndex was made with [TotalDebugCompanion](https://github.com/Minecraft-TA/Total
 to be fast and also be able to fit the indexed data nicely into memory.
 
 It has been tested with a set of around 330 jars containing 175k classes, 1.2 million methods and 500k fields. These
-take roughly 4 seconds to index on modern CPU, a quarter of this time is spent on file reading. The resulting index amounts
+take roughly 2.2 seconds to index on modern CPU, a quarter of this time is spent on file reading. The resulting index amounts
 to 256MB of memory. When serialized, the index becomes a 13MB file (54MB uncompressed) with a deserialization time of
 500ms.
 

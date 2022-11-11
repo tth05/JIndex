@@ -56,7 +56,7 @@ impl ConstantPoolStringView {
     pub fn into_ascii_str(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
         unsafe {
             AsciiStr::from_ascii_unchecked(
-                &constant_pool.string_data[(self.index + 1) as usize..][..self.end as usize],
+                &constant_pool.string_data[(self.index + 1) as usize..][..(self.end - 1) as usize],
             )
         }
     }

@@ -3,6 +3,7 @@
 #![feature(try_blocks)]
 
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use mimalloc::MiMalloc;
 
 pub mod builder;
 pub mod class_index;
@@ -13,6 +14,9 @@ pub mod package_index;
 pub mod signature;
 
 pub mod jni;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 pub(crate) fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &AsciiStr) {
     str.chars()
