@@ -249,22 +249,37 @@ impl ClassIndex {
         index: u32,
         direct_sub_types_only: bool,
     ) -> Vec<&IndexedClass> {
+        let mut queue = Vec::new();
         self.classes
             .iter()
             .filter(|class| {
                 if direct_sub_types_only {
                     class.is_direct_sub_type_of(index)
                 } else {
-                    let mut optional_parent = Some(*class);
-                    while let Some(parent) = optional_parent {
-                        if parent.is_direct_sub_type_of(index) {
+                    queue.push(*class);
+                    while let Some(current) = queue.pop() {
+                        if current.is_direct_sub_type_of(index) {
                             return true;
                         }
-                        optional_parent = parent
+
+                        if let Some(super_class) = current
                             .signature()
                             .super_class()
                             .and_then(|s| s.extract_base_object_type())
-                            .map(|i| self.class_at_index(i));
+                            .map(|i| self.class_at_index(i))
+                        {
+                            queue.push(super_class);
+                        }
+
+                        if let Some(interfaces) =
+                            current.signature().interfaces().map(|interfaces| {
+                                interfaces.iter().filter_map(|i| {
+                                    i.extract_base_object_type().map(|i| self.class_at_index(i))
+                                })
+                            })
+                        {
+                            interfaces.for_each(|i| queue.push(i));
+                        }
                     }
 
                     false
