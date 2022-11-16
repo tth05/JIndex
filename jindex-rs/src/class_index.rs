@@ -1,7 +1,8 @@
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::all_direct_super_types;
 use crate::class_index_members::{IndexedClass, IndexedMethod};
@@ -293,7 +294,7 @@ impl ClassIndex {
         &self,
         class: &IndexedClass,
         target_method: &IndexedMethod,
-    ) -> Vec<(&IndexedClass, &IndexedMethod)> {
+    ) -> Vec<MethodWithClass> {
         // Check all super types of the given class
         all_direct_super_types!(class)
             .filter_map(|c| c.extract_base_object_type())
@@ -304,13 +305,18 @@ impl ClassIndex {
                     // Collect all methods from the current class
                     .filter(|m| target_method.overrides(m))
                     // We don't use `c` here directly to satisfy the borrow checker
-                    .map(|m| (self.class_at_index(c.index()), m))
+                    .map(|m| MethodWithClass {
+                        class: self.class_at_index(c.index()),
+                        method: m,
+                    })
                     .chain(
                         // Recursively search super types of current class
                         self.find_base_methods_of_method(c, target_method)
                             .into_iter(),
                     )
             })
+            .collect::<FxHashSet<MethodWithClass>>() // Remove duplicates
+            .into_iter()
             .collect()
     }
 
@@ -335,5 +341,27 @@ impl ClassIndex {
             || &self.classes[0..0],
             |r| &self.classes[r.start as usize..r.end as usize],
         )
+    }
+}
+
+pub struct MethodWithClass<'a> {
+    pub class: &'a IndexedClass,
+    pub method: &'a IndexedMethod,
+}
+
+impl PartialEq<Self> for MethodWithClass<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        // NOTE: This implementation ignores method overloading, but it's fine for our use case
+        self.class.index() == other.class.index()
+            && self.method.method_name_index() == other.method.method_name_index()
+    }
+}
+
+impl Eq for MethodWithClass<'_> {}
+
+impl Hash for MethodWithClass<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.class.index().hash(state);
+        self.method.method_name_index().hash(state);
     }
 }

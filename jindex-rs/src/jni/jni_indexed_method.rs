@@ -1,4 +1,4 @@
-use crate::class_index::ClassIndex;
+use crate::class_index::{ClassIndex, MethodWithClass};
 use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
 use crate::jni::{collect_type_parameters, is_basic_signature_type};
@@ -289,15 +289,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findBas
         .new_object_array(impls.len() as i32, result_class, JObject::null())
         .expect("Failed to create result array");
 
-    for (index, (declaring_class, result_method)) in impls.iter().enumerate() {
+    for (index, MethodWithClass { class, method }) in impls.iter().enumerate() {
         let object = env
             .new_object(
                 result_class,
                 "(JJJ)V",
                 &[
                     JValue::from(class_index_pointer as jlong),
-                    JValue::from((*declaring_class as *const IndexedClass) as jlong),
-                    JValue::from((*result_method as *const IndexedMethod) as jlong),
+                    JValue::from((*class as *const IndexedClass) as jlong),
+                    JValue::from((*method as *const IndexedMethod) as jlong),
                 ],
             )
             .expect("Failed to create result object");
