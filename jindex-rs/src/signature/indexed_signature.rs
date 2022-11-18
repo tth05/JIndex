@@ -299,17 +299,20 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
             | SignatureType::ObjectPlus(_)
             | SignatureType::ObjectMinus(_)
             | SignatureType::ObjectTypeBounds(_)
-            | SignatureType::ObjectInnerClass(_) => {
-                String::from('L')
-                    + class_index
-                        .class_at_index(self.extract_base_object_type().unwrap())
-                        .class_name_with_package(
-                            class_index.package_index(),
-                            class_index.constant_pool(),
-                        )
-                        .as_str()
-                    + ";"
-            }
+            | SignatureType::ObjectInnerClass(_) => match self.extract_base_object_type() {
+                Some(index) => {
+                    String::from('L')
+                        + class_index
+                            .class_at_index(index)
+                            .class_name_with_package(
+                                class_index.package_index(),
+                                class_index.constant_pool(),
+                            )
+                            .as_str()
+                        + ";"
+                }
+                None => "Ljindex_unresolved;".to_string(),
+            },
             SignatureType::Generic(_) => self
                 .resolve_generic_type_bound(class_index, generic_data)
                 .map(|s| s.to_descriptor_string(class_index, generic_data))
