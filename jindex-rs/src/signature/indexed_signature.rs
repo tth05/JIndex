@@ -220,7 +220,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                 let (actual_type, type_bounds) = inner.as_ref();
 
                 String::from('L')
-                    + get_full_class_name(class_index, actual_type, false).as_str()
+                    + get_full_class_name(class_index, actual_type, simple_class_names).as_str()
                     + "<"
                     + &type_bounds
                         .iter()
