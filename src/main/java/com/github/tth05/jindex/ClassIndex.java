@@ -20,7 +20,7 @@ public class ClassIndex extends ClassIndexChildObject {
 
         // Either use the default file system (dev environment) or mount the jar file as a file system
         try (FileSystem fileSystem = isOnDisk ? FileSystems.getDefault() : FileSystems.newFileSystem(Paths.get(actualPath), null);
-             Stream<Path> fileStream = Files.list(isOnDisk ? fileSystem.getPath(actualPath) : fileSystem.getPath("/"))
+             Stream<Path> fileStream = Files.list(isOnDisk ? fileSystem.getPath(actualPath) : fileSystem.getPath("/lib"))
         ) {
             // Search for the lib file
             Optional<Path> libFile = fileStream.filter(p -> p.getFileName().toString().startsWith("jindex")).findFirst();
