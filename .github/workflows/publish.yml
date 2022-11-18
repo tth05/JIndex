@@ -22,4 +22,4 @@ jobs:
       - name: Build with Gradle
         env:
           PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
-        run: ./gradlew.bat build publish -x test
+        run: ./gradlew.bat --no-daemon build publish -x test
