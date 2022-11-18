@@ -303,9 +303,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
         .find_class("com/github/tth05/jindex/IndexedClass")
         .expect("Result class not found");
 
-    let interface_indicies = indexed_class.signature().interfaces();
-
-    let array_length = interface_indicies.map_or(0, |v| v.len());
+    let interfaces = indexed_class.signature().interfaces();
+    let array_length = interfaces.map_or(0, |v| {
+        v.iter()
+            .filter(|i| i.extract_base_object_type().is_some())
+            .count()
+    });
 
     let result_array = env
         .new_object_array(array_length as jsize, result_class, JObject::null())
@@ -315,7 +318,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
         return result_array;
     }
 
-    for (index, interface_index) in interface_indicies
+    for (index, interface_index) in interfaces
         .as_ref()
         .unwrap()
         .iter()
