@@ -7,7 +7,7 @@ use crate::signature::{
     IndexedTypeParameterData, RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use rustc_hash::FxHashMap;
 
 pub trait ToIndexedType {
@@ -22,7 +22,11 @@ pub trait ToIndexedType {
 }
 
 pub trait ToSignatureIndexedType {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String;
+    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+        self.to_signature_string0(class_index, false)
+    }
+
+    fn to_signature_string0(&self, class_index: &ClassIndex, simple_class_names: bool) -> String;
 }
 
 pub trait ToDescriptorIndexedType {
@@ -210,13 +214,13 @@ impl ToIndexedType for RawSignatureType {
 }
 
 impl ToSignatureIndexedType for IndexedSignatureType {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, simple_class_names: bool) -> String {
         match &self {
             SignatureType::ObjectTypeBounds(inner) => {
                 let (actual_type, type_bounds) = inner.as_ref();
 
                 String::from('L')
-                    + get_full_class_name(class_index, actual_type).as_str()
+                    + get_full_class_name(class_index, actual_type, false).as_str()
                     + "<"
                     + &type_bounds
                         .iter()
@@ -233,7 +237,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                     + &inner
                         .as_ref()
                         .iter()
-                        .map(|s| s.to_signature_string(class_index))
+                        .map(|s| s.to_signature_string0(class_index, true))
                         .fold(String::new(), |a, b| {
                             let is_first = a.is_empty();
                             let separator = if is_first { "" } else { "." };
@@ -245,7 +249,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
                                 None => b,
                             })
                             //We check for is_first here to exit rfind instantly
-                            .rfind(|c| is_first || c == '$' || c == '/') //Remove the package name and parent class name
+                            .rfind(|c| is_first || c == '/') //Remove the package name
                             .map_or(0, |u| match is_first {
                                 false => u + 1,
                                 _ => 0, //The first element needs to keep the package name
@@ -257,7 +261,9 @@ impl ToSignatureIndexedType for IndexedSignatureType {
             }
             SignatureType::Primitive(p) => p.to_string(),
             SignatureType::Object(index) => {
-                String::from('L') + get_full_class_name(class_index, index).as_str() + ";"
+                String::from('L')
+                    + get_full_class_name(class_index, index, simple_class_names).as_str()
+                    + ";"
             }
             SignatureType::Generic(index) => {
                 String::from('T')
@@ -277,7 +283,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
             SignatureType::Array(inner) => {
                 String::from('[') + &inner.to_signature_string(class_index)
             }
-            SignatureType::Unresolved => String::from("!unresolved!"),
+            SignatureType::Unresolved => String::from("Ljindex_unresolved;"),
         }
     }
 }
@@ -289,7 +295,6 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
         generic_data: &[&IndexedTypeParameterData],
     ) -> String {
         match &self {
-            SignatureType::Unresolved => String::from("!unresolved!"),
             SignatureType::Object(_)
             | SignatureType::ObjectPlus(_)
             | SignatureType::ObjectMinus(_)
@@ -313,14 +318,21 @@ impl ToDescriptorIndexedType for IndexedSignatureType {
                 String::from('[') + &inner.to_descriptor_string(class_index, generic_data)
             }
             SignatureType::Primitive(p) => p.to_string(),
+            SignatureType::Unresolved => String::from("Ljindex_unresolved;"),
         }
     }
 }
 
-fn get_full_class_name(class_index: &ClassIndex, index: &u32) -> AsciiString {
-    class_index
-        .class_at_index(*index)
-        .class_name_with_package(class_index.package_index(), class_index.constant_pool())
+fn get_full_class_name(class_index: &ClassIndex, index: &u32, simple: bool) -> AsciiString {
+    let class = class_index.class_at_index(*index);
+    if simple {
+        class.simple_class_name_with_package(
+            class_index.package_index(),
+            class_index.constant_pool(),
+        )
+    } else {
+        class.class_name_with_package(class_index.package_index(), class_index.constant_pool())
+    }
 }
 
 impl IndexedClassSignature {
@@ -373,7 +385,7 @@ impl ToIndexedType for RawClassSignature {
 }
 
 impl ToSignatureIndexedType for IndexedClassSignature {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, _: bool) -> String {
         (if self.generic_data.is_some() {
             String::from('<') + &self.generic_data.to_signature_string(class_index) + ">"
         } else {
@@ -425,7 +437,7 @@ impl ToIndexedType for RawTypeParameterData {
 }
 
 impl ToSignatureIndexedType for IndexedTypeParameterData {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, _: bool) -> String {
         class_index
             .constant_pool()
             .string_view_at(self.name)
@@ -506,7 +518,7 @@ impl ToIndexedType for RawMethodSignature {
 }
 
 impl ToSignatureIndexedType for IndexedMethodSignature {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, _: bool) -> String {
         (if self.generic_data.is_some() {
             String::from('<') + &self.generic_data.to_signature_string(class_index) + ">"
         } else {
@@ -643,7 +655,7 @@ impl<T> ToSignatureIndexedType for Option<T>
 where
     T: ToSignatureIndexedType,
 {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, _: bool) -> String {
         self.as_ref().map_or(String::new(), |inner| {
             inner.to_signature_string(class_index)
         })
@@ -654,7 +666,7 @@ impl<T> ToSignatureIndexedType for Box<T>
 where
     T: ToSignatureIndexedType,
 {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, _: bool) -> String {
         self.as_ref().to_signature_string(class_index)
     }
 }
@@ -663,7 +675,7 @@ impl<T> ToSignatureIndexedType for Vec<T>
 where
     T: ToSignatureIndexedType,
 {
-    fn to_signature_string(&self, class_index: &ClassIndex) -> String {
+    fn to_signature_string0(&self, class_index: &ClassIndex, _: bool) -> String {
         self.iter().fold(String::new(), |a, b| {
             a + &b.to_signature_string(class_index)
         })

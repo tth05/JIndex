@@ -374,6 +374,25 @@ mod tests {
         assert_eq!(input, result.to_string());
     }
 
+    #[test]
+    fn test_parse_inner_class_generic_with_dollar() {
+        let input = "Lscala/collection/parallel/mutable/ParArray<TT;>.ParArrayIterator$;";
+        let result = RawSignatureType::parse_str(input);
+        assert!(result.is_ok());
+        let result = result.unwrap().1;
+        assert_eq!(input, result.to_string());
+        println!(
+            "{:?}",
+            match result {
+                RawSignatureType::ObjectInnerClass(parts) => {
+                    assert_eq!(2, parts.len());
+                    assert_eq!("LParArrayIterator$;", parts.get(1).unwrap().to_string());
+                }
+                _ => panic!(""),
+            }
+        );
+    }
+
     fn assert_is_object_signature(str: &str, sig: &RawSignatureType) {
         assert!(matches!(sig, SignatureType::Object(_)));
         if let SignatureType::Object(s) = sig {
