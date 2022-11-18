@@ -7,7 +7,7 @@ use crate::signature::{
     IndexedTypeParameterData, RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use rustc_hash::FxHashMap;
 
 pub trait ToIndexedType {
