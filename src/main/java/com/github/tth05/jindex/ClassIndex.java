@@ -3,13 +3,14 @@ package com.github.tth05.jindex;
 import java.net.URL;
 import java.nio.file.*;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
 public class ClassIndex extends ClassIndexChildObject {
 
     static {
-        URL resource = ClassIndex.class.getResource("/lib");
+        URL resource = ClassIndex.class.getResource("/jindex_natives");
         if (resource == null)
             throw new RuntimeException("Could not find lib directory");
 
@@ -20,7 +21,7 @@ public class ClassIndex extends ClassIndexChildObject {
 
         // Either use the default file system (dev environment) or mount the jar file as a file system
         try (FileSystem fileSystem = isOnDisk ? FileSystems.getDefault() : FileSystems.newFileSystem(Paths.get(actualPath), null);
-             Stream<Path> fileStream = Files.list(isOnDisk ? fileSystem.getPath(actualPath) : fileSystem.getPath("/lib"))
+             Stream<Path> fileStream = Files.list(isOnDisk ? fileSystem.getPath(actualPath) : fileSystem.getPath("/jindex_natives"))
         ) {
             // Search for the lib file
             Optional<Path> libFile = fileStream.filter(p -> p.getFileName().toString().startsWith("jindex")).findFirst();
@@ -30,7 +31,7 @@ public class ClassIndex extends ClassIndexChildObject {
             // Copy it to the temp directory
             Path tempFilePath = Paths.get(System.getProperty("java.io.tmpdir")).resolve(libFile.get().getFileName().toString());
             if (System.getenv("JINDEX_DEV") != null || !Files.exists(tempFilePath)) {
-                Files.copy(ClassIndex.class.getResourceAsStream("/lib/" + libFile.get().getFileName()), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(Objects.requireNonNull(ClassIndex.class.getResourceAsStream("/jindex_natives/" + libFile.get().getFileName())), tempFilePath, StandardCopyOption.REPLACE_EXISTING);
             }
 
             System.load(tempFilePath.toAbsolutePath().toString());

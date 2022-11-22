@@ -32,7 +32,7 @@ task copyNativeLibrary {
     }
     copy {
         from "${projectDir}/jindex-rs/target/release"
-        into "${projectDir}/src/main/resources/lib"
+        into "${projectDir}/src/main/resources/jindex_natives"
         include "jindex_rs.dll"
         rename "jindex_rs.dll", "jindex_rs_${version}.dll"
     }
