@@ -1,6 +1,7 @@
 package com.github.tth05.jindex;
 
 import java.net.URL;
+import java.net.URLDecoder;
 import java.nio.file.*;
 import java.util.List;
 import java.util.Objects;
@@ -17,7 +18,11 @@ public class ClassIndex extends ClassIndexChildObject {
         // Sanitize URL
         boolean isOnDisk = resource.getProtocol().equals("file");
         String actualPath = resource.toString().split("!")[0];
-        actualPath = actualPath.substring(actualPath.indexOf("file:") + 6);
+        try {
+            actualPath = URLDecoder.decode(actualPath.substring(actualPath.indexOf("file:") + 6), "UTF-8");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
 
         // Either use the default file system (dev environment) or mount the jar file as a file system
         try (FileSystem fileSystem = isOnDisk ? FileSystems.getDefault() : FileSystems.newFileSystem(Paths.get(actualPath), null);
