@@ -151,10 +151,9 @@ unsafe fn convert_build_time_info(env: JNIEnv, info: BuildTimeInfo) -> jobject {
     env.new_object(
         env.find_class("com/github/tth05/jindex/BuildTimeInfo")
             .expect("Unable to find class"),
-        "(JJJJ)V",
+        "(JJJ)V",
         &[
             JValue::Long(info.deserialization_time as jlong),
-            JValue::Long(info.file_reading_time as jlong),
             JValue::Long(info.class_reading_time as jlong),
             JValue::Long(info.indexing_time as jlong),
         ],

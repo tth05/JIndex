@@ -63,7 +63,7 @@ where
         .collect())
 }
 
-fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<Vec<u8>>> {
+fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<ClassInfo>> {
     let mut file_buf = Vec::new();
     let mut output = Vec::new();
     for file_name in queue.iter() {
@@ -95,7 +95,14 @@ fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<Vec<u8>>> {
             entry
                 .read_to_end(&mut data)
                 .with_context(|| format!("Failed to read {},{}", file_name, entry.name()))?;
-            output.push(data);
+
+            // NOTE: While processing the class immediately makes this a bit slower, because the
+            // workload is split less evenly (e.g. a single jar file has way more classes than a
+            // different one), we get the benefit of using way less memory while indexing.
+            output.push(match process_class(&data) {
+                Ok(x) => x,
+                Err(_) => continue,
+            });
         }
     }
 
@@ -106,14 +113,14 @@ pub fn create_class_index_from_jars(
     jar_names: Vec<String>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
-    let class_bytes = do_multi_threaded(jar_names, &process_jar_worker)?;
+    let class_info_list = do_multi_threaded(jar_names, &process_jar_worker)?;
 
     let mut info = BuildTimeInfo {
-        file_reading_time: now.elapsed().as_millis(),
+        class_reading_time: now.elapsed().as_millis(),
         ..Default::default()
     };
 
-    let (other_info, class_index) = create_class_index_from_bytes(class_bytes)?;
+    let (other_info, class_index) = create_class_index_from_infos(class_info_list)?;
     info.merge(other_info);
     Ok((info, class_index))
 }
@@ -139,124 +146,124 @@ fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> anyhow::Result<Vec<Cla
     let mut class_info_list = Vec::new();
 
     for bytes in bytes_queue.iter() {
-        let class_file =
-            parse_class_with_options(&bytes[..], ParseOptions::default().parse_bytecode(false))
-                .map_err(|parse_error| anyhow!("{}", parse_error))
-                .with_context(|| format!("Failed to parse class file {:?}", bytes))?;
-
-        let ConvertedInnerClassInfo {
-            package_name,
-            full_class_name,
-            class_name_start_index,
-            inner_class_access_flags,
-            enclosing_type,
-            member_classes,
-        } = match convert_enclosing_type_and_inner_classes(
-            class_file.this_class,
-            get_attribute_data!(
-                &class_file.attributes,
-                AttributeData::EnclosingMethod { class_name, method },
-                Option::Some((class_name, method)),
-                Option::None
-            ),
-            get_attribute_data!(
-                &class_file.attributes,
-                AttributeData::InnerClasses(vec),
-                Option::Some(vec),
-                Option::None
-            ),
-        ) {
+        class_info_list.push(match process_class(bytes) {
             Ok(x) => x,
             Err(_) => continue,
-        };
-
-        let parsed_signature = match parse_class_signature(
-            &class_file.attributes,
-            class_file.super_class,
-            class_file.interfaces,
-        ) {
-            Ok(x) => x,
-            Err(_) => continue,
-        };
-
-        class_info_list.push(ClassInfo {
-            package_name,
-            class_name: full_class_name,
-            class_name_start_index,
-            access_flags: class_file
-                .access_flags
-                .bits()
-                .bitor(inner_class_access_flags),
-            signature: parsed_signature,
-            enclosing_type,
-            member_classes,
-            fields: class_file
-                .fields
-                .into_iter()
-                .filter_map(|f| {
-                    let name = match f.name.into_ascii_string() {
-                        Ok(x) => x,
-                        Err(_) => return None,
-                    };
-
-                    Some(get_attribute_data!(
-                        &f.attributes,
-                        AttributeData::Signature(s),
-                        s,
-                        &f.descriptor
-                    ))
-                    .and_then(|signature| {
-                        RawSignatureType::from_str(signature)
-                            .ok()
-                            .map(|signature_type| FieldInfo {
-                                field_name: name,
-                                descriptor: signature_type,
-                                access_flags: f.access_flags,
-                            })
-                    })
-                })
-                .collect(),
-            methods: class_file
-                .methods
-                .into_iter()
-                .filter_map(|m| {
-                    let name = match m.name.into_ascii_string() {
-                        Ok(x) => x,
-                        Err(_) => return None,
-                    };
-
-                    if m.access_flags.contains(MethodAccessFlags::SYNTHETIC) {
-                        return None;
-                    }
-
-                    Some(get_attribute_data!(
-                        &m.attributes,
-                        AttributeData::Signature(s),
-                        s,
-                        &m.descriptor
-                    ))
-                    .and_then(|signature| {
-                        RawMethodSignature::from_data(signature, &|| {
-                            get_attribute_data!(
-                                &m.attributes,
-                                AttributeData::Exceptions(vec),
-                                Option::Some(vec),
-                                Option::None
-                            )
-                        })
-                        .ok()
-                        .map(|signature_type| MethodInfo {
-                            method_name: name,
-                            signature: signature_type,
-                            access_flags: m.access_flags,
-                        })
-                    })
-                })
-                .collect(),
-        })
+        });
     }
 
     Ok(class_info_list)
+}
+
+fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
+    let class_file = parse_class_with_options(bytes, ParseOptions::default().parse_bytecode(false))
+        .map_err(|parse_error| anyhow!("{}", parse_error))
+        .with_context(|| format!("Failed to parse class file {:?}", bytes))?;
+
+    let ConvertedInnerClassInfo {
+        package_name,
+        full_class_name,
+        class_name_start_index,
+        inner_class_access_flags,
+        enclosing_type,
+        member_classes,
+    } = convert_enclosing_type_and_inner_classes(
+        class_file.this_class,
+        get_attribute_data!(
+            &class_file.attributes,
+            AttributeData::EnclosingMethod { class_name, method },
+            Option::Some((class_name, method)),
+            Option::None
+        ),
+        get_attribute_data!(
+            &class_file.attributes,
+            AttributeData::InnerClasses(vec),
+            Option::Some(vec),
+            Option::None
+        ),
+    )?;
+
+    let parsed_signature = parse_class_signature(
+        &class_file.attributes,
+        class_file.super_class,
+        class_file.interfaces,
+    )?;
+
+    Ok(ClassInfo {
+        package_name,
+        class_name: full_class_name,
+        class_name_start_index,
+        access_flags: class_file
+            .access_flags
+            .bits()
+            .bitor(inner_class_access_flags),
+        signature: parsed_signature,
+        enclosing_type,
+        member_classes,
+        fields: class_file
+            .fields
+            .into_iter()
+            .filter_map(|f| {
+                let name = match f.name.into_ascii_string() {
+                    Ok(x) => x,
+                    Err(_) => return None,
+                };
+
+                Some(get_attribute_data!(
+                    &f.attributes,
+                    AttributeData::Signature(s),
+                    s,
+                    &f.descriptor
+                ))
+                .and_then(|signature| {
+                    RawSignatureType::from_str(signature)
+                        .ok()
+                        .map(|signature_type| FieldInfo {
+                            field_name: name,
+                            descriptor: signature_type,
+                            access_flags: f.access_flags,
+                        })
+                })
+            })
+            .collect(),
+        methods: class_file
+            .methods
+            .into_iter()
+            .filter_map(|m| {
+                let name = match m.name.into_ascii_string() {
+                    Ok(x) => x,
+                    Err(_) => return None,
+                };
+
+                if m.access_flags.contains(MethodAccessFlags::SYNTHETIC) {
+                    return None;
+                }
+
+                Some(get_attribute_data!(
+                    &m.attributes,
+                    AttributeData::Signature(s),
+                    s,
+                    &m.descriptor
+                ))
+                .and_then(|signature| {
+                    RawMethodSignature::from_data(signature, &|| {
+                        get_attribute_data!(
+                            &m.attributes,
+                            AttributeData::Exceptions(vec),
+                            Option::Some(vec),
+                            Option::None
+                        )
+                    })
+                    .ok()
+                    .map(|signature_type| MethodInfo {
+                        method_name: name,
+                        signature: signature_type,
+                        access_flags: m.access_flags,
+                    })
+                })
+            })
+            .collect(),
+    })
 }
 
 pub fn create_class_index_from_bytes(
@@ -266,6 +273,14 @@ pub fn create_class_index_from_bytes(
 
     let mut class_info_list: Vec<ClassInfo> =
         do_multi_threaded(class_bytes, &process_class_bytes_worker)?;
+
+    create_class_index_from_infos(class_info_list)
+}
+
+fn create_class_index_from_infos(
+    mut class_info_list: Vec<ClassInfo>,
+) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
+    let now = Instant::now();
 
     //Removes duplicate classes
     class_info_list.sort_unstable_by(|a, b| {

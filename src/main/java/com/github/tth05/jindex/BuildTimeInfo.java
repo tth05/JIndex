@@ -6,13 +6,11 @@ package com.github.tth05.jindex;
 public class BuildTimeInfo {
 
     private final long deserializationTime;
-    private final long fileReadingTime;
     private final long classReadingTime;
     private final long indexingTime;
 
-    private BuildTimeInfo(long deserializationTime, long fileReadingTime, long classReadingTime, long indexingTime) {
+    private BuildTimeInfo(long deserializationTime, long classReadingTime, long indexingTime) {
         this.deserializationTime = deserializationTime;
-        this.fileReadingTime = fileReadingTime;
         this.classReadingTime = classReadingTime;
         this.indexingTime = indexingTime;
     }
@@ -22,13 +20,6 @@ public class BuildTimeInfo {
      */
     public long getDeserializationTime() {
         return deserializationTime;
-    }
-
-    /**
-     * @return The file reading time in milliseconds, if the index was read from a file; {@code 0} otherwise
-     */
-    public long getFileReadingTime() {
-        return fileReadingTime;
     }
 
     /**
@@ -49,22 +40,21 @@ public class BuildTimeInfo {
      * @return The total time in milliseconds
      */
     public long getTotalTime() {
-        return deserializationTime + fileReadingTime + classReadingTime + indexingTime;
+        return deserializationTime + classReadingTime + indexingTime;
     }
 
     /**
      * @return An opinionated string representation of the build time information
      */
     public String toFormattedString() {
-        return String.format("Deserialization time: %dms\nFile reading time: %dms\nClass reading time: %dms\nIndexing time: %dms\nTotal time: %dms",
-                deserializationTime, fileReadingTime, classReadingTime, indexingTime, getTotalTime());
+        return String.format("Deserialization time: %dms\nClass reading time: %dms\nIndexing time: %dms\nTotal time: %dms",
+                deserializationTime, classReadingTime, indexingTime, getTotalTime());
     }
 
     @Override
     public String toString() {
         return "BuildTimeInfo{" +
                "deserializationTime=" + deserializationTime +
-               ", fileReadingTime=" + fileReadingTime +
                ", classReadingTime=" + classReadingTime +
                ", indexingTime=" + indexingTime +
                '}';

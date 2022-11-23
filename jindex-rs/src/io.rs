@@ -26,7 +26,7 @@ pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo
         .with_context(|| "Failed to read first file")?;
 
     let mut info = BuildTimeInfo {
-        file_reading_time: now.elapsed().as_millis(),
+        class_reading_time: now.elapsed().as_millis(),
         ..Default::default()
     };
 
