@@ -52,6 +52,7 @@ public class ClassIndex extends ClassIndexChildObject {
 
     private ClassIndex() {
         super(0, 0);
+        this.destroyed = true;
     }
 
     /**
@@ -145,6 +146,7 @@ public class ClassIndex extends ClassIndexChildObject {
     public static ClassIndex fromJars(List<String> jarFilePaths) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.createClassIndexFromJars(jarFilePaths);
+        c.destroyed = false;
         return c;
     }
 
@@ -157,6 +159,7 @@ public class ClassIndex extends ClassIndexChildObject {
     public static ClassIndex fromBytes(List<byte[]> classes) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.createClassIndexFromBytes(classes);
+        c.destroyed = false;
         return c;
     }
 
@@ -169,6 +172,7 @@ public class ClassIndex extends ClassIndexChildObject {
     public static ClassIndex fromFile(String path) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.loadClassIndexFromFile(path);
+        c.destroyed = false;
         return c;
     }
 }
