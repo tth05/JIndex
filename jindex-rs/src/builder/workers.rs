@@ -9,101 +9,67 @@ use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::attributes::{AttributeData, AttributeInfo, InnerClassEntry};
 use cafebabe::constant_pool::NameAndType;
 use cafebabe::{parse_class_with_options, MethodAccessFlags, ParseOptions};
+use rayon::prelude::*;
 use std::borrow::Cow;
-use std::cmp::min;
 use std::fs::File;
 use std::io::{Cursor, Read};
 use std::ops::BitOr;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::Instant;
 use zip::ZipArchive;
 
 fn do_multi_threaded<I, F, O>(queue: Vec<I>, func: &F) -> anyhow::Result<Vec<O>>
 where
     O: Send,
-    F: (Fn(&[I]) -> anyhow::Result<Vec<O>>) + Sync,
+    F: (Fn(I) -> anyhow::Result<O>) + Sync,
     I: Sync + Send,
 {
-    let mut r: Vec<anyhow::Result<Vec<O>>> = Vec::new();
-
-    std::thread::scope(|scope| {
-        let mut threads = Vec::with_capacity(min(queue.len(), num_cpus::get()));
-
-        let split_size = queue.len() / threads.capacity();
-        let queue = Arc::new(queue);
-
-        for i in 0..threads.capacity() {
-            let queue = queue.clone();
-
-            let start = i * split_size;
-            let end = if i == threads.capacity() - 1 {
-                queue.len()
-            } else {
-                start + split_size
-            };
-            threads.push(
-                std::thread::Builder::new()
-                    .name(format!("JIndex Thread {}", i))
-                    .spawn_scoped(scope, move || func(&queue[start..end]))
-                    .unwrap(),
-            )
-        }
-
-        for x in threads.into_iter().map(|t| t.join().unwrap()) {
-            r.push(x);
-        }
-    });
-
-    Ok(r.into_iter()
-        .collect::<anyhow::Result<Vec<Vec<O>>>>()?
-        .into_iter()
-        .flatten()
-        .collect())
+    Ok(queue
+        .into_par_iter()
+        .map(|el| func(el))
+        .collect::<anyhow::Result<Vec<O>>>()?)
 }
 
-fn process_jar_worker(queue: &[String]) -> anyhow::Result<Vec<ClassInfo>> {
+fn process_jar_worker(file_name: String) -> anyhow::Result<Vec<ClassInfo>> {
     let mut file_buf = Vec::new();
     let mut output = Vec::new();
-    for file_name in queue.iter() {
-        let file_path = Path::new(&file_name)
-            .canonicalize()
-            .with_context(|| format!("Failed to canonicalize path {}", file_name))?;
-        if !file_path.exists() {
-            return Err(anyhow!("File {} does not exist", file_name));
+    let file_path = Path::new(&file_name)
+        .canonicalize()
+        .with_context(|| format!("Failed to canonicalize path {}", file_name))?;
+    if !file_path.exists() {
+        return Err(anyhow!("File {} does not exist", file_name));
+    }
+
+    file_buf.clear();
+    let mut file =
+        File::open(file_path).with_context(|| format!("Failed to open file {}", file_name))?;
+    file.read_to_end(&mut file_buf)?;
+
+    let mut archive = ZipArchive::new(Cursor::new(&file_buf))
+        .with_context(|| format!("Failed to read zip file {}", file_name))?;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        if entry.is_dir()
+            || !entry.name().ends_with(".class")
+            || entry.name() == "module-info.class"
+        {
+            continue;
         }
 
-        file_buf.clear();
-        let mut file =
-            File::open(file_path).with_context(|| format!("Failed to open file {}", file_name))?;
-        file.read_to_end(&mut file_buf)?;
+        let mut data = Vec::with_capacity(entry.size() as usize);
+        entry
+            .read_to_end(&mut data)
+            .with_context(|| format!("Failed to read {},{}", file_name, entry.name()))?;
 
-        let mut archive = ZipArchive::new(Cursor::new(&file_buf))
-            .with_context(|| format!("Failed to read zip file {}", file_name))?;
-
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)?;
-            if entry.is_dir()
-                || !entry.name().ends_with(".class")
-                || entry.name() == "module-info.class"
-            {
-                continue;
-            }
-
-            let mut data = Vec::with_capacity(entry.size() as usize);
-            entry
-                .read_to_end(&mut data)
-                .with_context(|| format!("Failed to read {},{}", file_name, entry.name()))?;
-
-            // NOTE: While processing the class immediately makes this a bit slower, because the
-            // workload is split less evenly (e.g. a single jar file has way more classes than a
-            // different one), we get the benefit of using way less memory while indexing.
-            output.push(match process_class(&data) {
-                Ok(x) => x,
-                Err(_) => continue,
-            });
-        }
+        // NOTE: While processing the class immediately makes this a bit slower, because the
+        // workload is split less evenly (e.g. a single jar file has way more classes than a
+        // different one), we get the benefit of using way less memory while indexing.
+        output.push(match process_class(&data) {
+            Ok(x) => x,
+            Err(_) => continue,
+        });
     }
 
     Ok(output)
@@ -113,7 +79,10 @@ pub fn create_class_index_from_jars(
     jar_names: Vec<String>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
-    let class_info_list = do_multi_threaded(jar_names, &process_jar_worker)?;
+    let class_info_list = do_multi_threaded(jar_names, &process_jar_worker)?
+        .into_iter()
+        .flatten()
+        .collect();
 
     let mut info = BuildTimeInfo {
         class_reading_time: now.elapsed().as_millis(),
@@ -142,17 +111,8 @@ macro_rules! get_attribute_data {
     };
 }
 
-fn process_class_bytes_worker(bytes_queue: &[Vec<u8>]) -> anyhow::Result<Vec<ClassInfo>> {
-    let mut class_info_list = Vec::new();
-
-    for bytes in bytes_queue.iter() {
-        class_info_list.push(match process_class(bytes) {
-            Ok(x) => x,
-            Err(_) => continue,
-        });
-    }
-
-    Ok(class_info_list)
+fn process_class_bytes_worker(bytes_queue: Vec<u8>) -> anyhow::Result<ClassInfo> {
+    process_class(&bytes_queue)
 }
 
 fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
@@ -269,9 +229,7 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
 pub fn create_class_index_from_bytes(
     class_bytes: Vec<Vec<u8>>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
-    let now = Instant::now();
-
-    let mut class_info_list: Vec<ClassInfo> =
+    let class_info_list: Vec<ClassInfo> =
         do_multi_threaded(class_bytes, &process_class_bytes_worker)?;
 
     create_class_index_from_infos(class_info_list)
@@ -283,7 +241,7 @@ fn create_class_index_from_infos(
     let now = Instant::now();
 
     //Removes duplicate classes
-    class_info_list.sort_unstable_by(|a, b| {
+    class_info_list.par_sort_unstable_by(|a, b| {
         a.class_name
             .cmp(&b.class_name)
             .then_with(|| a.package_name.cmp(&b.package_name))

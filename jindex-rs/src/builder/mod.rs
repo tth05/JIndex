@@ -9,6 +9,7 @@ use crate::signature::{
 use anyhow::anyhow;
 use ascii::{AsciiChar, AsciiStr, AsciiString};
 use cafebabe::{FieldAccessFlags, MethodAccessFlags};
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::time::Instant;
@@ -205,7 +206,7 @@ impl ClassIndexBuilder {
         constant_pool: &ClassIndexConstantPool,
         classes: &mut [((&AsciiStr, &AsciiStr), IndexedClass)],
     ) {
-        classes.sort_by(|a, b| {
+        classes.par_sort_by(|a, b| {
             let a_name = a.1.class_name(constant_pool);
             let b_name = b.1.class_name(constant_pool);
             a_name.cmp(b_name).then_with(|| {
