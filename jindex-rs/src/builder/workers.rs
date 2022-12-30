@@ -9,6 +9,7 @@ use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString, IntoAsciiString};
 use cafebabe::attributes::{AttributeData, AttributeInfo, InnerClassEntry};
 use cafebabe::constant_pool::NameAndType;
 use cafebabe::{parse_class_with_options, MethodAccessFlags, ParseOptions};
+use compact_str::{CompactString, ToCompactString};
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::fs::File;
@@ -164,8 +165,8 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
             .fields
             .into_iter()
             .filter_map(|f| {
-                let name = match f.name.into_ascii_string() {
-                    Ok(x) => x,
+                let name = match f.name.as_ascii_str() {
+                    Ok(x) => x.to_compact_string(),
                     Err(_) => return None,
                 };
 
@@ -190,8 +191,8 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
             .methods
             .into_iter()
             .filter_map(|m| {
-                let name = match m.name.into_ascii_string() {
-                    Ok(x) => x,
+                let name = match m.name.as_ascii_str() {
+                    Ok(x) => x.to_compact_string(),
                     Err(_) => return None,
                 };
 
@@ -265,12 +266,12 @@ fn create_class_index_from_infos(
 }
 
 struct ConvertedInnerClassInfo {
-    package_name: AsciiString,
-    full_class_name: AsciiString,
+    package_name: CompactString,
+    full_class_name: CompactString,
     class_name_start_index: usize,
     inner_class_access_flags: u16,
     enclosing_type: Option<RawEnclosingTypeInfo>,
-    member_classes: Option<Vec<AsciiString>>,
+    member_classes: Option<Vec<CompactString>>,
 }
 
 fn convert_enclosing_type_and_inner_classes(
@@ -311,14 +312,14 @@ fn convert_enclosing_type_and_inner_classes(
             if let Some((class_name, method_data)) = enclosing_method_data {
                 let (method_name, method_descriptor) = match method_data {
                     Some(NameAndType { name, descriptor }) => (
-                        Some(name.as_ascii_str()?.to_ascii_string()),
+                        Some(name.as_ascii_str()?.to_compact_string()),
                         Some(RawMethodSignature::from_data(descriptor, &|| Option::None)?),
                     ),
                     None => (None, None),
                 };
 
                 enclosing_type_info = Some(RawEnclosingTypeInfo::new(
-                    Some(class_name.as_ascii_str()?.to_ascii_string()),
+                    Some(class_name.as_ascii_str()?.to_compact_string()),
                     inner_class_type,
                     method_name,
                     method_descriptor,
@@ -350,7 +351,7 @@ fn convert_enclosing_type_and_inner_classes(
                     {
                         None
                     } else if let Ok(name) = e.1.inner_class_info.as_ascii_str() {
-                        Some(name.to_ascii_string())
+                        Some(name.to_compact_string())
                     } else {
                         None
                     }
@@ -360,8 +361,8 @@ fn convert_enclosing_type_and_inner_classes(
     }
 
     Ok(ConvertedInnerClassInfo {
-        package_name: package_name.to_ascii_string(),
-        full_class_name: class_name.to_ascii_string(),
+        package_name: package_name.to_compact_string(),
+        full_class_name: class_name.to_compact_string(),
         class_name_start_index,
         inner_class_access_flags: access_flags,
         enclosing_type: enclosing_type_info,
@@ -374,14 +375,17 @@ fn convert_enclosing_type_and_inner_classes(
 fn extract_outer_and_inner_name(
     original_class_name: &AsciiStr,
     e: &InnerClassEntry,
-) -> anyhow::Result<(AsciiString, usize)> {
+) -> anyhow::Result<(CompactString, usize)> {
     e.inner_name
         .as_ref()
         .filter(|n| !n.is_empty())
         .filter(|_| e.outer_class_info.is_some())
         .and_then(|n| {
             if let Ok(name) = e.outer_class_info.as_ref().unwrap().as_ascii_str() {
-                Some((name.to_ascii_string(), original_class_name.len() - n.len()))
+                Some((
+                    name.to_compact_string(),
+                    original_class_name.len() - n.len(),
+                ))
             } else {
                 None
             }
@@ -393,7 +397,7 @@ fn extract_outer_and_inner_name(
                 match &e.outer_class_info {
                     //There might be an outer name which we can use to extract the inner name
                     Some(outer_name) => (
-                        outer_name.as_ascii_str()?.to_ascii_string(),
+                        outer_name.as_ascii_str()?.to_compact_string(),
                         original_class_name.len()
                             - (e.inner_class_info.len() - (outer_name.len() + 1)),
                     ),
@@ -406,7 +410,7 @@ fn extract_outer_and_inner_name(
                         (
                             e.inner_class_info[..index]
                                 .as_ascii_str()?
-                                .to_ascii_string(),
+                                .to_compact_string(),
                             original_class_name.len() - (e.inner_class_info.len() - (index + 1)),
                         )
                     }
@@ -436,7 +440,7 @@ fn parse_class_signature(
                     .and_then(|s| {
                         s.as_ascii_str()
                             .ok()
-                            .map(|s| RawSignatureType::Object(s.to_ascii_string()))
+                            .map(|s| RawSignatureType::Object(s.to_compact_string()))
                     }),
                 Some(
                     interfaces
@@ -444,7 +448,7 @@ fn parse_class_signature(
                         .filter_map(|s| {
                             s.as_ascii_str()
                                 .ok()
-                                .map(|s| RawSignatureType::Object(s.to_ascii_string()))
+                                .map(|s| RawSignatureType::Object(s.to_compact_string()))
                         })
                         .collect::<Vec<_>>(),
                 )

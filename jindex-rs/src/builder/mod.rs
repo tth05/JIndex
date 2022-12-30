@@ -9,6 +9,7 @@ use crate::signature::{
 use anyhow::anyhow;
 use ascii::{AsciiChar, AsciiStr, AsciiString};
 use cafebabe::{FieldAccessFlags, MethodAccessFlags};
+use compact_str::CompactString;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -16,8 +17,7 @@ use std::time::Instant;
 
 pub mod workers;
 
-pub(crate) type ClassToIndexMap<'a> =
-    FxHashMap<(&'a AsciiStr, &'a AsciiStr), (u32, &'a IndexedClass)>;
+pub(crate) type ClassToIndexMap<'a> = FxHashMap<(&'a str, &'a str), (u32, &'a IndexedClass)>;
 
 struct ClassIndexBuilder {
     expected_method_count: u32,
@@ -50,18 +50,17 @@ impl ClassIndexBuilder {
         );
 
         let mut package_index = PackageIndex::new();
-        let mut classes: Vec<((&AsciiStr, &AsciiStr), IndexedClass)> =
-            Vec::with_capacity(vec.len());
-        let mut constant_pool_map: FxHashMap<&AsciiStr, u32> = FxHashMap::with_capacity_and_hasher(
+        let mut classes: Vec<((&str, &str), IndexedClass)> = Vec::with_capacity(vec.len());
+        let mut constant_pool_map: FxHashMap<&str, u32> = FxHashMap::with_capacity_and_hasher(
             vec.len() + self.expected_method_count as usize,
             Default::default(),
         );
 
         for class_info in vec.iter() {
             let package_index = package_index
-                .get_or_add_package_index(&mut constant_pool, &class_info.package_name);
+                .get_or_add_package_index(&mut constant_pool, class_info.package_name.as_str());
             let class_name_index = get_index_from_pool(
-                &class_info.class_name,
+                class_info.class_name.as_str(),
                 &mut constant_pool_map,
                 &mut constant_pool,
             )?;
@@ -74,7 +73,10 @@ impl ClassIndexBuilder {
             );
 
             classes.push((
-                (&class_info.package_name, &class_info.class_name),
+                (
+                    class_info.package_name.as_str(),
+                    class_info.class_name.as_str(),
+                ),
                 indexed_class,
             ));
         }
@@ -94,8 +96,8 @@ impl ClassIndexBuilder {
         for class_info in vec.iter() {
             let (indexed_class_index, indexed_class) = classes_map
                 .get(&(
-                    class_info.package_name.as_ref(),
-                    class_info.class_name.as_ref(),
+                    class_info.package_name.as_str(),
+                    class_info.class_name.as_str(),
                 ))
                 .ok_or_else(|| {
                     anyhow::anyhow!("Indexed class not found in map {:?}", class_info)
@@ -127,7 +129,7 @@ impl ClassIndexBuilder {
                 members
                     .iter()
                     .filter_map(|m| {
-                        let split_parts = crate::rsplit_once(m, AsciiChar::Slash);
+                        let split_parts = m.rsplit_once('/').unwrap_or_else(|| ("", m));
                         classes_map.get(&split_parts)
                     })
                     .for_each(|m| {
@@ -204,7 +206,7 @@ impl ClassIndexBuilder {
     fn sort_classes(
         package_index: &PackageIndex,
         constant_pool: &ClassIndexConstantPool,
-        classes: &mut [((&AsciiStr, &AsciiStr), IndexedClass)],
+        classes: &mut [((&str, &str), IndexedClass)],
     ) {
         classes.par_sort_by(|a, b| {
             let a_name = a.1.class_name(constant_pool);
@@ -225,8 +227,8 @@ impl ClassIndexBuilder {
 }
 
 pub fn get_index_from_pool<'a>(
-    value: &'a AsciiStr,
-    map: &mut FxHashMap<&'a AsciiStr, u32>,
+    value: &'a str,
+    map: &mut FxHashMap<&'a str, u32>,
     pool: &mut ClassIndexConstantPool,
 ) -> anyhow::Result<u32> {
     let entry = map.entry(value);
@@ -248,12 +250,12 @@ impl Default for ClassIndexBuilder {
 
 #[derive(Debug)]
 struct ClassInfo {
-    pub package_name: AsciiString,
-    pub class_name: AsciiString,
+    pub package_name: CompactString,
+    pub class_name: CompactString,
     pub class_name_start_index: usize,
     pub access_flags: u16,
     pub enclosing_type: Option<RawEnclosingTypeInfo>,
-    pub member_classes: Option<Vec<AsciiString>>,
+    pub member_classes: Option<Vec<CompactString>>,
     pub signature: RawClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
@@ -261,14 +263,14 @@ struct ClassInfo {
 
 #[derive(Debug)]
 struct FieldInfo {
-    pub field_name: AsciiString,
+    pub field_name: CompactString,
     pub descriptor: RawSignatureType,
     pub access_flags: FieldAccessFlags,
 }
 
 #[derive(Debug)]
 struct MethodInfo {
-    pub method_name: AsciiString,
+    pub method_name: CompactString,
     pub signature: RawMethodSignature,
     pub access_flags: MethodAccessFlags,
 }

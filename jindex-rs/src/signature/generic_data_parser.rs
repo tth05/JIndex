@@ -3,6 +3,7 @@ use crate::signature::{
     TypeParameterData,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use compact_str::ToCompactString;
 
 /// Parses stuff like '<T:Ljava/lang/Object;:Ljava/lang/Comparable;B>'
 pub fn parse_generic_signature_data(
@@ -36,7 +37,7 @@ fn parse_generic_signature_data_single(
         .chars()
         .position(|ch| ch == ':')
         .ok_or(ParseError::Eof)?;
-    let name = input[..separator_index].to_ascii_string();
+    let name = input[..separator_index].as_str().to_compact_string();
 
     let mut is_first = true;
     let mut type_bound = None;

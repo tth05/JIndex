@@ -4,6 +4,7 @@ use crate::signature::{
     RawSignatureType, RawTypeParameterData, SignaturePrimitive, SignatureType,
 };
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use compact_str::{CompactString, ToCompactString};
 use std::borrow::Cow;
 use std::str::FromStr;
 
@@ -55,7 +56,9 @@ impl RawSignatureType {
                         .chars()
                         .position(|ch| ch == ';')
                         .ok_or(ParseError::Eof)?;
-                    let sig = SignatureType::Generic(input[1..semi_colon_index].to_ascii_string());
+                    let sig = SignatureType::Generic(
+                        input[1..semi_colon_index].as_str().to_compact_string(),
+                    );
 
                     (semi_colon_index as u16 + 1, sig)
                 }
@@ -83,7 +86,7 @@ impl RawSignatureType {
             .position(|ch| ch == '<' || ch == ';' || ch == '.')
             .ok_or(ParseError::Eof)?;
         //Parse the first type, which we'll need either way
-        let base_type = input[..special_char_index].to_ascii_string();
+        let base_type = unsafe { CompactString::from_utf8_unchecked(&input[..special_char_index]) };
 
         //Parse the generic type bounds if there are any
         let sig = match SignatureType::parse_generic_type_bounds(&input[special_char_index..]) {
@@ -239,7 +242,7 @@ impl FromStr for RawClassSignature {
         let mut other_classes = {
             let mut parameters = Vec::new();
             while start_index < input.len() {
-                let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
+                let parse_result = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
                 start_index += parse_result.0 as usize;
                 parameters.push(parse_result.1);
             }
@@ -251,7 +254,7 @@ impl FromStr for RawClassSignature {
             generic_data: generic_data.map(|v| v.1),
             super_class: Some(other_classes.remove(0)).filter(|s| {
                 if let SignatureType::Object(name) = s {
-                    name != "java/lang/Object"
+                    name.as_bytes() != "java/lang/Object".as_bytes()
                 } else {
                     true
                 }
@@ -302,7 +305,7 @@ impl RawMethodSignature {
 
             let mut parameters = Vec::new();
             while input.get_ascii(start_index).ok_or(ParseError::Eof)? != ')' {
-                let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
+                let parse_result = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
                 start_index += parse_result.0 as usize;
                 parameters.push(parse_result.1);
             }
@@ -316,24 +319,24 @@ impl RawMethodSignature {
             ));
         };
 
-        let return_type = SignatureType::parse_ascii(&input[start_index..])?;
+        let return_type = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
         start_index += return_type.0 as usize;
 
         let mut exceptions = Vec::new();
         while input.get_ascii(start_index).map_or(false, |ch| ch == '^') {
             start_index += 1; //Skip '^'
 
-            let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
+            let parse_result = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
             start_index += parse_result.0 as usize;
             exceptions.push(parse_result.1);
         }
 
         if exceptions.is_empty() {
             if let Some(vec) = exception_attribute_supplier() {
-                exceptions.extend(vec.iter().filter_map(|s| {
-                    s.as_ascii_str()
-                        .ok()
-                        .map(|a| RawSignatureType::Object(a.to_ascii_string()))
+                exceptions.extend(vec.iter().filter_map(|s: &Cow<'_, str>| {
+                    Some(s)
+                        .filter(|s| s.is_ascii())
+                        .map(|a| RawSignatureType::Object(a.to_compact_string()))
                 }));
             }
         }

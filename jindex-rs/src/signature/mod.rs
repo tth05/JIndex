@@ -3,9 +3,11 @@ pub mod indexed_signature;
 pub mod raw_signature;
 
 use ascii::{AsAsciiStrError, AsciiStr, AsciiString};
+use compact_str::CompactString;
 use speedy::{Readable, Writable};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
+use std::ops::Deref;
 
 pub type SignaturePrimitive = jni::signature::Primitive;
 
@@ -31,7 +33,7 @@ pub enum SignatureType<T> {
     Array(Box<SignatureType<T>>),
 }
 
-pub type RawSignatureType = SignatureType<AsciiString>;
+pub type RawSignatureType = SignatureType<CompactString>;
 pub type IndexedSignatureType = SignatureType<u32>;
 
 /// Contains number of consumed characters and result object
@@ -46,7 +48,7 @@ pub struct TypeParameterData<T> {
     interface_bounds: Option<Vec<SignatureType<T>>>,
 }
 
-type RawTypeParameterData = TypeParameterData<AsciiString>;
+type RawTypeParameterData = TypeParameterData<CompactString>;
 pub type IndexedTypeParameterData = TypeParameterData<u32>;
 
 #[derive(Readable, Writable, Debug)]
@@ -57,7 +59,7 @@ pub struct ClassSignature<T> {
     interfaces: Option<Vec<SignatureType<T>>>,
 }
 
-pub type RawClassSignature = ClassSignature<AsciiString>;
+pub type RawClassSignature = ClassSignature<CompactString>;
 pub type IndexedClassSignature = ClassSignature<u32>;
 
 impl<T> ClassSignature<T> {
@@ -109,7 +111,7 @@ impl<T> MethodSignature<T> {
     }
 }
 
-pub type RawMethodSignature = MethodSignature<AsciiString>;
+pub type RawMethodSignature = MethodSignature<CompactString>;
 pub type IndexedMethodSignature = MethodSignature<u32>;
 
 #[derive(Readable, Writable, Eq, PartialEq, Clone, Copy, Debug)]
@@ -171,7 +173,7 @@ impl<T> EnclosingTypeInfo<T> {
     }
 }
 
-pub type RawEnclosingTypeInfo = EnclosingTypeInfo<AsciiString>;
+pub type RawEnclosingTypeInfo = EnclosingTypeInfo<CompactString>;
 pub type IndexedEnclosingTypeInfo = EnclosingTypeInfo<u32>;
 
 fn starts_with<T>(str: &AsciiStr, prefix: T) -> bool
@@ -396,7 +398,7 @@ mod tests {
     fn assert_is_object_signature(str: &str, sig: &RawSignatureType) {
         assert!(matches!(sig, SignatureType::Object(_)));
         if let SignatureType::Object(s) = sig {
-            assert_eq!(str, s);
+            assert_eq!(str, s.as_str());
         }
     }
 }

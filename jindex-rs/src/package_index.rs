@@ -1,6 +1,7 @@
 use crate::constant_pool::ClassIndexConstantPool;
 use ascii::{AsAsciiStr, AsciiStr, AsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell};
+use compact_str::CompactString;
 use speedy::{Readable, Writable};
 use std::cmp::Ordering;
 
@@ -19,7 +20,7 @@ impl PackageIndex {
     pub(crate) fn get_or_add_package_index(
         &mut self,
         constant_pool: &mut ClassIndexConstantPool,
-        name: &AsciiStr,
+        name: &str,
     ) -> u32 {
         self.get_or_add_package_index0(0, constant_pool, name)
     }
@@ -30,7 +31,7 @@ impl PackageIndex {
         &mut self,
         indexed_package_index: u32,
         constant_pool: &mut ClassIndexConstantPool,
-        name: &AsciiStr,
+        name: &str,
     ) -> u32 {
         let slash_index_or_none = name.chars().position(|char| char == '/');
         let sub_name = match slash_index_or_none {
