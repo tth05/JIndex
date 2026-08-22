@@ -19,4 +19,7 @@ jobs:
       - name: Build with Gradle
         env:
           PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
-        run: ./gradlew.bat --no-daemon build publish
+        shell: pwsh
+        run: |
+          $releaseVersion = '${{ github.ref_name }}' -replace '^v', ''
+          ./gradlew.bat --no-daemon clean build publish "-PjindexVersion=$releaseVersion"

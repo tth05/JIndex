@@ -4,8 +4,7 @@ plugins {
 }
 
 group = 'com.github.tth05'
-var ver = System.getenv("GITHUB_REF") ?: "dev"
-version = ver.replaceAll("^refs/tags/v", "")
+version = providers.gradleProperty('jindexVersion').orElse('1.0.0-SNAPSHOT').get()
 
 repositories {
     mavenCentral()
