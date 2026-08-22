@@ -9,7 +9,7 @@ edition = "2021"
 ascii = "1.0.0"
 rustc-hash = "1.1.0"
 anyhow = "1.0.57"
-jni = "0.20.0"
+jni = "0.22.4"
 cafebabe = { git = "https://github.com/tth05/cafebabe", rev = "db42ccd08d75e1ce3c83ffb026a6e26aa0b5ab72" }
 speedy = "0.8.0"
 zip = { version = "0.6.2", features = ["deflate"], default-features = false}

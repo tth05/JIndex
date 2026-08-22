@@ -4,7 +4,7 @@ use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, Signature
 use ascii::AsAsciiStr;
 use cafebabe::attributes::InnerClassAccessFlags;
 use jni::objects::JObject;
-use jni::JNIEnv;
+use jni::{jni_sig, jni_str, Env};
 
 mod cache;
 pub mod jni_class_index;
@@ -20,12 +20,21 @@ unsafe fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass
     )
 }
 
-unsafe fn get_enum_ordinal(env: JNIEnv, enum_object: JObject) -> u32 {
-    env.call_method(enum_object, "ordinal", "()I", &[])
+unsafe fn get_enum_ordinal(env: &mut Env<'_>, enum_object: JObject) -> u32 {
+    env.call_method(enum_object, jni_str!("ordinal"), jni_sig!("()I"), &[])
         .expect("Failed to call ordinal")
         .i()
         .unwrap() as u32
 }
+
+macro_rules! with_jni_env {
+    ($env:ident, $body:block) => {{
+        $env.with_env(|$env| -> jni::errors::Result<_> { Ok(unsafe { $body }) })
+            .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+    }};
+}
+
+pub(crate) use with_jni_env;
 
 macro_rules! propagate_error {
     ($env:ident, $result:expr) => {
@@ -36,11 +45,11 @@ macro_rules! propagate_error {
             Ok(value) => value,
             Err(error) => {
                 $env.throw_new(
-                    "com/github/tth05/jindex/ClassIndexBuildingException",
-                    error.to_string(),
+                    jni_str!("com/github/tth05/jindex/ClassIndexBuildingException"),
+                    JNIString::new(error.to_string()),
                 )
                 .expect("Failed to throw exception");
-                return $return_value;
+                return Ok($return_value);
             }
         }
     };

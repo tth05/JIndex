@@ -2,7 +2,7 @@ use crate::class_index::ClassIndex;
 use jni::objects::{JFieldID, JObject};
 use jni::signature::{Primitive, ReturnType};
 use jni::sys::jlong;
-use jni::JNIEnv;
+use jni::{jni_sig, jni_str, Env};
 use once_cell::sync::OnceCell;
 
 pub struct FieldIDs {
@@ -18,36 +18,45 @@ pub fn cached_field_ids() -> &'static FieldIDs {
     CACHED_FIELD_IDS.get().unwrap()
 }
 
-pub unsafe fn init_field_ids(env: JNIEnv) -> anyhow::Result<()> {
+pub unsafe fn init_field_ids(env: &mut Env<'_>) -> anyhow::Result<()> {
     if CACHED_FIELD_IDS.get().is_some() {
         return Ok(());
     }
 
     unsafe fn transmute_field_id(
-        env: JNIEnv,
-        name: &str,
-        class_name: &str,
+        env: &mut Env<'_>,
+        name: &'static jni::strings::JNIStr,
+        class_name: &'static jni::strings::JNIStr,
     ) -> anyhow::Result<JFieldID> {
-        Ok(env.get_field_id(
-            env.find_class("com/github/tth05/jindex/".to_owned() + class_name)?,
-            name,
-            "J",
-        )?)
+        let class = env.find_class(class_name)?;
+        Ok(env.get_field_id(&class, name, jni_sig!("J"))?)
     }
 
     let _ = CACHED_FIELD_IDS.set(FieldIDs {
-        class_index_pointer: transmute_field_id(env, "classIndexPointer", "ClassIndexChildObject")?,
+        class_index_pointer: transmute_field_id(
+            env,
+            jni_str!("classIndexPointer"),
+            jni_str!("com/github/tth05/jindex/ClassIndexChildObject"),
+        )?,
         class_index_child_self_pointer: transmute_field_id(
             env,
-            "pointer",
-            "ClassIndexChildObject",
+            jni_str!("pointer"),
+            jni_str!("com/github/tth05/jindex/ClassIndexChildObject"),
         )?,
-        class_child_class_pointer: transmute_field_id(env, "classPointer", "ClassChildObject")?,
+        class_child_class_pointer: transmute_field_id(
+            env,
+            jni_str!("classPointer"),
+            jni_str!("com/github/tth05/jindex/ClassChildObject"),
+        )?,
     });
     Ok(())
 }
 
-pub unsafe fn get_field_with_id<'a, T>(env: JNIEnv, this: JObject, field_id: &JFieldID) -> &'a T {
+pub unsafe fn get_field_with_id<'a, T>(
+    env: &mut Env<'_>,
+    this: &JObject<'_>,
+    field_id: &JFieldID,
+) -> &'a T {
     &*(env
         .get_field_unchecked(this, *field_id, ReturnType::Primitive(Primitive::Long))
         .unwrap()
@@ -55,7 +64,10 @@ pub unsafe fn get_field_with_id<'a, T>(env: JNIEnv, this: JObject, field_id: &JF
         .unwrap() as *mut T)
 }
 
-pub unsafe fn get_class_index(env: JNIEnv, this: JObject) -> (jlong, &'static ClassIndex) {
+pub unsafe fn get_class_index(
+    env: &mut Env<'_>,
+    this: &JObject<'_>,
+) -> (jlong, &'static ClassIndex) {
     let class_index_pointer = env
         .get_field_unchecked(
             this,

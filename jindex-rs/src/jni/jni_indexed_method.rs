@@ -6,93 +6,111 @@ use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIn
 use crate::signature::{IndexedMethodSignature, IndexedSignatureType, TypeParameterData};
 use jni::objects::{JObject, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
-use jni::JNIEnv;
+use jni::{jni_sig, jni_str, EnvUnowned};
+
+use crate::jni::with_jni_env;
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getNameNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
+    with_jni_env!(env, {
+        let (_, class_index) = get_class_index(env, &this);
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
 
-    env.new_string(indexed_method.method_name(class_index.constant_pool()))
-        .unwrap()
-        .into_raw()
+        env.new_string(indexed_method.method_name(class_index.constant_pool()))
+            .unwrap()
+            .into_raw()
+    })
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDeclaringClassNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jobject {
-    let indexed_class =
-        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
-    let (class_index_pointer, _) = get_class_index(env, this);
+    with_jni_env!(env, {
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_child_class_pointer,
+        );
+        let (class_index_pointer, _) = get_class_index(env, &this);
 
-    env.new_object(
-        env.find_class("com/github/tth05/jindex/IndexedClass")
-            .expect("Result class not found"),
-        "(JJ)V",
-        &[
-            JValue::from(class_index_pointer as jlong),
-            JValue::from((indexed_class as *const IndexedClass) as jlong),
-        ],
-    )
-    .expect("Failed to create result object")
-    .into_raw()
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))
+            .expect("Result class not found");
+        env.new_object(
+            &result_class,
+            jni_sig!("(JJ)V"),
+            &[
+                JValue::from(class_index_pointer as jlong),
+                JValue::from((indexed_class as *const IndexedClass) as jlong),
+            ],
+        )
+        .expect("Failed to create result object")
+        .into_raw()
+    })
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAccessFlagsNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jint {
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
+    with_jni_env!(env, {
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
 
-    indexed_method.access_flags() as jint
+        indexed_method.access_flags() as jint
+    })
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDescriptorStringNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
-    let indexed_class =
-        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
-    let signature = indexed_method.method_signature();
+    with_jni_env!(env, {
+        let (_, class_index) = get_class_index(env, &this);
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_child_class_pointer,
+        );
+        let signature = indexed_method.method_signature();
 
-    let type_parameters = collect_method_type_parameters(class_index, indexed_class, signature);
+        let type_parameters = collect_method_type_parameters(class_index, indexed_class, signature);
 
-    env.new_string(signature.to_descriptor_string(
-        class_index,
-        //TODO: Pass generic data of super classes
-        &type_parameters,
-    ))
-    .expect("Unable to create generic signature String")
-    .into_raw()
+        env.new_string(signature.to_descriptor_string(
+            class_index,
+            //TODO: Pass generic data of super classes
+            &type_parameters,
+        ))
+        .expect("Unable to create generic signature String")
+        .into_raw()
+    })
 }
 
 unsafe fn collect_method_type_parameters<'a>(
@@ -113,73 +131,77 @@ unsafe fn collect_method_type_parameters<'a>(
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGenericSignatureStringNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jstring {
-    let (_, class_index) = get_class_index(env, this);
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
-    let signature = indexed_method.method_signature();
+    with_jni_env!(env, {
+        let (_, class_index) = get_class_index(env, &this);
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let signature = indexed_method.method_signature();
 
-    //No generic signature available
-    if signature.generic_data().is_none()
-        && signature
-            .parameters()
-            .map(|v| !v.iter().any(|s| !is_basic_signature_type(s)))
-            .unwrap_or(true)
-        && is_basic_signature_type(signature.return_type())
-        && signature
-            .exceptions()
-            .map_or(true, |v| !v.iter().any(|s| !is_basic_signature_type(s)))
-    {
-        return JObject::null().into_raw();
-    }
+        //No generic signature available
+        if signature.generic_data().is_none()
+            && signature
+                .parameters()
+                .map(|v| !v.iter().any(|s| !is_basic_signature_type(s)))
+                .unwrap_or(true)
+            && is_basic_signature_type(signature.return_type())
+            && signature
+                .exceptions()
+                .map_or(true, |v| !v.iter().any(|s| !is_basic_signature_type(s)))
+        {
+            return Ok(JObject::null().into_raw());
+        }
 
-    env.new_string(signature.to_signature_string(class_index))
-        .expect("Unable to create generic signature String")
-        .into_raw()
+        env.new_string(signature.to_signature_string(class_index))
+            .expect("Unable to create generic signature String")
+            .into_raw()
+    })
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExceptionsNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    with_jni_env!(env, {
+        let (class_index_pointer, class_index) = get_class_index(env, &this);
 
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
-    let indexed_class =
-        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_child_class_pointer,
+        );
 
-    let exceptions = indexed_method.method_signature().exceptions();
-    let array_length = exceptions.map_or(0, |v| v.len());
+        let exceptions = indexed_method.method_signature().exceptions();
+        let array_length = exceptions.map_or(0, |v| v.len());
 
-    let result_class = env
-        .find_class("com/github/tth05/jindex/IndexedClass")
-        .expect("Result class not found");
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))
+            .expect("Result class not found");
 
-    let result_array = env
-        .new_object_array(array_length as jsize, result_class, JObject::null())
-        .expect("Failed to create result array");
+        let result_array = env
+            .new_object_array(array_length as jsize, &result_class, JObject::null())
+            .expect("Failed to create result array");
 
-    if array_length == 0 {
-        return result_array;
-    }
+        if array_length == 0 {
+            return Ok(result_array.into_raw());
+        }
 
-    for (index, exception_signature) in exceptions.unwrap().iter().enumerate() {
-        let exception_class_index =
-            exception_signature
-                .extract_base_object_type()
-                .or_else(|| match exception_signature {
+        for (index, exception_signature) in exceptions.unwrap().iter().enumerate() {
+            let exception_class_index = exception_signature.extract_base_object_type().or_else(
+                || match exception_signature {
                     IndexedSignatureType::Generic(_) => {
                         let generic_data = collect_method_type_parameters(
                             class_index,
@@ -192,118 +214,134 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExce
                             .and_then(|s| s.extract_base_object_type())
                     }
                     _ => Option::None,
-                });
-        if exception_class_index.is_none() {
-            continue;
+                },
+            );
+            if exception_class_index.is_none() {
+                continue;
+            }
+
+            let class = class_index.class_at_index(exception_class_index.unwrap());
+
+            let object = env
+                .new_object(
+                    &result_class,
+                    jni_sig!("(JJ)V"),
+                    &[
+                        JValue::from(class_index_pointer as jlong),
+                        JValue::from((class as *const IndexedClass) as jlong),
+                    ],
+                )
+                .expect("Failed to create result object");
+            result_array
+                .set_element(env, index, &object)
+                .expect("Failed to set element into result array");
         }
 
-        let class = class_index.class_at_index(exception_class_index.unwrap());
-
-        let object = env
-            .new_object(
-                result_class,
-                "(JJ)V",
-                &[
-                    JValue::from(class_index_pointer as jlong),
-                    JValue::from((class as *const IndexedClass) as jlong),
-                ],
-            )
-            .expect("Failed to create result object");
-        env.set_object_array_element(result_array, index as i32, object)
-            .expect("Failed to set element into result array");
-    }
-
-    result_array
+        result_array.into_raw()
+    })
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImplementationsNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    with_jni_env!(env, {
+        let (class_index_pointer, class_index) = get_class_index(env, &this);
 
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
-    let indexed_class =
-        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_child_class_pointer,
+        );
 
-    let impls = class_index.find_implementations_of_method(indexed_class.index(), indexed_method);
+        let impls =
+            class_index.find_implementations_of_method(indexed_class.index(), indexed_method);
 
-    let result_class = env
-        .find_class("com/github/tth05/jindex/IndexedMethod")
-        .expect("Result class not found");
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/IndexedMethod"))
+            .expect("Result class not found");
 
-    let result_array = env
-        .new_object_array(impls.len() as i32, result_class, JObject::null())
-        .expect("Failed to create result array");
+        let result_array = env
+            .new_object_array(impls.len() as i32, &result_class, JObject::null())
+            .expect("Failed to create result array");
 
-    for (index, (declaring_class, result_method)) in impls.iter().enumerate() {
-        let object = env
-            .new_object(
-                result_class,
-                "(JJJ)V",
-                &[
-                    JValue::from(class_index_pointer as jlong),
-                    JValue::from((*declaring_class as *const IndexedClass) as jlong),
-                    JValue::from((*result_method as *const IndexedMethod) as jlong),
-                ],
-            )
-            .expect("Failed to create result object");
-        env.set_object_array_element(result_array, index as i32, object)
-            .expect("Failed to set element into result array");
-    }
+        for (index, (declaring_class, result_method)) in impls.iter().enumerate() {
+            let object = env
+                .new_object(
+                    &result_class,
+                    jni_sig!("(JJJ)V"),
+                    &[
+                        JValue::from(class_index_pointer as jlong),
+                        JValue::from((*declaring_class as *const IndexedClass) as jlong),
+                        JValue::from((*result_method as *const IndexedMethod) as jlong),
+                    ],
+                )
+                .expect("Failed to create result object");
+            result_array
+                .set_element(env, index, &object)
+                .expect("Failed to set element into result array");
+        }
 
-    result_array
+        result_array.into_raw()
+    })
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findBaseMethodsNative(
-    env: JNIEnv,
+    mut env: EnvUnowned<'_>,
     this: JObject,
 ) -> jobjectArray {
-    let (class_index_pointer, class_index) = get_class_index(env, this);
+    with_jni_env!(env, {
+        let (class_index_pointer, class_index) = get_class_index(env, &this);
 
-    let indexed_method = get_field_with_id::<IndexedMethod>(
-        env,
-        this,
-        &cached_field_ids().class_index_child_self_pointer,
-    );
-    let indexed_class =
-        get_field_with_id::<IndexedClass>(env, this, &cached_field_ids().class_child_class_pointer);
+        let indexed_method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_child_class_pointer,
+        );
 
-    let impls = class_index.find_base_methods_of_method(indexed_class, indexed_method);
+        let impls = class_index.find_base_methods_of_method(indexed_class, indexed_method);
 
-    let result_class = env
-        .find_class("com/github/tth05/jindex/IndexedMethod")
-        .expect("Result class not found");
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/IndexedMethod"))
+            .expect("Result class not found");
 
-    let result_array = env
-        .new_object_array(impls.len() as i32, result_class, JObject::null())
-        .expect("Failed to create result array");
+        let result_array = env
+            .new_object_array(impls.len() as i32, &result_class, JObject::null())
+            .expect("Failed to create result array");
 
-    for (index, MethodWithClass { class, method }) in impls.iter().enumerate() {
-        let object = env
-            .new_object(
-                result_class,
-                "(JJJ)V",
-                &[
-                    JValue::from(class_index_pointer as jlong),
-                    JValue::from((*class as *const IndexedClass) as jlong),
-                    JValue::from((*method as *const IndexedMethod) as jlong),
-                ],
-            )
-            .expect("Failed to create result object");
-        env.set_object_array_element(result_array, index as i32, object)
-            .expect("Failed to set element into result array");
-    }
+        for (index, MethodWithClass { class, method }) in impls.iter().enumerate() {
+            let object = env
+                .new_object(
+                    &result_class,
+                    jni_sig!("(JJJ)V"),
+                    &[
+                        JValue::from(class_index_pointer as jlong),
+                        JValue::from((*class as *const IndexedClass) as jlong),
+                        JValue::from((*method as *const IndexedMethod) as jlong),
+                    ],
+                )
+                .expect("Failed to create result object");
+            result_array
+                .set_element(env, index, &object)
+                .expect("Failed to set element into result array");
+        }
 
-    result_array
+        result_array.into_raw()
+    })
 }
