@@ -24,17 +24,16 @@ test {
         showStandardStreams = true
     }
 }
+tasks.register('buildNativeLibrary', Exec) {
+    workingDir "${projectDir}/jindex-rs"
+    commandLine "cargo", "build", "--release"
 
-task copyNativeLibrary {
-    exec {
-        workingDir "${projectDir}/jindex-rs"
-        commandLine "cargo", "build", "--release"
-    }
-    copy {
-        from "${projectDir}/jindex-rs/target/release"
-        into "${projectDir}/src/main/resources/jindex_natives"
-        include "jindex_rs.dll"
-        rename "jindex_rs.dll", "jindex_rs_${version}.dll"
+    doLast {
+        copy {
+            from "${projectDir}/jindex-rs/target/release"
+            into "${projectDir}/src/main/resources/jindex_natives"
+            include "jindex_rs.dll"
+        }
     }
 }
 
@@ -59,5 +58,3 @@ publishing {
         }
     }
 }
-
-build.dependsOn copyNativeLibrary

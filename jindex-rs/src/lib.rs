@@ -1,6 +1,4 @@
 #![recursion_limit = "40"]
-#![feature(once_cell)]
-#![feature(try_blocks)]
 
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 use mimalloc::MiMalloc;

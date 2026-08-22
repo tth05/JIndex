@@ -393,8 +393,8 @@ fn extract_outer_and_inner_name(
         .or_else(|| {
             //If we don't have an inner name, we usually have an anonymous class like
             // java/lang/Object$1.
-            let r: anyhow::Result<(_, _)> = try {
-                match &e.outer_class_info {
+            let r: anyhow::Result<(_, _)> = (|| {
+                Ok(match &e.outer_class_info {
                     //There might be an outer name which we can use to extract the inner name
                     Some(outer_name) => (
                         outer_name.as_ascii_str()?.to_compact_string(),
@@ -414,8 +414,8 @@ fn extract_outer_and_inner_name(
                             original_class_name.len() - (e.inner_class_info.len() - (index + 1)),
                         )
                     }
-                }
-            };
+                })
+            })();
             r.ok()
         })
         .ok_or_else(|| anyhow::anyhow!("Failed to extract outer and inner name"))

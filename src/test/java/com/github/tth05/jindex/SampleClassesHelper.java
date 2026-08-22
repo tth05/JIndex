@@ -51,7 +51,14 @@ public class SampleClassesHelper {
     public static void createSamplesJar() {
         URL resource = SampleClassesHelper.class.getResource("/Samples.jar");
         if (resource == null) {
-            try (ZipOutputStream zipFile = new ZipOutputStream(Files.newOutputStream(Paths.get("src/test/resources/Samples.jar")))) {
+            var samplesJar = Paths.get("src/test/resources/Samples.jar");
+            try {
+                Files.createDirectories(samplesJar.getParent());
+            } catch (IOException e) {
+                throw new RuntimeException("Unable to create test resources directory", e);
+            }
+
+            try (ZipOutputStream zipFile = new ZipOutputStream(Files.newOutputStream(samplesJar))) {
                 int i = 0;
                 for (byte[] b : readSampleClasses()) {
                     zipFile.putNextEntry(new ZipEntry("Class" + i + ".class"));
