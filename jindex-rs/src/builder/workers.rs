@@ -11,6 +11,7 @@ use cafebabe::constant_pool::NameAndType;
 use cafebabe::{parse_class_with_options, MethodAccessFlags, ParseOptions};
 use compact_str::{CompactString, ToCompactString};
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{Cursor, Read};
@@ -79,20 +80,7 @@ fn process_jar_worker(file_name: String) -> anyhow::Result<Vec<ClassInfo>> {
 pub fn create_class_index_from_jars(
     jar_names: Vec<String>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
-    let now = Instant::now();
-    let class_info_list = do_multi_threaded(jar_names, &process_jar_worker)?
-        .into_iter()
-        .flatten()
-        .collect();
-
-    let mut info = BuildTimeInfo {
-        class_reading_time: now.elapsed().as_millis(),
-        ..Default::default()
-    };
-
-    let (other_info, class_index) = create_class_index_from_infos(class_info_list)?;
-    info.merge(other_info);
-    Ok((info, class_index))
+    create_class_index_from_sources(jar_names, Vec::new())
 }
 
 macro_rules! get_attribute_info {
@@ -230,10 +218,41 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
 pub fn create_class_index_from_bytes(
     class_bytes: Vec<Vec<u8>>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
-    let class_info_list: Vec<ClassInfo> =
-        do_multi_threaded(class_bytes, &process_class_bytes_worker)?;
+    create_class_index_from_sources(Vec::new(), class_bytes)
+}
 
-    create_class_index_from_infos(class_info_list)
+pub fn create_class_index_from_sources(
+    jar_names: Vec<String>,
+    class_bytes: Vec<Vec<u8>>,
+) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
+    let now = Instant::now();
+    let (jar_result, class_bytes_result) = rayon::join(
+        || do_multi_threaded(jar_names, &process_jar_worker),
+        || do_multi_threaded(class_bytes, &process_class_bytes_worker),
+    );
+
+    let mut jar_class_infos: Vec<ClassInfo> = jar_result?.into_iter().flatten().collect();
+    let class_bytes_infos = class_bytes_result?;
+
+    // Direct class bytes are authoritative when the same class also exists in an archive.
+    let direct_class_names: FxHashSet<(&str, &str)> = class_bytes_infos
+        .iter()
+        .map(|info| (info.package_name.as_str(), info.class_name.as_str()))
+        .collect();
+    jar_class_infos.retain(|info| {
+        !direct_class_names.contains(&(info.package_name.as_str(), info.class_name.as_str()))
+    });
+    drop(direct_class_names);
+    jar_class_infos.extend(class_bytes_infos);
+
+    let mut info = BuildTimeInfo {
+        class_reading_time: now.elapsed().as_millis(),
+        ..Default::default()
+    };
+
+    let (other_info, class_index) = create_class_index_from_infos(jar_class_infos)?;
+    info.merge(other_info);
+    Ok((info, class_index))
 }
 
 fn create_class_index_from_infos(

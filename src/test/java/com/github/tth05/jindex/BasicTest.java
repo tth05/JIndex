@@ -6,17 +6,26 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.function.Executable;
 
+import java.io.InputStream;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+
+import javax.tools.ToolProvider;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -52,6 +61,62 @@ public class BasicTest {
     public void testBuildFromBytes() {
         try (ClassIndex byteIndex = ClassIndex.fromBytes(SampleClassesHelper.loadSampleClasses())) {
             assertNotNull(byteIndex.findClass("java/lang", "String"));
+        }
+    }
+
+    @Test
+    public void testBuildFromMixedSources() throws Exception {
+        Path archive = Files.createTempFile("jindex-mixed-sources-", ".jar");
+        try {
+            byte[] stringClass = readClassBytes(String.class);
+            try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {
+                output.putNextEntry(new ZipEntry("java/lang/String.class"));
+                output.write(stringClass);
+                output.closeEntry();
+            }
+
+            try (ClassIndex mixedIndex = ClassIndex.fromSources(
+                    List.of(archive.toString()),
+                    List.of(readClassBytes(java.util.ArrayList.class))
+            )) {
+                assertNotNull(mixedIndex.findClass("java/lang", "String"));
+                assertNotNull(mixedIndex.findClass("java/util", "ArrayList"));
+            }
+        } finally {
+            Files.deleteIfExists(archive);
+        }
+    }
+
+    @Test
+    public void testDirectClassesOverrideArchiveClasses() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-source-precedence-");
+        try {
+            byte[] archiveClass = compileFixture(
+                    workspace.resolve("archive-compile"),
+                    "package mixed; public class Fixture { public int archiveField; }"
+            );
+            byte[] directClass = compileFixture(
+                    workspace.resolve("direct-compile"),
+                    "package mixed; public class Fixture { public int directField; }"
+            );
+            Path archive = workspace.resolve("fixture.jar");
+            try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {
+                output.putNextEntry(new ZipEntry("mixed/Fixture.class"));
+                output.write(archiveClass);
+                output.closeEntry();
+            }
+
+            try (ClassIndex mixedIndex = ClassIndex.fromSources(
+                    List.of(archive.toString()),
+                    List.of(directClass)
+            )) {
+                IndexedClass fixture = mixedIndex.findClass("mixed", "Fixture");
+                assertNotNull(fixture);
+                assertTrue(Arrays.stream(fixture.getFields()).anyMatch(field -> field.getName().equals("directField")));
+                assertFalse(Arrays.stream(fixture.getFields()).anyMatch(field -> field.getName().equals("archiveField")));
+            }
+        } finally {
+            deleteTree(workspace);
         }
     }
 
@@ -146,6 +211,37 @@ public class BasicTest {
     private static void assertClosed(Executable operation) {
         IllegalStateException exception = assertThrows(IllegalStateException.class, operation);
         assertEquals("Class index is closed", exception.getMessage());
+    }
+
+    private static byte[] readClassBytes(Class<?> type) throws Exception {
+        try (InputStream input = type.getResourceAsStream(type.getSimpleName() + ".class")) {
+            assertNotNull(input);
+            return input.readAllBytes();
+        }
+    }
+
+    private static byte[] compileFixture(Path workspace, String sourceText) throws Exception {
+        Path source = workspace.resolve("src/mixed/Fixture.java");
+        Path classes = workspace.resolve("classes");
+        Files.createDirectories(source.getParent());
+        Files.createDirectories(classes);
+        Files.writeString(source, sourceText);
+
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler);
+        assertEquals(0, compiler.run(null, null, null, "-d", classes.toString(), source.toString()));
+        return Files.readAllBytes(classes.resolve("mixed/Fixture.class"));
+    }
+
+    private static void deleteTree(Path root) throws Exception {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private static void await(CountDownLatch latch) {

@@ -1,4 +1,6 @@
-use crate::builder::workers::{create_class_index_from_bytes, create_class_index_from_jars};
+use crate::builder::workers::{
+    create_class_index_from_bytes, create_class_index_from_jars, create_class_index_from_sources,
+};
 use crate::builder::BuildTimeInfo;
 use anyhow::anyhow;
 use ascii::IntoAsciiString;
@@ -88,6 +90,54 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
         let (info, class_index) = propagate_error!(
             env,
             create_class_index_from_jars(jar_names),
+            JObject::null().into_raw()
+        );
+
+        env.set_field(
+            &this,
+            jni_str!("classIndexPointer"),
+            jni_sig!("J"),
+            JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
+        )
+        .expect("Unable to set field");
+
+        convert_build_time_info(env, info)
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid...
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromSources(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    jar_names_list: JObject,
+    byte_array_list: JObject,
+) -> jobject {
+    with_jni_env!(env, {
+        propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
+
+        let java_jar_list = env.cast_local::<JList>(jar_names_list).unwrap();
+        let jar_list_size = java_jar_list.size(env).unwrap();
+        let mut jar_names = Vec::with_capacity(jar_list_size as usize);
+        for index in 0..jar_list_size {
+            let value = java_jar_list.get(env, index).unwrap();
+            let string = env.cast_local::<JString>(value).unwrap();
+            jar_names.push(string.try_to_string(env).expect("Not a string"));
+        }
+
+        let java_byte_list = env.cast_local::<JList>(byte_array_list).unwrap();
+        let byte_list_size = java_byte_list.size(env).unwrap();
+        let mut class_bytes = Vec::with_capacity(byte_list_size as usize);
+        for index in 0..byte_list_size {
+            let value = java_byte_list.get(env, index).unwrap();
+            let byte_array = env.cast_local::<JByteArray>(value).unwrap();
+            class_bytes.push(env.convert_byte_array(&byte_array).unwrap());
+        }
+
+        let (info, class_index) = propagate_error!(
+            env,
+            create_class_index_from_sources(jar_names, class_bytes),
             JObject::null().into_raw()
         );
 

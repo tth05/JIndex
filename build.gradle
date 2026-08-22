@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.github.tth05'
-version = providers.gradleProperty('jindexVersion').orElse('1.0.0-SNAPSHOT').get()
+version = providers.gradleProperty('jindexVersion').orElse('1.1.0-SNAPSHOT').get()
 
 repositories {
     mavenCentral()
@@ -24,6 +24,13 @@ test {
         showStandardStreams = true
     }
 }
+
+tasks.register('benchmarkInitialIndex', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.github.tth05.jindex.InitialIndexBenchmark'
+}
+
 def rustProjectDirectory = file("${projectDir}/jindex-rs")
 def nativeLibrary = file("${rustProjectDirectory}/target/release/jindex_rs.dll")
 def generatedNativeResources = layout.buildDirectory.dir('generated-resources/jindex')

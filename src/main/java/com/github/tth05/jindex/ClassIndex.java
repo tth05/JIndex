@@ -138,6 +138,8 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private native BuildTimeInfo createClassIndexFromJars(List<String> classes);
 
+    private native BuildTimeInfo createClassIndexFromSources(List<String> jarFilePaths, List<byte[]> classes);
+
     private native BuildTimeInfo loadClassIndexFromFile(String filePath);
 
     private native IndexedClass findClassNative(String packageName, String className);
@@ -259,6 +261,23 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     public static ClassIndex fromBytes(List<byte[]> classes) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.createClassIndexFromBytes(classes);
+        c.registerCleanup();
+        return c;
+    }
+
+    /**
+     * Creates a class index from archive paths and direct class-file bytes. Direct class files take precedence when
+     * an archive contains a class with the same internal name.
+     *
+     * @param jarFilePaths The JAR or ZIP file paths to index
+     * @param classes      The direct class-file bytes to index
+     * @return The class index
+     */
+    public static ClassIndex fromSources(List<String> jarFilePaths, List<byte[]> classes) {
+        Objects.requireNonNull(jarFilePaths, "jarFilePaths");
+        Objects.requireNonNull(classes, "classes");
+        ClassIndex c = new ClassIndex();
+        c.buildTimeInfo = c.createClassIndexFromSources(jarFilePaths, classes);
         c.registerCleanup();
         return c;
     }
