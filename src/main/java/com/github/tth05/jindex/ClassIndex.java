@@ -2,13 +2,20 @@ package com.github.tth05.jindex;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.ref.Cleaner;
+import java.lang.ref.WeakReference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
-public class ClassIndex extends ClassIndexChildObject {
+public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
+
+    private static final Cleaner CLEANER = Cleaner.create();
+    private static final ConcurrentMap<Long, WeakReference<ClassIndex>> OWNERS = new ConcurrentHashMap<>();
 
     static {
         try (InputStream nativeLibrary = Objects.requireNonNull(
@@ -24,8 +31,9 @@ public class ClassIndex extends ClassIndexChildObject {
         }
     }
 
-    private boolean destroyed;
+    private volatile boolean destroyed;
     private BuildTimeInfo buildTimeInfo;
+    private Cleaner.Cleanable cleanable;
 
     private ClassIndex() {
         super(0, 0);
@@ -39,7 +47,10 @@ public class ClassIndex extends ClassIndexChildObject {
      * @param className   The class name
      * @return The class, or {@code null} if no class matching the input was found
      */
-    public native IndexedClass findClass(String packageName, String className);
+    public IndexedClass findClass(String packageName, String className) {
+        ensureOpen();
+        return findClassNative(packageName, className);
+    }
 
     /**
      * <p>Returns an array of classes which match the given query and the given search options.</p>
@@ -48,7 +59,10 @@ public class ClassIndex extends ClassIndexChildObject {
      * @param options The search options
      * @return The classes which match the query and options, or an empty array if no classes were found
      */
-    public native IndexedClass[] findClasses(String query, SearchOptions options);
+    public IndexedClass[] findClasses(String query, SearchOptions options) {
+        ensureOpen();
+        return findClassesNative(query, options);
+    }
 
     /**
      * <p>Searches for a package which exactly matches the given name. Both '/' and '.' may be used as package
@@ -57,7 +71,10 @@ public class ClassIndex extends ClassIndexChildObject {
      * @param packageName The package name to search for
      * @return The package, or {@code null} if no package with the given name was found
      */
-    public native IndexedPackage findPackage(String packageName);
+    public IndexedPackage findPackage(String packageName) {
+        ensureOpen();
+        return findPackageNative(packageName);
+    }
 
     /**
      * <p>Returns an array of packages which start with the given query. The query is case sensitive. Both '/' and '.'
@@ -72,19 +89,40 @@ public class ClassIndex extends ClassIndexChildObject {
      * @param query The query to search for
      * @return An array of packages, or an empty array if no packages were found
      */
-    public native IndexedPackage[] findPackages(String query);
+    public IndexedPackage[] findPackages(String query) {
+        ensureOpen();
+        return findPackagesNative(query);
+    }
 
     public List<String> findMethods(String query, int limit) {
         throw new UnsupportedOperationException();
     }
 
-    public native void saveToFile(String filePath);
+    public void saveToFile(String filePath) {
+        ensureOpen();
+        saveToFileNative(filePath);
+    }
 
     /**
-     * Drops all natively managed memory used by this class index. Any further attempt to use this class index will
-     * result in a JVM crash.
+     * Drops all natively managed memory used by this class index. This method is idempotent. Objects obtained from
+     * this index must not be used after it is destroyed.
      */
-    public native void destroy();
+    public void destroy() {
+        close();
+    }
+
+    @Override
+    public synchronized void close() {
+        if (this.destroyed) {
+            return;
+        }
+
+        this.destroyed = true;
+        long pointer = classIndexPointer();
+        OWNERS.remove(pointer);
+        this.cleanable.clean();
+        clearClassIndexPointer();
+    }
 
     /**
      * @return {@code true} if this class index has been destroyed and is deemed unusable, {@code false} otherwise
@@ -99,12 +137,49 @@ public class ClassIndex extends ClassIndexChildObject {
 
     private native BuildTimeInfo loadClassIndexFromFile(String filePath);
 
-    @Override
-    protected void finalize() {
-        if (this.destroyed)
-            return;
+    private native IndexedClass findClassNative(String packageName, String className);
 
-        destroy();
+    private native IndexedClass[] findClassesNative(String query, SearchOptions options);
+
+    private native IndexedPackage findPackageNative(String packageName);
+
+    private native IndexedPackage[] findPackagesNative(String query);
+
+    private native void saveToFileNative(String filePath);
+
+    private static native void destroyPointer(long pointer);
+
+    private void ensureOpen() {
+        if (this.destroyed) {
+            throw new IllegalStateException("This class index has been destroyed");
+        }
+    }
+
+    private void registerCleanup() {
+        long pointer = classIndexPointer();
+        if (pointer == 0) {
+            throw new IllegalStateException("The native class index was not initialized");
+        }
+
+        OWNERS.put(pointer, new WeakReference<>(this));
+        this.cleanable = CLEANER.register(this, new NativeCleanup(pointer));
+        this.destroyed = false;
+    }
+
+    static ClassIndex ownerFor(long pointer) {
+        WeakReference<ClassIndex> reference = OWNERS.get(pointer);
+        ClassIndex owner = reference == null ? null : reference.get();
+        if (owner == null) {
+            throw new IllegalStateException("The native class index owner is unavailable");
+        }
+        return owner;
+    }
+
+    private record NativeCleanup(long pointer) implements Runnable {
+        @Override
+        public void run() {
+            destroyPointer(this.pointer);
+        }
     }
 
     /**
@@ -123,7 +198,7 @@ public class ClassIndex extends ClassIndexChildObject {
     public static ClassIndex fromJars(List<String> jarFilePaths) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.createClassIndexFromJars(jarFilePaths);
-        c.destroyed = false;
+        c.registerCleanup();
         return c;
     }
 
@@ -136,7 +211,7 @@ public class ClassIndex extends ClassIndexChildObject {
     public static ClassIndex fromBytes(List<byte[]> classes) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.createClassIndexFromBytes(classes);
-        c.destroyed = false;
+        c.registerCleanup();
         return c;
     }
 
@@ -149,7 +224,7 @@ public class ClassIndex extends ClassIndexChildObject {
     public static ClassIndex fromFile(String path) {
         ClassIndex c = new ClassIndex();
         c.buildTimeInfo = c.loadClassIndexFromFile(path);
-        c.destroyed = false;
+        c.registerCleanup();
         return c;
     }
 }

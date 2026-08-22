@@ -76,5 +76,5 @@ dependencies {
 ## Development
 
 - Clone the repo
-- Run `cargo build` or `cargo test` for the rust side
-- Run the `copyNativeLibrary` task and then any test for the java side
+- Install Java 21 and the stable Rust toolchain
+- Run `./gradlew build`; the build compiles the native library before packaging and testing the Java API

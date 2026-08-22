@@ -11,33 +11,25 @@ use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
 use crate::constant_pool::{MatchMode, SearchMode, SearchOptions};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
-use crate::jni::cache::{cached_field_ids, get_class_index, init_field_ids};
+use crate::jni::cache::{get_class_index, init_field_ids};
 use crate::jni::{get_enum_ordinal, propagate_error};
 use crate::package_index::IndexedPackage;
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroy(
-    env: JNIEnv,
-    this: JObject,
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroyPointer(
+    _env: JNIEnv,
+    _class: JObject,
+    pointer: jlong,
 ) {
-    let _class_index = Box::from_raw(get_class_index(env, this).0 as *mut ClassIndex);
-
-    env.set_field_unchecked(
-        this,
-        cached_field_ids().class_index_pointer,
-        JValue::Long(0i64),
-    )
-    .expect("Unable to set field");
-    env.set_field(this, "destroyed", "Z", JValue::Bool(1))
-        .expect("Unable to set field");
+    let _class_index = Box::from_raw(pointer as *mut ClassIndex);
 }
 
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndex(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromBytes(
     env: JNIEnv,
     this: JObject,
     byte_array_list: JObject,
@@ -107,7 +99,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFile(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_saveToFileNative(
     env: JNIEnv,
     this: JObject,
     path: JString,
@@ -186,7 +178,7 @@ macro_rules! java_to_ascii_string {
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasses(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClassesNative(
     env: JNIEnv,
     this: JObject,
     input: JString,
@@ -284,7 +276,7 @@ unsafe fn convert_search_options(env: JNIEnv, options: JObject) -> anyhow::Resul
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClassNative(
     env: JNIEnv,
     this: JObject,
     i_package_name: JString,
@@ -318,7 +310,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClass(
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackage(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackageNative(
     env: JNIEnv,
     this: JObject,
     i_package_name: JString,
@@ -350,7 +342,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackages(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackagesNative(
     env: JNIEnv,
     this: JObject,
     query: JString,

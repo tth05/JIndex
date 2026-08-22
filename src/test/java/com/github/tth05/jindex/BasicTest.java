@@ -21,15 +21,16 @@ public class BasicTest {
     @BeforeAll
     public void init() {
         SampleClassesHelper.createSamplesJar();
-        ClassIndex tempIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
-        tempIndex.saveToFile("index");
+        try (ClassIndex tempIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"))) {
+            tempIndex.saveToFile("index");
+            System.out.println(tempIndex.getBuildTimeInfo().toFormattedString());
+        }
         this.index = ClassIndex.fromFile("index");
-
-        System.out.println(tempIndex.getBuildTimeInfo().toFormattedString());
     }
 
     @AfterAll
     public void cleanup() {
+        this.index.close();
         assertDoesNotThrow(() -> Files.deleteIfExists(Paths.get("index")));
     }
 
@@ -38,6 +39,22 @@ public class BasicTest {
         IndexedClass singleClass = index.findClass("java/lang", "String");
         assertNotNull(singleClass);
         assertEquals("java/lang/String", singleClass.getNameWithPackage());
+    }
+
+    @Test
+    public void testBuildFromBytes() {
+        try (ClassIndex byteIndex = ClassIndex.fromBytes(SampleClassesHelper.loadSampleClasses())) {
+            assertNotNull(byteIndex.findClass("java/lang", "String"));
+        }
+    }
+
+    @Test
+    public void testCloseIsIdempotentAndGuardsIndexOperations() {
+        ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
+        closedIndex.close();
+        assertDoesNotThrow(closedIndex::close);
+        assertTrue(closedIndex.isDestroyed());
+        assertThrows(IllegalStateException.class, () -> closedIndex.findClass("java/lang", "String"));
     }
 
     @Test

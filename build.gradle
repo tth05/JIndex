@@ -3,18 +3,19 @@ plugins {
     id 'maven-publish'
 }
 
-group 'com.github.tth05'
+group = 'com.github.tth05'
 var ver = System.getenv("GITHUB_REF") ?: "dev"
-version ver.replaceAll("^refs/tags/v", "")
+version = ver.replaceAll("^refs/tags/v", "")
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    testImplementation 'io.github.classgraph:classgraph:4.8.146'
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.2'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.2'
+    testImplementation 'io.github.classgraph:classgraph:4.8.193'
+    testImplementation platform('org.junit:junit-bom:6.1.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 test {
@@ -37,9 +38,18 @@ tasks.register('buildNativeLibrary', Exec) {
     }
 }
 
+tasks.named('processResources') {
+    dependsOn tasks.named('buildNativeLibrary')
+}
+
 java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
     withSourcesJar()
     withJavadocJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
 }
 
 publishing {
@@ -50,7 +60,7 @@ publishing {
     }
     repositories {
         maven {
-            url "https://packagecloud.io/tth05/repo/java/maven2/"
+            url = "https://packagecloud.io/tth05/repo/java/maven2/"
             credentials {
                 username = System.getenv("PACKAGECLOUD_TOKEN")
                 password = ""
