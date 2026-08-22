@@ -1,10 +1,13 @@
 package com.github.tth05.jindex;
 
+import java.util.Objects;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+
 abstract class ClassIndexChildObject {
 
     private volatile long classIndexPointer;
     private final long pointer;
-    @SuppressWarnings("FieldCanBeLocal")
     private final ClassIndex owner;
 
     public ClassIndexChildObject(long classIndexPointer, long pointer) {
@@ -19,5 +22,13 @@ abstract class ClassIndexChildObject {
 
     final void clearClassIndexPointer() {
         this.classIndexPointer = 0;
+    }
+
+    final <T> T executeWhileOwnerOpen(Supplier<T> operation) {
+        return Objects.requireNonNull(this.owner, "Class index owner").executeWhileOpen(operation);
+    }
+
+    final int executeWhileOwnerOpen(IntSupplier operation) {
+        return Objects.requireNonNull(this.owner, "Class index owner").executeWhileOpen(operation);
     }
 }

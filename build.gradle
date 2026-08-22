@@ -25,21 +25,32 @@ test {
         showStandardStreams = true
     }
 }
-tasks.register('buildNativeLibrary', Exec) {
-    workingDir "${projectDir}/jindex-rs"
-    commandLine "cargo", "build", "--release"
+def rustProjectDirectory = file("${projectDir}/jindex-rs")
+def nativeLibrary = file("${rustProjectDirectory}/target/release/jindex_rs.dll")
+def generatedNativeResources = layout.buildDirectory.dir('generated-resources/jindex')
 
-    doLast {
-        copy {
-            from "${projectDir}/jindex-rs/target/release"
-            into "${projectDir}/src/main/resources/jindex_natives"
-            include "jindex_rs.dll"
-        }
-    }
+tasks.register('buildNativeLibrary', Exec) {
+    inputs.files(fileTree(rustProjectDirectory) {
+        include 'src/**'
+        include 'Cargo.toml'
+        include 'Cargo.lock'
+        include 'rust-toolchain.toml'
+    })
+    outputs.file(nativeLibrary)
+
+    workingDir "${projectDir}/jindex-rs"
+    commandLine 'cargo', 'build', '--release', '--locked'
+}
+
+tasks.register('stageNativeLibrary', Sync) {
+    dependsOn tasks.named('buildNativeLibrary')
+    from nativeLibrary
+    into generatedNativeResources.map { it.dir('jindex_natives') }
 }
 
 tasks.named('processResources') {
-    dependsOn tasks.named('buildNativeLibrary')
+    dependsOn tasks.named('stageNativeLibrary')
+    from generatedNativeResources
 }
 
 java {

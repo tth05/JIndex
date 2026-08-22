@@ -1,6 +1,6 @@
 package com.github.tth05.jindex;
 
-public class IndexedPackage extends ClassIndexChildObject{
+public class IndexedPackage extends ClassIndexChildObject {
 
     public IndexedPackage(long classIndexPointer, long pointer) {
         super(classIndexPointer, pointer);
@@ -9,25 +9,45 @@ public class IndexedPackage extends ClassIndexChildObject{
     /**
      * @return The name of this package part
      */
-    public native String getName();
+    public String getName() {
+        return executeWhileOwnerOpen(this::getNameNative);
+    }
 
     /**
      * @return The name of this package including all parents
      */
-    public native String getNameWithParents();
+    public String getNameWithParents() {
+        return executeWhileOwnerOpen(this::getNameWithParentsNative);
+    }
 
     /**
      * @return Same as {@link #getNameWithParents()}, but using '.' as the package separator
      */
-    public native String getNameWithParentsDot();
+    public String getNameWithParentsDot() {
+        return executeWhileOwnerOpen(this::getNameWithParentsDotNative);
+    }
 
     /**
      * @return All classes which are members of this package, or an empty array if there are none
      */
-    public native IndexedClass[] getClasses();
+    public IndexedClass[] getClasses() {
+        return executeWhileOwnerOpen(this::getClassesNative);
+    }
 
     /**
      * @return All packages which are members of this package, or an empty array if there are none
      */
-    public native IndexedPackage[] getSubPackages();
+    public IndexedPackage[] getSubPackages() {
+        return executeWhileOwnerOpen(this::getSubPackagesNative);
+    }
+
+    private native String getNameNative();
+
+    private native String getNameWithParentsNative();
+
+    private native String getNameWithParentsDotNative();
+
+    private native IndexedClass[] getClassesNative();
+
+    private native IndexedPackage[] getSubPackagesNative();
 }

@@ -12,7 +12,7 @@ use jni::JNIEnv;
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -31,7 +31,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getName(
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourceName(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourceNameNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -53,7 +53,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourc
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPackage(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPackageNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobject {
@@ -84,7 +84,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getPacka
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameWithPackage(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameWithPackageNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -106,7 +106,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameWithPackageDot(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameWithPackageDotNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -130,7 +130,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getNameW
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAccessFlags(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAccessFlagsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jint {
@@ -146,7 +146,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAcces
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getFields(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getFieldsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -191,7 +191,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getField
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMethods(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMethodsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -236,7 +236,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMetho
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuperClass(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuperClassNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobject {
@@ -288,7 +288,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInterfaces(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInterfacesNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -347,7 +347,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInter
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGenericSignatureString(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGenericSignatureStringNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -381,7 +381,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclosingClass(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclosingClassNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobject {
@@ -435,7 +435,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getInner
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclosingMethodNameAndDesc(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclosingMethodNameAndDescNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -476,7 +476,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getEnclo
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMemberClasses(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMemberClassesNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -519,7 +519,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getMembe
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_findImplementations(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_findImplementationsNative(
     env: JNIEnv,
     this: JObject,
     direct_sub_types_only: jboolean,

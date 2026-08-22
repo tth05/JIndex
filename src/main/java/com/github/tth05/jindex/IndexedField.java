@@ -9,22 +9,38 @@ public class IndexedField extends ClassChildObject {
     /**
      * @return The name of this field
      */
-    public native String getName();
+    public String getName() {
+        return executeWhileOwnerOpen(this::getNameNative);
+    }
 
     /**
      * @return The modifiers of this field
      */
-    public native int getAccessFlags();
+    public int getAccessFlags() {
+        return executeWhileOwnerOpen(this::getAccessFlagsNative);
+    }
 
     /**
      * @return The descriptor of this field's type
      */
-    public native String getDescriptorString();
+    public String getDescriptorString() {
+        return executeWhileOwnerOpen(this::getDescriptorStringNative);
+    }
 
     /**
      * @return The generic signature of this field, or {@code null} if this field's type is not generic
      */
-    public native String getGenericSignatureString();
+    public String getGenericSignatureString() {
+        return executeWhileOwnerOpen(this::getGenericSignatureStringNative);
+    }
+
+    private native String getNameNative();
+
+    private native int getAccessFlagsNative();
+
+    private native String getDescriptorStringNative();
+
+    private native String getGenericSignatureStringNative();
 
     @Override
     public String toString() {

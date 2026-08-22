@@ -15,7 +15,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.1
       - name: Build with Gradle
         env:
           PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}

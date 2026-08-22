@@ -76,5 +76,5 @@ dependencies {
 ## Development
 
 - Clone the repo
-- Install Java 21 and the stable Rust toolchain
-- Run `./gradlew build`; the build compiles the native library before packaging and testing the Java API
+- Install Java 21 and Rust 1.97.1
+- Run `./gradlew build`; the build compiles the locked native dependency graph, stages the DLL under `build/`, then packages and tests the Java API

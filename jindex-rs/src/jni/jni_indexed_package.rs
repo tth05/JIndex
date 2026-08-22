@@ -8,7 +8,7 @@ use jni::JNIEnv;
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getName(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -27,7 +27,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameWithParents(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameWithParentsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -49,7 +49,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameWithParentsDot(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNameWithParentsDotNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -73,7 +73,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSubPackages(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSubPackagesNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -122,7 +122,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getSub
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getClasses(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getClassesNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {

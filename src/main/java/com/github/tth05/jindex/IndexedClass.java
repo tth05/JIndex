@@ -11,7 +11,9 @@ public class IndexedClass extends ClassIndexChildObject {
     /**
      * @return The full name of the class, e.g. "String", "String$1LocalClass", "String$1$2$Class"
      */
-    public native String getName();
+    public String getName() {
+        return executeWhileOwnerOpen(this::getNameNative);
+    }
 
     /**
      * Returns the name of the class as it appears in the source code. The name is extracted from the inner class
@@ -28,7 +30,9 @@ public class IndexedClass extends ClassIndexChildObject {
      *
      * @return The name of the class as it appears in the source code
      */
-    public native String getSourceName();
+    public String getSourceName() {
+        return executeWhileOwnerOpen(this::getSourceNameNative);
+    }
 
     /**
      * <p>The package of this class. If this class is not in a package, this will be the empty package which has an empty
@@ -36,40 +40,52 @@ public class IndexedClass extends ClassIndexChildObject {
      *
      * @return The package of this class
      */
-    public native IndexedPackage getPackage();
+    public IndexedPackage getPackage() {
+        return executeWhileOwnerOpen(this::getPackageNative);
+    }
 
     /**
      * @return The name of this class including the package, e.g. "java/lang/String"
      */
-    public native String getNameWithPackage();
+    public String getNameWithPackage() {
+        return executeWhileOwnerOpen(this::getNameWithPackageNative);
+    }
 
     /**
      * @return The same as {@link #getNameWithPackage()}, but using '.' as the package separator
      */
-    public native String getNameWithPackageDot();
+    public String getNameWithPackageDot() {
+        return executeWhileOwnerOpen(this::getNameWithPackageDotNative);
+    }
 
     /**
      * @return The generic signature of this class as it may be found in the 'Signature' attribute of a class file, or
      * {@code null} if this class does not have a generic signature
      */
-    public native String getGenericSignatureString();
+    public String getGenericSignatureString() {
+        return executeWhileOwnerOpen(this::getGenericSignatureStringNative);
+    }
 
     /**
      * @return The enclosing class of this class, or {@code null} if this class is not an inner class
      */
-    public native IndexedClass getEnclosingClass();
+    public IndexedClass getEnclosingClass() {
+        return executeWhileOwnerOpen(this::getEnclosingClassNative);
+    }
 
     /**
      * @return The enclosing method name and descriptor of this class, or {@code null} if this class is not enclosed by
      * a method. The returned value might look like this: <code>foo(Ljava/lang/String;)V</code>
      */
-    public native String getEnclosingMethodNameAndDesc();
+    public String getEnclosingMethodNameAndDesc() {
+        return executeWhileOwnerOpen(this::getEnclosingMethodNameAndDescNative);
+    }
 
     /**
      * @return The inner class type of this class, or {@code null} if this class is not an inner class
      */
     public InnerClassType getInnerClassType() {
-        int type = getInnerClassType0();
+        int type = executeWhileOwnerOpen(this::getInnerClassType0);
         if (type < 0)
             return null;
 
@@ -81,7 +97,9 @@ public class IndexedClass extends ClassIndexChildObject {
     /**
      * @return All inner classes of this class with the {@link InnerClassType#MEMBER} type
      */
-    public native IndexedClass[] getMemberClasses();
+    public IndexedClass[] getMemberClasses() {
+        return executeWhileOwnerOpen(this::getMemberClassesNative);
+    }
 
     /**
      * Returns all class which implemented this class.
@@ -89,33 +107,75 @@ public class IndexedClass extends ClassIndexChildObject {
      * @param directSubTypesOnly Whether to only return direct subtypes or not
      * @return All classes which implemented this class, or an empty array if none were found
      */
-    public native IndexedClass[] findImplementations(boolean directSubTypesOnly);
+    public IndexedClass[] findImplementations(boolean directSubTypesOnly) {
+        return executeWhileOwnerOpen(() -> findImplementationsNative(directSubTypesOnly));
+    }
 
     /**
      * @return The super class of this class, or {@code null} if this class is {@code java/lang/Object} or if the super class is unresolved
      */
-    public native IndexedClass getSuperClass();
+    public IndexedClass getSuperClass() {
+        return executeWhileOwnerOpen(this::getSuperClassNative);
+    }
 
     /**
      * @return The interfaces implemented by this class, or an empty array if this class does not implement any
      * interfaces
      */
-    public native IndexedClass[] getInterfaces();
+    public IndexedClass[] getInterfaces() {
+        return executeWhileOwnerOpen(this::getInterfacesNative);
+    }
 
     /**
      * @return The fields of this class
      */
-    public native IndexedField[] getFields();
+    public IndexedField[] getFields() {
+        return executeWhileOwnerOpen(this::getFieldsNative);
+    }
 
     /**
      * @return The methods of this class
      */
-    public native IndexedMethod[] getMethods();
+    public IndexedMethod[] getMethods() {
+        return executeWhileOwnerOpen(this::getMethodsNative);
+    }
 
     /**
      * @return The modifiers of this class
      */
-    public native int getAccessFlags();
+    public int getAccessFlags() {
+        return executeWhileOwnerOpen(this::getAccessFlagsNative);
+    }
+
+    private native String getNameNative();
+
+    private native String getSourceNameNative();
+
+    private native IndexedPackage getPackageNative();
+
+    private native String getNameWithPackageNative();
+
+    private native String getNameWithPackageDotNative();
+
+    private native String getGenericSignatureStringNative();
+
+    private native IndexedClass getEnclosingClassNative();
+
+    private native String getEnclosingMethodNameAndDescNative();
+
+    private native IndexedClass[] getMemberClassesNative();
+
+    private native IndexedClass[] findImplementationsNative(boolean directSubTypesOnly);
+
+    private native IndexedClass getSuperClassNative();
+
+    private native IndexedClass[] getInterfacesNative();
+
+    private native IndexedField[] getFieldsNative();
+
+    private native IndexedMethod[] getMethodsNative();
+
+    private native int getAccessFlagsNative();
 
     @Override
     public String toString() {

@@ -11,6 +11,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
@@ -34,6 +37,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     private volatile boolean destroyed;
     private BuildTimeInfo buildTimeInfo;
     private Cleaner.Cleanable cleanable;
+    private final ReentrantReadWriteLock lifecycleLock = new ReentrantReadWriteLock(true);
 
     private ClassIndex() {
         super(0, 0);
@@ -48,8 +52,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The class, or {@code null} if no class matching the input was found
      */
     public IndexedClass findClass(String packageName, String className) {
-        ensureOpen();
-        return findClassNative(packageName, className);
+        return executeWhileOpen(() -> findClassNative(packageName, className));
     }
 
     /**
@@ -60,8 +63,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The classes which match the query and options, or an empty array if no classes were found
      */
     public IndexedClass[] findClasses(String query, SearchOptions options) {
-        ensureOpen();
-        return findClassesNative(query, options);
+        return executeWhileOpen(() -> findClassesNative(query, options));
     }
 
     /**
@@ -72,8 +74,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The package, or {@code null} if no package with the given name was found
      */
     public IndexedPackage findPackage(String packageName) {
-        ensureOpen();
-        return findPackageNative(packageName);
+        return executeWhileOpen(() -> findPackageNative(packageName));
     }
 
     /**
@@ -90,8 +91,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return An array of packages, or an empty array if no packages were found
      */
     public IndexedPackage[] findPackages(String query) {
-        ensureOpen();
-        return findPackagesNative(query);
+        return executeWhileOpen(() -> findPackagesNative(query));
     }
 
     public List<String> findMethods(String query, int limit) {
@@ -99,8 +99,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     }
 
     public void saveToFile(String filePath) {
-        ensureOpen();
-        saveToFileNative(filePath);
+        executeWhileOpen(() -> saveToFileNative(filePath));
     }
 
     /**
@@ -112,16 +111,20 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
-        if (this.destroyed) {
-            return;
-        }
+    public void close() {
+        var writeLock = this.lifecycleLock.writeLock();
+        writeLock.lock();
+        try {
+            if (this.destroyed) {
+                return;
+            }
 
-        this.destroyed = true;
-        long pointer = classIndexPointer();
-        OWNERS.remove(pointer);
-        this.cleanable.clean();
-        clearClassIndexPointer();
+            this.destroyed = true;
+            this.cleanable.clean();
+            clearClassIndexPointer();
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     /**
@@ -151,7 +154,43 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private void ensureOpen() {
         if (this.destroyed) {
-            throw new IllegalStateException("This class index has been destroyed");
+            throw new IllegalStateException("Class index is closed");
+        }
+    }
+
+    final <T> T executeWhileOpen(Supplier<T> operation) {
+        Objects.requireNonNull(operation, "operation");
+        var readLock = this.lifecycleLock.readLock();
+        readLock.lock();
+        try {
+            ensureOpen();
+            return operation.get();
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    final int executeWhileOpen(IntSupplier operation) {
+        Objects.requireNonNull(operation, "operation");
+        var readLock = this.lifecycleLock.readLock();
+        readLock.lock();
+        try {
+            ensureOpen();
+            return operation.getAsInt();
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    final void executeWhileOpen(Runnable operation) {
+        Objects.requireNonNull(operation, "operation");
+        var readLock = this.lifecycleLock.readLock();
+        readLock.lock();
+        try {
+            ensureOpen();
+            operation.run();
+        } finally {
+            readLock.unlock();
         }
     }
 
@@ -161,9 +200,17 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
             throw new IllegalStateException("The native class index was not initialized");
         }
 
-        OWNERS.put(pointer, new WeakReference<>(this));
-        this.cleanable = CLEANER.register(this, new NativeCleanup(pointer));
-        this.destroyed = false;
+        WeakReference<ClassIndex> ownerReference = new WeakReference<>(this);
+        OWNERS.put(pointer, ownerReference);
+        try {
+            this.cleanable = CLEANER.register(this, new NativeCleanup(pointer, ownerReference));
+            this.destroyed = false;
+        } catch (RuntimeException | Error e) {
+            OWNERS.remove(pointer, ownerReference);
+            destroyPointer(pointer);
+            clearClassIndexPointer();
+            throw e;
+        }
     }
 
     static ClassIndex ownerFor(long pointer) {
@@ -175,9 +222,10 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         return owner;
     }
 
-    private record NativeCleanup(long pointer) implements Runnable {
+    private record NativeCleanup(long pointer, WeakReference<ClassIndex> ownerReference) implements Runnable {
         @Override
         public void run() {
+            OWNERS.remove(this.pointer, this.ownerReference);
             destroyPointer(this.pointer);
         }
     }

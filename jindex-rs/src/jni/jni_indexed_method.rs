@@ -11,7 +11,7 @@ use jni::JNIEnv;
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getNameNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -30,7 +30,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getName
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDeclaringClass(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDeclaringClassNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobject {
@@ -54,7 +54,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDecl
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAccessFlags(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAccessFlagsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jint {
@@ -70,7 +70,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getAcce
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDescriptorString(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDescriptorStringNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -112,7 +112,7 @@ unsafe fn collect_method_type_parameters<'a>(
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGenericSignatureString(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGenericSignatureStringNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -146,7 +146,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExceptions(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExceptionsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -219,7 +219,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExce
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImplementations(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImplementationsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {
@@ -265,7 +265,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findImp
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findBaseMethods(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_findBaseMethodsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jobjectArray {

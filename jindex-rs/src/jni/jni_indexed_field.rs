@@ -10,7 +10,7 @@ use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIn
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getNameNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -29,7 +29,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getName(
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAccessFlags(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAccessFlagsNative(
     env: JNIEnv,
     this: JObject,
 ) -> jint {
@@ -45,7 +45,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getAcces
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescriptorString(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescriptorStringNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {
@@ -74,7 +74,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescr
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getGenericSignatureString(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getGenericSignatureStringNative(
     env: JNIEnv,
     this: JObject,
 ) -> jstring {

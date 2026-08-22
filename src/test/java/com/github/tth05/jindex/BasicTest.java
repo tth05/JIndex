@@ -4,12 +4,19 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.function.Executable;
 
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -54,7 +61,63 @@ public class BasicTest {
         closedIndex.close();
         assertDoesNotThrow(closedIndex::close);
         assertTrue(closedIndex.isDestroyed());
-        assertThrows(IllegalStateException.class, () -> closedIndex.findClass("java/lang", "String"));
+        assertClosed(() -> closedIndex.findClass("java/lang", "String"));
+    }
+
+    @Test
+    public void testRetainedChildrenAreGuardedAfterClose() {
+        ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
+        try {
+            IndexedClass indexedClass = closedIndex.findClass("java/lang", "String");
+            assertNotNull(indexedClass);
+            IndexedPackage indexedPackage = indexedClass.getPackage();
+            IndexedField indexedField = indexedClass.getFields()[0];
+            IndexedMethod indexedMethod = indexedClass.getMethods()[0];
+
+            closedIndex.close();
+
+            assertClosed(indexedClass::getName);
+            assertClosed(indexedPackage::getName);
+            assertClosed(indexedField::getName);
+            assertClosed(indexedMethod::getName);
+        } finally {
+            closedIndex.close();
+        }
+    }
+
+    @Test
+    public void testCloseWaitsForInFlightOperation() throws Exception {
+        ClassIndex concurrentIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
+        CountDownLatch operationStarted = new CountDownLatch(1);
+        CountDownLatch releaseOperation = new CountDownLatch(1);
+        CountDownLatch closeStarted = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        Future<?> operation = executor.submit(() -> concurrentIndex.executeWhileOpen(() -> {
+            operationStarted.countDown();
+            await(releaseOperation);
+        }));
+
+        try {
+            assertTrue(operationStarted.await(5, TimeUnit.SECONDS));
+            Future<?> close = executor.submit(() -> {
+                closeStarted.countDown();
+                concurrentIndex.close();
+            });
+
+            assertTrue(closeStarted.await(5, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> close.get(250, TimeUnit.MILLISECONDS));
+
+            releaseOperation.countDown();
+            operation.get(5, TimeUnit.SECONDS);
+            close.get(5, TimeUnit.SECONDS);
+            assertTrue(concurrentIndex.isDestroyed());
+            assertClosed(() -> concurrentIndex.findClass("java/lang", "String"));
+        } finally {
+            releaseOperation.countDown();
+            concurrentIndex.close();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
     }
 
     @Test
@@ -78,5 +141,21 @@ public class BasicTest {
 
         assertTrue(Arrays.stream(resultClass.getMethods())
                 .anyMatch(method -> method.getName().equals("lastIndexOf")));
+    }
+
+    private static void assertClosed(Executable operation) {
+        IllegalStateException exception = assertThrows(IllegalStateException.class, operation);
+        assertEquals("Class index is closed", exception.getMessage());
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("Timed out waiting to release the in-flight index operation");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting to release the in-flight index operation", e);
+        }
     }
 }
