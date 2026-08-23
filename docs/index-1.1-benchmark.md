@@ -85,6 +85,12 @@ The migration was checked against the same production corpus. It selects exactly
 
 One production class contains the method `generateGrötzschGraph`. JVM member names may be Unicode, but JIndex's compact declaration-name pool and search API remain ASCII-only. The builder therefore retains that class and its 77 supported methods while excluding the one unsupported declaration, which is the previous format's behavior. Other parse failures now identify the archive and entry and fail the build instead of silently omitting a class.
 
+## Runtime archive view
+
+Archive indexing now applies the Java multi-release JAR rules before parsing classes. A manifest opt-in selects the highest `META-INF/versions/<N>` entry no newer than the configured target Java release; ordinary archives ignore versioned entries. `IndexBuildOptions` makes that release explicit and defaults to the running JVM.
+
+This correctness change establishes the new production totals at 170,212 classes, 584,761 fields, and 1,244,596 methods. The previous reader parsed every versioned entry and resolved same-source duplicates after parallel parsing, so its 170,213/584,761/1,244,579 totals did not describe one real runtime view. The unit suite checks Java 17 and Java 21 views of a multi-release fixture and confirms that a non-multi-release archive exposes only its base class.
+
 ## Comparison rules
 
 Every format experiment must use the same manifest, Java runtime, and benchmark process shape. Report at least:

@@ -7,7 +7,7 @@ use anyhow::{anyhow, ensure};
 use ascii::IntoAsciiString;
 use jni::objects::{JByteArray, JIntArray, JList, JObject, JString, JValue};
 use jni::strings::JNIString;
-use jni::sys::{jlong, jobject, jobjectArray};
+use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::{jni_sig, jni_str, Env, EnvUnowned};
 use std::ops::Deref;
 
@@ -76,6 +76,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     mut env: EnvUnowned<'_>,
     this: JObject,
     jar_names_list: JObject,
+    target_java_release: jint,
 ) -> jobject {
     with_jni_env!(env, {
         propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
@@ -88,10 +89,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
             let string = env.cast_local::<JString>(ar).unwrap();
             jar_names.push(string.try_to_string(env).expect("Not a string"));
         }
+        let target_java_release = propagate_error!(
+            env,
+            require_positive_java_release(target_java_release),
+            JObject::null().into_raw()
+        );
 
         let (info, class_index) = propagate_error!(
             env,
-            create_class_index_from_jars(jar_names),
+            create_class_index_from_jars(jar_names, target_java_release),
             JObject::null().into_raw()
         );
 
@@ -119,6 +125,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
     byte_array_list: JObject,
     class_source_ids_array: JObject,
     class_input_orders_array: JObject,
+    target_java_release: jint,
 ) -> jobject {
     with_jni_env!(env, {
         propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
@@ -181,6 +188,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
             JObject::null().into_raw()
         );
 
+        let target_java_release = propagate_error!(
+            env,
+            require_positive_java_release(target_java_release),
+            JObject::null().into_raw()
+        );
         let jar_sources = jar_names
             .into_iter()
             .zip(jar_source_ids)
@@ -188,6 +200,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
             .map(|((file_name, source_id), input_order)| ArchiveSource {
                 source_id,
                 input_order,
+                target_java_release,
                 file_name,
             })
             .collect();
@@ -218,6 +231,13 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 
         convert_build_time_info(env, info)
     })
+}
+
+fn require_positive_java_release(release: jint) -> anyhow::Result<u32> {
+    let release =
+        u32::try_from(release).map_err(|_| anyhow!("targetJavaRelease must be positive"))?;
+    ensure!(release > 0, "targetJavaRelease must be positive");
+    Ok(release)
 }
 
 fn read_nonnegative_int_array(

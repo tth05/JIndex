@@ -2,10 +2,12 @@ use crate::builder::{BuildTimeInfo, ClassIndexBuilder, ClassInfo};
 use crate::class_index::ClassIndex;
 use anyhow::{anyhow, Context};
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use std::fs::File;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 use std::path::Path;
 use std::time::Instant;
+use zip::result::ZipError;
 use zip::ZipArchive;
 
 fn do_multi_threaded<I, F, O>(queue: Vec<I>, func: &F) -> anyhow::Result<Vec<O>>
@@ -23,6 +25,7 @@ where
 pub(crate) struct ArchiveSource {
     pub source_id: u32,
     pub input_order: u32,
+    pub target_java_release: u32,
     pub file_name: String,
 }
 
@@ -36,6 +39,7 @@ fn process_jar_worker(source: ArchiveSource) -> anyhow::Result<Vec<ClassInfo>> {
     let ArchiveSource {
         source_id,
         input_order,
+        target_java_release,
         file_name,
     } = source;
     let mut file_buf = Vec::new();
@@ -54,15 +58,38 @@ fn process_jar_worker(source: ArchiveSource) -> anyhow::Result<Vec<ClassInfo>> {
 
     let mut archive = ZipArchive::new(Cursor::new(&file_buf))
         .with_context(|| format!("Failed to read zip file {}", file_name))?;
+    let multi_release = is_multi_release(&mut archive)?;
+    let mut selected_entries: FxHashMap<String, (u32, usize)> = FxHashMap::default();
 
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i)?;
-        if entry.is_dir()
-            || !entry.name().ends_with(".class")
-            || entry.name() == "module-info.class"
+        let entry = archive.by_index(i)?;
+        if entry.is_dir() {
+            continue;
+        }
+
+        let Some((version, logical_name)) = archive_class_name(entry.name()) else {
+            continue;
+        };
+        if logical_name == "module-info.class"
+            || version > target_java_release
+            || (version > 0 && !multi_release)
         {
             continue;
         }
+        selected_entries
+            .entry(logical_name.to_owned())
+            .and_modify(|selected| {
+                if version > selected.0 {
+                    *selected = (version, i);
+                }
+            })
+            .or_insert((version, i));
+    }
+
+    let mut selected_entries = selected_entries.into_iter().collect::<Vec<_>>();
+    selected_entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    for (_, (_, entry_index)) in selected_entries {
+        let mut entry = archive.by_index(entry_index)?;
 
         let mut data = Vec::with_capacity(entry.size() as usize);
         entry
@@ -84,6 +111,7 @@ fn process_jar_worker(source: ArchiveSource) -> anyhow::Result<Vec<ClassInfo>> {
 
 pub fn create_class_index_from_jars(
     jar_names: Vec<String>,
+    target_java_release: u32,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let jar_sources = jar_names
         .into_iter()
@@ -94,11 +122,70 @@ pub fn create_class_index_from_jars(
             Ok(ArchiveSource {
                 source_id: input_order,
                 input_order,
+                target_java_release,
                 file_name,
             })
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     create_class_index_from_sources(jar_sources, Vec::new())
+}
+
+fn archive_class_name(name: &str) -> Option<(u32, &str)> {
+    const VERSIONS_PREFIX: &str = "META-INF/versions/";
+
+    if !name.ends_with(".class") {
+        return None;
+    }
+    let Some(versioned_name) = name.strip_prefix(VERSIONS_PREFIX) else {
+        return Some((0, name));
+    };
+    let (version, logical_name) = versioned_name.split_once('/')?;
+    let version = version.parse::<u32>().ok()?;
+    (version >= 9 && !logical_name.is_empty()).then_some((version, logical_name))
+}
+
+fn is_multi_release<R: Read + Seek>(archive: &mut ZipArchive<R>) -> anyhow::Result<bool> {
+    let mut manifest = match archive.by_name("META-INF/MANIFEST.MF") {
+        Ok(manifest) => manifest,
+        Err(ZipError::FileNotFound) => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let mut bytes = Vec::with_capacity(manifest.size() as usize);
+    manifest.read_to_end(&mut bytes)?;
+    Ok(manifest_attribute(&bytes, "Multi-Release")
+        .is_some_and(|value| value.eq_ignore_ascii_case("true")))
+}
+
+fn manifest_attribute<'a>(manifest: &'a [u8], requested_name: &str) -> Option<String> {
+    let text = String::from_utf8_lossy(manifest);
+    let mut current_name = None::<&str>;
+    let mut current_value = String::new();
+
+    for raw_line in text.lines() {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if line.is_empty() {
+            break;
+        }
+        if let Some(continuation) = line.strip_prefix(' ') {
+            current_value.push_str(continuation);
+            continue;
+        }
+        if current_name.is_some_and(|name| name.eq_ignore_ascii_case(requested_name)) {
+            return Some(current_value.trim().to_owned());
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            current_name = None;
+            current_value.clear();
+            continue;
+        };
+        current_name = Some(name);
+        current_value.clear();
+        current_value.push_str(value.trim_start());
+    }
+
+    current_name
+        .is_some_and(|name| name.eq_ignore_ascii_case(requested_name))
+        .then(|| current_value.trim().to_owned())
 }
 
 fn process_class_bytes_worker(source: DirectSource) -> anyhow::Result<ClassInfo> {

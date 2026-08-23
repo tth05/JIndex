@@ -8,6 +8,7 @@ import org.junit.jupiter.api.function.Executable;
 
 import java.io.InputStream;
 import java.lang.reflect.Modifier;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -274,6 +275,53 @@ public class BasicTest {
     }
 
     @Test
+    public void testMultiReleaseArchiveUsesTargetRuntimeView() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-multi-release-");
+        try {
+            byte[] baseClass = compileFixture(
+                    workspace.resolve("base"),
+                    "package mixed; public class Fixture { public int baseField; }"
+            );
+            byte[] java21Class = compileFixture(
+                    workspace.resolve("java21"),
+                    "package mixed; public class Fixture { public int java21Field; }"
+            );
+            Path multiRelease = workspace.resolve("multi-release.jar");
+            try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(multiRelease))) {
+                output.putNextEntry(new ZipEntry("META-INF/MANIFEST.MF"));
+                output.write(("Manifest-Version: 1.0\r\n"
+                        + "Multi-Release: true\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                output.closeEntry();
+                writeClassEntry(output, "mixed/Fixture.class", baseClass);
+                writeClassEntry(output, "META-INF/versions/21/mixed/Fixture.class", java21Class);
+            }
+
+            Path ordinaryArchive = workspace.resolve("ordinary.jar");
+            try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(ordinaryArchive))) {
+                writeClassEntry(output, "mixed/Fixture.class", baseClass);
+                writeClassEntry(output, "META-INF/versions/21/mixed/Fixture.class", java21Class);
+            }
+
+            try (ClassIndex java17View = ClassIndex.fromSources(
+                    List.of(IndexSource.archive(1, multiRelease.toString())),
+                    new IndexBuildOptions(17)
+            ); ClassIndex java21View = ClassIndex.fromSources(
+                    List.of(IndexSource.archive(1, multiRelease.toString())),
+                    new IndexBuildOptions(21)
+            ); ClassIndex ordinaryView = ClassIndex.fromSources(
+                    List.of(IndexSource.archive(1, ordinaryArchive.toString())),
+                    new IndexBuildOptions(21)
+            )) {
+                assertFieldSet(java17View.findClass("mixed", "Fixture"), "baseField");
+                assertFieldSet(java21View.findClass("mixed", "Fixture"), "java21Field");
+                assertFieldSet(ordinaryView.findClass("mixed", "Fixture"), "baseField");
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
     public void testCloseIsIdempotentAndGuardsIndexOperations() {
         ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
         closedIndex.close();
@@ -450,6 +498,20 @@ public class BasicTest {
             zip.write(payload);
             zip.closeEntry();
         }
+    }
+
+    private static void writeClassEntry(ZipOutputStream output, String name, byte[] bytes) throws Exception {
+        output.putNextEntry(new ZipEntry(name));
+        output.write(bytes);
+        output.closeEntry();
+    }
+
+    private static void assertFieldSet(IndexedClass indexedClass, String expectedName) {
+        assertNotNull(indexedClass);
+        assertArrayEquals(
+                new String[]{expectedName},
+                Arrays.stream(indexedClass.getFields()).map(IndexedField::getName).toArray(String[]::new)
+        );
     }
 
     private static void deleteTree(Path root) throws Exception {

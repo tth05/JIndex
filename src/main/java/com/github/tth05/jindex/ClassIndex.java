@@ -170,7 +170,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private native BuildTimeInfo createClassIndexFromBytes(List<byte[]> classes);
 
-    private native BuildTimeInfo createClassIndexFromJars(List<String> classes);
+    private native BuildTimeInfo createClassIndexFromJars(List<String> classes, int targetJavaRelease);
 
     private native BuildTimeInfo createClassIndexFromExplicitSources(
             List<String> jarFilePaths,
@@ -178,7 +178,8 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
             int[] jarInputOrders,
             List<byte[]> classes,
             int[] classSourceIds,
-            int[] classInputOrders
+            int[] classInputOrders,
+            int targetJavaRelease
     );
 
     private native BuildTimeInfo loadClassIndexFromFile(String filePath);
@@ -292,7 +293,10 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      */
     public static ClassIndex fromJars(List<String> jarFilePaths) {
         ClassIndex c = new ClassIndex();
-        c.buildTimeInfo = c.createClassIndexFromJars(jarFilePaths);
+        c.buildTimeInfo = c.createClassIndexFromJars(
+                jarFilePaths,
+                IndexBuildOptions.currentRuntime().targetJavaRelease()
+        );
         c.registerCleanup();
         return c;
     }
@@ -340,7 +344,23 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return the class index
      */
     public static ClassIndex fromSources(List<? extends IndexSource> sources) {
+        return fromSources(sources, IndexBuildOptions.currentRuntime());
+    }
+
+    /**
+     * Creates a class index from ordered inputs using the requested Java runtime view. Multi-release archives select
+     * the highest versioned class no newer than {@link IndexBuildOptions#targetJavaRelease()}.
+     *
+     * @param sources inputs in descending precedence order
+     * @param options runtime-view options
+     * @return the class index
+     */
+    public static ClassIndex fromSources(
+            List<? extends IndexSource> sources,
+            IndexBuildOptions options
+    ) {
         Objects.requireNonNull(sources, "sources");
+        Objects.requireNonNull(options, "options");
         List<? extends IndexSource> orderedSources = List.copyOf(sources);
         int archiveCount = 0;
         int classCount = 0;
@@ -383,7 +403,8 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
                 jarInputOrders,
                 classes,
                 classSourceIds,
-                classInputOrders
+                classInputOrders,
+                options.targetJavaRelease()
         );
         c.registerCleanup();
         return c;
