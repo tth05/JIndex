@@ -91,6 +91,63 @@ Archive indexing now applies the Java multi-release JAR rules before parsing cla
 
 This correctness change establishes the new production totals at 170,212 classes, 584,761 fields, and 1,244,596 methods. The previous reader parsed every versioned entry and resolved same-source duplicates after parallel parsing, so its 170,213/584,761/1,244,579 totals did not describe one real runtime view. The unit suite checks Java 17 and Java 21 views of a multi-release fixture and confirms that a non-multi-release archive exposes only its base class.
 
+## Semantic references and string literals
+
+The semantic slice parses code and attributes in the same pass as declarations. It resolves
+member owners after declaration IDs exist, then stores target-sorted reference postings as one
+eight-byte packed site and occurrence count. Construction uses a temporary twelve-byte resolved
+posting so raw parser data can be released before the final array is sorted and compacted.
+
+The production runtime view contains 14,308,440 distinct target/site postings. The first global-sort
+prototype built in 16.24 seconds and reached a 3.21 GB process working set. The accepted staged
+builder reduced the measured build call to 11.65 seconds while producing the same postings. A later
+same-machine run measured 10.01 seconds; cold build timing remains secondary to correctness until
+the graph and consumer integration are complete. The
+whole-process working-set ceiling remained sensitive to the benchmark's repeated 43,335-object
+class-reference query; it is therefore retained as a ceiling rather than reported as native retained
+index memory.
+
+String literals use exact UTF-16 code units. The extractor includes `ldc`, `ConstantValue`,
+annotation/default values, and semantic bootstrap string constants, while excluding the recipe
+argument of `StringConcatFactory.makeConcatWithConstants`. The corpus contains 586,326 unique
+values and 1,951,942 occurrences. Lone surrogates and embedded nulls remain representable.
+
+| Measurement | Declaration slice | References + literals |
+|---|---:|---:|
+| Selected classes | 170,213 | 170,212 |
+| Fields | 584,761 | 584,761 |
+| Methods | 1,244,579 | 1,244,596 |
+| Distinct reference sites | not indexed | 14,308,440 |
+| Unique literals | not indexed | 586,326 |
+| Literal occurrences | not indexed | 1,951,942 |
+| Java-observed native build call | 6,584.5 ms | 11,649.6 ms |
+| Save compressed index | 4,156.9 ms | 11,907.2 ms |
+| Persisted index size | 27,562,209 bytes | 76,304,860 bytes |
+| First load | 470.4 ms | 855.6 ms |
+| Warm load p50 | 405.6 ms | 812.6 ms |
+| Warm load p95 | 516.5 ms | 869.8 ms |
+
+Reference queries are bounded before JNI object construction. The table reports the total stored
+site count and the latency to return the first 200 deterministic sites, including Java result
+construction:
+
+| Query | Stored sites | Returned | p50 | p95 |
+|---|---:|---:|---:|---:|
+| Class `Block` | 43,335 | 200 | 0.239 ms | 0.401 ms |
+| Field `Blocks.AIR` | 966 | 200 | 0.301 ms | 0.376 ms |
+| Method `Block.defaultBlockState` | 4,509 | 200 | 0.291 ms | 0.514 ms |
+| Exact literal `minecraft` | 349 | 200 | 0.288 ms | 0.454 ms |
+| Literal contains `block`, limit 200 | n/a | 200 | 5.06 ms | 6.63 ms |
+
+Source filters are applied against the containing class's opaque source ID in the same native loop,
+before the page limit and before JNI allocation. Truncation therefore describes the selected source
+set, not the unfiltered posting list.
+
+The literal pool is sorted by UTF-16 code units, giving binary exact lookup and deterministic prefix
+order. Contains search scans the deduplicated pool. A trigram index is rejected for this corpus:
+the measured scan is already interactive, while n-grams would add another large postings structure,
+increase build memory, and complicate the snapshot.
+
 ## Comparison rules
 
 Every format experiment must use the same manifest, Java runtime, and benchmark process shape. Report at least:

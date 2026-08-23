@@ -4,11 +4,13 @@ use crate::builder::workers::{
 };
 use crate::builder::BuildTimeInfo;
 use anyhow::{anyhow, ensure};
-use ascii::IntoAsciiString;
-use jni::objects::{JByteArray, JIntArray, JList, JObject, JString, JValue};
+use ascii::{AsAsciiStr, IntoAsciiString};
+use jni::objects::{JByteArray, JIntArray, JList, JObject, JObjectArray, JString, JValue};
 use jni::strings::JNIString;
 use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::{jni_sig, jni_str, Env, EnvUnowned};
+use jvmti_bindings::mutf8;
+use std::ffi::CString;
 use std::ops::Deref;
 
 use crate::class_index::ClassIndex;
@@ -18,7 +20,30 @@ use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{get_class_index, init_field_ids};
 use crate::jni::{get_enum_ordinal, propagate_error, with_jni_env};
 use crate::package_index::IndexedPackage;
-use crate::semantic_index::SymbolKind;
+use crate::semantic_index::{PackedReferenceSite, ReferenceSiteKind, SymbolId, SymbolKind};
+
+macro_rules! java_to_ascii_string {
+    ($env:expr, $jstring:ident) => {
+        java_to_ascii_string!($env, $jstring, |s| s)
+    };
+    ($env:expr, $jstring:ident, $mapper:expr) => {{
+        let env_str: String = $mapper($jstring.try_to_string($env).expect("Not a string"));
+
+        match env_str.into_ascii_string() {
+            Ok(s) => s,
+            Err(e) => {
+                match $env.throw_new(
+                    jni_str!("java/lang/IllegalArgumentException"),
+                    JNIString::new(format!("'{}' is not an ASCII string", e.into_source())),
+                ) {
+                    Err(jni::errors::Error::JavaException) => {}
+                    other => panic!("Failed to throw IllegalArgumentException: {:?}", other),
+                }
+                return Ok(JObject::null().into_raw());
+            }
+        }
+    }};
+}
 
 #[no_mangle]
 /// # Safety
@@ -265,6 +290,34 @@ fn read_nonnegative_int_array(
         .collect()
 }
 
+fn read_optional_source_ids(
+    env: &mut Env<'_>,
+    array: JObject<'_>,
+) -> anyhow::Result<Option<Vec<u32>>> {
+    if array.is_null() {
+        return Ok(None);
+    }
+    let array = env.cast_local::<JIntArray>(array)?;
+    let length = array.len(env)?;
+    let mut values = vec![0; length];
+    array.get_region(env, 0, &mut values)?;
+    let mut values = values
+        .into_iter()
+        .map(|value| {
+            u32::try_from(value).map_err(|_| anyhow!("sourceIds contains a negative value"))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    values.sort_unstable();
+    values.dedup();
+    Ok(Some(values))
+}
+
+fn require_positive_limit(limit: jint) -> anyhow::Result<usize> {
+    let limit = usize::try_from(limit).map_err(|_| anyhow!("limit must be positive"))?;
+    ensure!(limit > 0, "limit must be positive");
+    Ok(limit)
+}
+
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
@@ -348,9 +401,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getStatist
                 JValue::Long(class_index.class_count() as jlong),
                 JValue::Long(class_index.semantic_index().field_count() as jlong),
                 JValue::Long(class_index.semantic_index().method_count() as jlong),
-                JValue::Long(0),
-                JValue::Long(0),
-                JValue::Long(0),
+                JValue::Long(class_index.semantic_index().reference_site_count() as jlong),
+                JValue::Long(class_index.semantic_index().literal_count() as jlong),
+                JValue::Long(class_index.semantic_index().literal_occurrence_count() as jlong),
             ],
         )
         .expect("Unable to create statistics")
@@ -358,27 +411,362 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getStatist
     })
 }
 
-macro_rules! java_to_ascii_string {
-    ($env:expr, $jstring:ident) => {
-        java_to_ascii_string!($env, $jstring, |s| s)
-    };
-    ($env:expr, $jstring:ident, $mapper:expr) => {{
-        let env_str: String = $mapper($jstring.try_to_string($env).expect("Not a string"));
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findReferencesNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    target_kind: jint,
+    owner_internal_name: JString,
+    name: JString,
+    descriptor: JString,
+    source_ids_array: JObject,
+    limit: jint,
+) -> jobject {
+    with_jni_env!(env, {
+        let owner_internal_name = java_to_ascii_string!(env, owner_internal_name);
+        let name = java_to_ascii_string!(env, name);
+        let descriptor = java_to_ascii_string!(env, descriptor);
+        let source_ids = propagate_error!(
+            env,
+            read_optional_source_ids(env, source_ids_array),
+            JObject::null().into_raw()
+        );
+        let limit = propagate_error!(
+            env,
+            require_positive_limit(limit),
+            JObject::null().into_raw()
+        );
+        let (_, class_index) = get_class_index(env, &this);
 
-        match env_str.into_ascii_string() {
-            Ok(s) => s,
-            Err(e) => {
-                match $env.throw_new(
-                    jni_str!("java/lang/IllegalArgumentException"),
-                    JNIString::new(format!("'{}' is not an ASCII string", e.into_source())),
-                ) {
-                    Err(jni::errors::Error::JavaException) => {}
-                    other => panic!("Failed to throw IllegalArgumentException: {:?}", other),
-                }
-                return Ok(JObject::null().into_raw());
-            }
+        let owner_name = owner_internal_name.as_str();
+        let (package_name, class_name) = owner_name.rsplit_once('/').unwrap_or(("", owner_name));
+        let Some(owner) = class_index.find_class(
+            package_name
+                .as_ascii_str()
+                .expect("Validated owner package is ASCII"),
+            class_name
+                .as_ascii_str()
+                .expect("Validated owner class is ASCII"),
+        ) else {
+            return Ok(create_reference_search_page(
+                env,
+                class_index,
+                &[],
+                source_ids.as_deref(),
+                limit,
+            )?
+            .into_raw());
+        };
+
+        let target = match target_kind {
+            0 => SymbolId::new(SymbolKind::Class, u64::from(owner.index())),
+            1 => owner
+                .fields()
+                .iter()
+                .enumerate()
+                .find(|(member_index, field)| {
+                    field.field_name(class_index.constant_pool()) == name.as_str()
+                        && class_index.semantic_index().descriptor(
+                            SymbolKind::Field,
+                            owner.index(),
+                            *member_index as u16,
+                        ) == descriptor.as_str()
+                })
+                .map(|(member_index, _)| {
+                    class_index.semantic_index().symbol_id(
+                        SymbolKind::Field,
+                        owner.index(),
+                        member_index as u16,
+                    )
+                })
+                .transpose()
+                .map(|target| target.ok_or_else(|| anyhow!("Reference target field was not found")))
+                .and_then(|target| target),
+            2 => owner
+                .methods()
+                .iter()
+                .enumerate()
+                .find(|(member_index, method)| {
+                    method.method_name(class_index.constant_pool()) == name.as_str()
+                        && class_index.semantic_index().descriptor(
+                            SymbolKind::Method,
+                            owner.index(),
+                            *member_index as u16,
+                        ) == descriptor.as_str()
+                })
+                .map(|(member_index, _)| {
+                    class_index.semantic_index().symbol_id(
+                        SymbolKind::Method,
+                        owner.index(),
+                        member_index as u16,
+                    )
+                })
+                .transpose()
+                .map(|target| {
+                    target.ok_or_else(|| anyhow!("Reference target method was not found"))
+                })
+                .and_then(|target| target),
+            _ => Err(anyhow!("Unknown reference target kind {target_kind}")),
+        };
+        let target = propagate_error!(env, target, JObject::null().into_raw());
+        let references = propagate_error!(
+            env,
+            class_index.semantic_index().references_to(target),
+            JObject::null().into_raw()
+        );
+        create_reference_search_page(env, class_index, references, source_ids.as_deref(), limit)?
+            .into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findLiteralReferencesNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    literal: JString,
+    source_ids_array: JObject,
+    limit: jint,
+) -> jobject {
+    with_jni_env!(env, {
+        let literal = propagate_error!(
+            env,
+            java_string_to_utf16(env, &literal),
+            JObject::null().into_raw()
+        );
+        let source_ids = propagate_error!(
+            env,
+            read_optional_source_ids(env, source_ids_array),
+            JObject::null().into_raw()
+        );
+        let limit = propagate_error!(
+            env,
+            require_positive_limit(limit),
+            JObject::null().into_raw()
+        );
+        let (_, class_index) = get_class_index(env, &this);
+        let references = class_index
+            .semantic_index()
+            .find_literal(&literal)
+            .map(|literal| class_index.semantic_index().literal_references(literal))
+            .unwrap_or_default();
+        create_reference_search_page(env, class_index, references, source_ids.as_deref(), limit)?
+            .into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findLiteralsContainingNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    query: JString,
+    limit: jint,
+) -> jobject {
+    with_jni_env!(env, {
+        let query = propagate_error!(
+            env,
+            java_string_to_utf16(env, &query),
+            JObject::null().into_raw()
+        );
+        let limit = propagate_error!(
+            env,
+            usize::try_from(limit).map_err(anyhow::Error::from),
+            JObject::null().into_raw()
+        );
+        let (_, class_index) = get_class_index(env, &this);
+        let (matches, truncated) = class_index
+            .semantic_index()
+            .find_literals_containing(&query, limit);
+        let string_class = env.find_class(jni_str!("java/lang/String"))?;
+        let values = env.new_object_array(matches.len() as i32, &string_class, JObject::null())?;
+        for (index, literal) in matches.into_iter().enumerate() {
+            let value =
+                new_java_string_from_utf16(env, class_index.semantic_index().literal(literal))?;
+            values.set_element(env, index, &value)?;
         }
-    }};
+        let page_class = env.find_class(jni_str!("com/github/tth05/jindex/LiteralSearchPage"))?;
+        env.new_object(
+            &page_class,
+            jni_sig!("([Ljava/lang/String;Z)V"),
+            &[JValue::Object(&values), JValue::Bool(truncated)],
+        )?
+        .into_raw()
+    })
+}
+
+fn java_string_to_utf16(env: &Env<'_>, value: &JString<'_>) -> anyhow::Result<Vec<u16>> {
+    let chars = value.mutf8_chars(env)?;
+    Ok(mutf8::decode_utf16(chars.to_bytes())?)
+}
+
+fn new_java_string_from_utf16<'local>(
+    env: &mut Env<'local>,
+    value: &[u16],
+) -> jni::errors::Result<JString<'local>> {
+    let encoded = mutf8::encode_utf16(value);
+    let encoded = CString::new(encoded).expect("Modified UTF-8 contains no zero bytes");
+    let encoded = unsafe { JNIString::from_cstring(encoded) };
+    JString::from_jni_str(env, &encoded)
+}
+
+fn create_reference_results<'local>(
+    env: &mut Env<'local>,
+    class_index: &ClassIndex,
+    references: &[crate::semantic_index::PackedReferenceSite],
+) -> jni::errors::Result<JObjectArray<'local>> {
+    let result_class = env
+        .find_class(jni_str!("com/github/tth05/jindex/ReferenceResult"))
+        .expect("Reference result class not found");
+    let result_array =
+        env.new_object_array(references.len() as i32, &result_class, JObject::null())?;
+
+    for (index, reference) in references.iter().enumerate() {
+        env.with_local_frame(8, |env| -> jni::errors::Result<()> {
+            let (kind, owner_index, name, descriptor) = match reference.storage_kind() {
+                0 => (
+                    ReferenceSiteKind::Class,
+                    reference.ordinal(),
+                    env.new_string("")?,
+                    env.new_string("")?,
+                ),
+                1 | 2 => {
+                    let symbol_kind = if reference.storage_kind() == 1 {
+                        SymbolKind::Field
+                    } else {
+                        SymbolKind::Method
+                    };
+                    let member = class_index
+                        .semantic_index()
+                        .member_from_ordinal(symbol_kind, reference.ordinal())
+                        .expect("Stored reference site has an invalid member ordinal");
+                    let owner = class_index.class_at_index(member.class_index());
+                    let member_name = match symbol_kind {
+                        SymbolKind::Field => owner.fields()[member.member_index() as usize]
+                            .field_name(class_index.constant_pool()),
+                        SymbolKind::Method => owner.methods()[member.member_index() as usize]
+                            .method_name(class_index.constant_pool()),
+                        SymbolKind::Class => unreachable!(),
+                    };
+                    (
+                        if matches!(symbol_kind, SymbolKind::Field) {
+                            ReferenceSiteKind::Field
+                        } else {
+                            ReferenceSiteKind::Method
+                        },
+                        member.class_index(),
+                        env.new_string(member_name)?,
+                        env.new_string(class_index.semantic_index().descriptor(
+                            symbol_kind,
+                            member.class_index(),
+                            member.member_index(),
+                        ))?,
+                    )
+                }
+                3 => {
+                    let extra = class_index.semantic_index().extra_site(reference.ordinal());
+                    let kind = match extra.kind {
+                        1 => ReferenceSiteKind::Field,
+                        2 => ReferenceSiteKind::Method,
+                        3 => ReferenceSiteKind::RecordComponent,
+                        value => panic!("Unknown extra reference-site kind {value}"),
+                    };
+                    (
+                        kind,
+                        extra.owner_class_index,
+                        env.new_string(class_index.semantic_index().extra_site_name(extra))?,
+                        env.new_string(class_index.semantic_index().extra_site_descriptor(extra))?,
+                    )
+                }
+                value => panic!("Unknown reference-site storage kind {value}"),
+            };
+            let site_owner = class_index.class_at_index(owner_index);
+            let owner_name = env.new_string(site_owner.class_name_with_package(
+                class_index.package_index(),
+                class_index.constant_pool(),
+            ))?;
+            let object = env.new_object(
+                &result_class,
+                jni_sig!("(JILjava/lang/String;Ljava/lang/String;Ljava/lang/String;IJ)V"),
+                &[
+                    JValue::Long(i64::from(reference.identity())),
+                    JValue::Int(kind as i32),
+                    JValue::Object(&owner_name),
+                    JValue::Object(&name),
+                    JValue::Object(&descriptor),
+                    JValue::Int(class_index.semantic_index().class_source_id(owner_index) as i32),
+                    JValue::Long(i64::from(reference.occurrence_count())),
+                ],
+            )?;
+            result_array.set_element(env, index, &object)?;
+            Ok(())
+        })?;
+    }
+
+    Ok(result_array)
+}
+
+fn create_reference_search_page<'local>(
+    env: &mut Env<'local>,
+    class_index: &ClassIndex,
+    references: &[PackedReferenceSite],
+    source_ids: Option<&[u32]>,
+    limit: usize,
+) -> jni::errors::Result<JObject<'local>> {
+    let mut selected = Vec::with_capacity(references.len().min(limit));
+    let mut truncated = false;
+    for reference in references {
+        let owner_index = reference_owner_class_index(class_index, *reference);
+        if source_ids.is_some_and(|source_ids| {
+            source_ids
+                .binary_search(&class_index.semantic_index().class_source_id(owner_index))
+                .is_err()
+        }) {
+            continue;
+        }
+        if selected.len() == limit {
+            truncated = true;
+            break;
+        }
+        selected.push(*reference);
+    }
+
+    let results = create_reference_results(env, class_index, &selected)?;
+    let page_class = env.find_class(jni_str!("com/github/tth05/jindex/ReferenceSearchPage"))?;
+    env.new_object(
+        &page_class,
+        jni_sig!("([Lcom/github/tth05/jindex/ReferenceResult;Z)V"),
+        &[JValue::Object(&results), JValue::Bool(truncated)],
+    )
+}
+
+fn reference_owner_class_index(class_index: &ClassIndex, reference: PackedReferenceSite) -> u32 {
+    match reference.storage_kind() {
+        0 => reference.ordinal(),
+        1 | 2 => class_index
+            .semantic_index()
+            .member_from_ordinal(
+                if reference.storage_kind() == 1 {
+                    SymbolKind::Field
+                } else {
+                    SymbolKind::Method
+                },
+                reference.ordinal(),
+            )
+            .expect("Stored reference site has an invalid member ordinal")
+            .class_index(),
+        3 => {
+            class_index
+                .semantic_index()
+                .extra_site(reference.ordinal())
+                .owner_class_index
+        }
+        value => panic!("Unknown reference-site storage kind {value}"),
+    }
 }
 
 #[no_mangle]

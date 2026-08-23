@@ -2,22 +2,27 @@ use crate::class_index::ClassIndex;
 use crate::class_index_members::{IndexedClass, IndexedField, IndexedMethod};
 use crate::constant_pool::ClassIndexConstantPool;
 use crate::package_index::PackageIndex;
+use crate::semantic_index::{
+    sort_members_for_search, DescriptorPool, PackedMemberId, SemanticIndex, SymbolKind,
+};
 use crate::signature::indexed_signature::ToIndexedType;
 use crate::signature::{
     RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature, RawSignatureType,
 };
-use crate::semantic_index::{
-    sort_members_for_search, DescriptorPool, PackedMemberId, SemanticIndex, SymbolKind,
-};
 use anyhow::anyhow;
 use compact_str::CompactString;
+use raw_references::RawReferenceData;
 use rayon::prelude::*;
+use reference_index_builder::build_reference_index;
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::time::Instant;
 
-pub mod workers;
+mod bytecode;
 mod classfile_parser;
+mod raw_references;
+mod reference_index_builder;
+pub mod workers;
 
 pub(crate) type ClassToIndexMap<'a> = FxHashMap<(&'a str, &'a str), (u32, &'a IndexedClass)>;
 
@@ -48,9 +53,13 @@ impl ClassIndexBuilder {
         self
     }
 
-    fn build(self, vec: Vec<ClassInfo>) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
+    fn build(self, mut vec: Vec<ClassInfo>) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
         let start_time = Instant::now();
         let element_count = vec.len() as u32;
+        let raw_references = vec
+            .iter_mut()
+            .map(|class_info| std::mem::take(&mut class_info.references))
+            .collect();
 
         let mut constant_pool = ClassIndexConstantPool::new(
             ((element_count * self.average_class_name_size
@@ -229,7 +238,6 @@ impl ClassIndexBuilder {
                 Some(indexed_method_descriptors);
         }
 
-        let classes: Vec<IndexedClass> = classes.into_iter().map(|class| class.1).collect();
         let mut field_offsets = Vec::with_capacity(element_count as usize + 1);
         let mut method_offsets = Vec::with_capacity(element_count as usize + 1);
         let mut field_descriptors = Vec::with_capacity(self.expected_field_count as usize);
@@ -239,28 +247,41 @@ impl ClassIndexBuilder {
         field_offsets.push(0);
         method_offsets.push(0);
         for class_index in 0..element_count {
-            let class = &classes[class_index as usize];
             let class_field_descriptors = field_descriptors_by_class[class_index as usize]
                 .take()
                 .expect("Missing field descriptors for indexed class");
             let class_method_descriptors = method_descriptors_by_class[class_index as usize]
                 .take()
                 .expect("Missing method descriptors for indexed class");
-            for member_index in 0..class.fields().len() {
+            for member_index in 0..class_field_descriptors.len() {
                 field_search.push(PackedMemberId::new(class_index, member_index)?);
             }
-            for member_index in 0..class.methods().len() {
+            for member_index in 0..class_method_descriptors.len() {
                 method_search.push(PackedMemberId::new(class_index, member_index)?);
             }
             field_descriptors.extend(class_field_descriptors);
             method_descriptors.extend(class_method_descriptors);
-            field_offsets.push(u32::try_from(field_descriptors.len()).map_err(|_| {
-                anyhow!("The index contains more than 4294967295 fields")
-            })?);
-            method_offsets.push(u32::try_from(method_descriptors.len()).map_err(|_| {
-                anyhow!("The index contains more than 4294967295 methods")
-            })?);
+            field_offsets.push(
+                u32::try_from(field_descriptors.len())
+                    .map_err(|_| anyhow!("The index contains more than 4294967295 fields"))?,
+            );
+            method_offsets.push(
+                u32::try_from(method_descriptors.len())
+                    .map_err(|_| anyhow!("The index contains more than 4294967295 methods"))?,
+            );
         }
+        let references = build_reference_index(
+            &vec,
+            raw_references,
+            &classes_map,
+            &constant_pool_map,
+            &descriptor_pool_map,
+            &mut descriptor_pool,
+            &field_offsets,
+            &method_offsets,
+        )?;
+        drop(classes_map);
+        let classes: Vec<IndexedClass> = classes.into_iter().map(|class| class.1).collect();
         sort_members_for_search(
             &classes,
             &constant_pool,
@@ -282,6 +303,7 @@ impl ClassIndexBuilder {
             method_descriptors,
             field_search,
             method_search,
+            references,
         );
 
         Ok((
@@ -362,11 +384,14 @@ struct ClassInfo {
     pub class_name: CompactString,
     pub class_name_start_index: usize,
     pub access_flags: u16,
+    pub super_class: Option<CompactString>,
+    pub interfaces: Vec<CompactString>,
     pub enclosing_type: Option<RawEnclosingTypeInfo>,
     pub member_classes: Option<Vec<CompactString>>,
     pub signature: RawClassSignature,
     pub fields: Vec<FieldInfo>,
     pub methods: Vec<MethodInfo>,
+    pub references: RawReferenceData,
 }
 
 #[derive(Debug)]

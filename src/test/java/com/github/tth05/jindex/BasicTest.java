@@ -322,6 +322,71 @@ public class BasicTest {
     }
 
     @Test
+    public void testReferencesAreResolvedAndPersisted() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-references-");
+        Path snapshot = workspace.resolve("index.zip");
+        try {
+            List<byte[]> classes = compileFixtureClasses(
+                    workspace.resolve("compile"),
+                    "package mixed;"
+                            + " public class Fixture {"
+                            + "   Target field;"
+                            + "   void caller(Target target) {"
+                            + "     target.value++;"
+                            + "     target.run();"
+                            + "     target.run();"
+                            + "   }"
+                            + "   Runnable methodReference(Target target) { return target::run; }"
+                            + " }"
+                            + " class Target { int value; void run() {} }",
+                    "mixed/Fixture.class",
+                    "mixed/Target.class"
+            );
+
+            try (ClassIndex fixtureIndex = ClassIndex.fromBytes(classes)) {
+                assertReferenceGraph(fixtureIndex);
+                fixtureIndex.saveToFile(snapshot.toString());
+            }
+            try (ClassIndex persistedIndex = ClassIndex.fromFile(snapshot.toString())) {
+                assertReferenceGraph(persistedIndex);
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
+    public void testSemanticStringLiteralsAreExactAndPersisted() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-literals-");
+        Path snapshot = workspace.resolve("index.zip");
+        try {
+            byte[] fixture = compileFixture(
+                    workspace.resolve("compile"),
+                    "package mixed;"
+                            + " @Marker(\"annotation-value\")"
+                            + " public class Fixture {"
+                            + "   static final String CONSTANT = \"constant-value\";"
+                            + "   String unicode() { return \"snowman ☃\"; }"
+                            + "   String embeddedNull() { return \"embedded\\0null\"; }"
+                            + "   String loneSurrogate() { return \"\\uD800\"; }"
+                            + "   String concat(String value) { return \"recipe-prefix=\" + value; }"
+                            + " }"
+                            + " @interface Marker { String value(); }"
+            );
+
+            try (ClassIndex fixtureIndex = ClassIndex.fromBytes(List.of(fixture))) {
+                assertLiteralIndex(fixtureIndex);
+                fixtureIndex.saveToFile(snapshot.toString());
+            }
+            try (ClassIndex persistedIndex = ClassIndex.fromFile(snapshot.toString())) {
+                assertLiteralIndex(persistedIndex);
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
     public void testCloseIsIdempotentAndGuardsIndexOperations() {
         ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
         closedIndex.close();
@@ -415,7 +480,7 @@ public class BasicTest {
         assertTrue(statistics.classCount() > 0);
         assertTrue(statistics.fieldCount() > 0);
         assertTrue(statistics.methodCount() > 0);
-        assertEquals(0, statistics.referenceSiteCount());
+        assertTrue(statistics.referenceSiteCount() > 0);
         SymbolSearchResult[] results = index.findSymbols(
                 "lastIndexOf",
                 SearchOptions.with(
@@ -455,12 +520,12 @@ public class BasicTest {
             );
             assertTrue(missingHeader.getMessage().contains("missing format header"));
 
-            writeIndexPayload(unsupported, new byte[]{'J', 'I', 'N', 'D', 'E', 'X', 0, 0, 2, 0});
+            writeIndexPayload(unsupported, new byte[]{'J', 'I', 'N', 'D', 'E', 'X', 0, 0, 3, 0});
             ClassIndexBuildingException unknownVersion = assertThrows(
                     ClassIndexBuildingException.class,
                     () -> ClassIndex.fromFile(unsupported.toString())
             );
-            assertTrue(unknownVersion.getMessage().contains("snapshot version 2; expected 1"));
+            assertTrue(unknownVersion.getMessage().contains("snapshot version 3; expected 2"));
         } finally {
             Files.deleteIfExists(malformed);
             Files.deleteIfExists(unsupported);
@@ -490,6 +555,120 @@ public class BasicTest {
         assertNotNull(compiler);
         assertEquals(0, compiler.run(null, null, null, "-d", classes.toString(), source.toString()));
         return Files.readAllBytes(classes.resolve("mixed/Fixture.class"));
+    }
+
+    private static List<byte[]> compileFixtureClasses(
+            Path workspace,
+            String sourceText,
+            String... relativeClassPaths
+    ) throws Exception {
+        Path source = workspace.resolve("src/mixed/Fixture.java");
+        Path classes = workspace.resolve("classes");
+        Files.createDirectories(source.getParent());
+        Files.createDirectories(classes);
+        Files.writeString(source, sourceText);
+
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler);
+        assertEquals(0, compiler.run(null, null, null, "-d", classes.toString(), source.toString()));
+        return Arrays.stream(relativeClassPaths)
+                .map(classes::resolve)
+                .map(path -> assertDoesNotThrow(() -> Files.readAllBytes(path)))
+                .toList();
+    }
+
+    private static void assertReferenceGraph(ClassIndex fixtureIndex) {
+        ReferenceResult[] classReferences = fixtureIndex.findReferences(
+                ReferenceTarget.classTarget("mixed/Target"),
+                100
+        ).results();
+        assertTrue(Arrays.stream(classReferences).anyMatch(reference ->
+                reference.kind() == ReferenceSiteKind.FIELD
+                        && reference.ownerInternalName().equals("mixed/Fixture")
+                        && reference.name().equals("field")
+                        && reference.descriptor().equals("Lmixed/Target;")
+        ));
+        assertTrue(Arrays.stream(classReferences).anyMatch(reference ->
+                reference.kind() == ReferenceSiteKind.METHOD
+                        && reference.ownerInternalName().equals("mixed/Fixture")
+                        && reference.name().equals("caller")
+        ));
+
+        ReferenceResult fieldReference = Arrays.stream(fixtureIndex.findReferences(
+                        ReferenceTarget.fieldTarget("mixed/Target", "value", "I"),
+                        100
+                ).results())
+                .filter(reference -> reference.name().equals("caller"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(ReferenceSiteKind.METHOD, fieldReference.kind());
+        assertEquals(2, fieldReference.occurrenceCount());
+
+        ReferenceTarget methodTarget = ReferenceTarget.methodTarget("mixed/Target", "run", "()V");
+        ReferenceResult[] methodReferences = fixtureIndex.findReferences(methodTarget, 100).results();
+        ReferenceResult directCalls = Arrays.stream(methodReferences)
+                .filter(reference -> reference.name().equals("caller"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(2, directCalls.occurrenceCount());
+        assertTrue(Arrays.stream(methodReferences).anyMatch(reference ->
+                reference.name().equals("methodReference") && reference.occurrenceCount() == 1
+        ));
+
+        ReferenceSearchPage limited = fixtureIndex.findReferences(methodTarget, 1);
+        assertEquals(1, limited.results().length);
+        assertTrue(limited.truncated());
+        ReferenceSearchPage fixtureSource = fixtureIndex.findReferences(methodTarget, 100, 0, 0);
+        assertEquals(methodReferences.length, fixtureSource.results().length);
+        assertFalse(fixtureSource.truncated());
+        assertEquals(0, fixtureIndex.findReferences(methodTarget, 100, 1).results().length);
+        assertEquals(0, fixtureIndex.findReferences(methodTarget, 100, new int[0]).results().length);
+        assertThrows(IllegalArgumentException.class, () -> fixtureIndex.findReferences(methodTarget, 0));
+        assertThrows(IllegalArgumentException.class, () -> fixtureIndex.findReferences(methodTarget, 1, -1));
+
+        assertTrue(fixtureIndex.getStatistics().referenceSiteCount() >= 5);
+    }
+
+    private static void assertLiteralIndex(ClassIndex fixtureIndex) {
+        assertLiteralSite(fixtureIndex, "annotation-value", ReferenceSiteKind.CLASS, "");
+        assertLiteralSite(fixtureIndex, "constant-value", ReferenceSiteKind.FIELD, "CONSTANT");
+        assertLiteralSite(fixtureIndex, "snowman ☃", ReferenceSiteKind.METHOD, "unicode");
+        assertLiteralSite(fixtureIndex, "embedded\0null", ReferenceSiteKind.METHOD, "embeddedNull");
+        assertLiteralSite(
+                fixtureIndex,
+                new String(new char[]{'\uD800'}),
+                ReferenceSiteKind.METHOD,
+                "loneSurrogate"
+        );
+        assertEquals(0, fixtureIndex.findLiteralReferences("recipe-prefix=", 10).results().length);
+        LiteralSearchPage values = fixtureIndex.findLiteralsContaining("value", 10);
+        assertArrayEquals(new String[]{"annotation-value", "constant-value"}, values.values());
+        assertFalse(values.truncated());
+        LiteralSearchPage limited = fixtureIndex.findLiteralsContaining("value", 1);
+        assertArrayEquals(new String[]{"annotation-value"}, limited.values());
+        assertTrue(limited.truncated());
+        assertArrayEquals(
+                new String[]{new String(new char[]{'\uD800'})},
+                fixtureIndex.findLiteralsContaining(new String(new char[]{'\uD800'}), 10).values()
+        );
+        assertEquals(5, fixtureIndex.getStatistics().literalCount());
+        assertEquals(5, fixtureIndex.getStatistics().literalOccurrenceCount());
+    }
+
+    private static void assertLiteralSite(
+            ClassIndex fixtureIndex,
+            String literal,
+            ReferenceSiteKind kind,
+            String name
+    ) {
+        ReferenceResult[] references = fixtureIndex.findLiteralReferences(literal, 10).results();
+        assertEquals(1, references.length);
+        assertEquals(kind, references[0].kind());
+        assertEquals("mixed/Fixture", references[0].ownerInternalName());
+        assertEquals(name, references[0].name());
+        assertEquals(1, references[0].occurrenceCount());
+        assertEquals(1, fixtureIndex.findLiteralReferences(literal, 10, 0).results().length);
+        assertEquals(0, fixtureIndex.findLiteralReferences(literal, 10, 1).results().length);
     }
 
     private static void writeIndexPayload(Path output, byte[] payload) throws Exception {

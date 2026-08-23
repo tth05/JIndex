@@ -1,3 +1,4 @@
+use super::raw_references::{RawExtraSiteKind, RawReferenceBuilder, RawReferenceSite};
 use super::{ClassInfo, FieldInfo, MethodInfo};
 use crate::rsplit_once;
 use crate::signature::{
@@ -28,52 +29,69 @@ pub(super) fn parse_class(
         inner_classes(&class_file.attributes, pool)?,
     )?;
 
-    let fields = class_file
-        .fields
-        .iter()
-        .filter_map(|field| {
-            let name = match ascii_member_name(pool, field.name_index) {
-                Ok(Some(name)) => name,
-                Ok(None) => return None,
-                Err(error) => return Some(Err(error)),
-            };
-            Some((|| {
-                let descriptor = ascii(pool.get_utf8(field.descriptor_index)?, "field descriptor")?;
-                let signature = signature(&field.attributes, pool)?.unwrap_or(descriptor);
-                Ok(FieldInfo {
-                    field_name: name.to_compact_string(),
-                    jvm_descriptor: descriptor.to_compact_string(),
-                    descriptor: RawSignatureType::from_str(signature)
-                        .with_context(|| format!("Invalid field signature {signature}"))?,
-                    access_flags: field.access_flags,
-                })
-            })())
-        })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+    let mut references = RawReferenceBuilder::default();
+    let mut fields = Vec::with_capacity(class_file.fields.len());
+    let mut field_sites = Vec::with_capacity(class_file.fields.len());
+    for field in &class_file.fields {
+        let name = pool.get_utf8(field.name_index)?;
+        let descriptor = ascii(pool.get_utf8(field.descriptor_index)?, "field descriptor")?;
+        let site = if name.is_ascii() {
+            let site = RawReferenceSite::field(fields.len())?;
+            let parsed_signature = signature(&field.attributes, pool)?.unwrap_or(descriptor);
+            fields.push(FieldInfo {
+                field_name: name.to_compact_string(),
+                jvm_descriptor: descriptor.to_compact_string(),
+                descriptor: RawSignatureType::from_str(parsed_signature)
+                    .with_context(|| format!("Invalid field signature {parsed_signature}"))?,
+                access_flags: field.access_flags,
+            });
+            site
+        } else {
+            references.add_extra_site(RawExtraSiteKind::Field, name, descriptor)?
+        };
+        field_sites.push(site);
+    }
 
-    let methods = class_file
-        .methods
-        .iter()
-        .filter(|method| method.access_flags & ACC_SYNTHETIC == 0)
-        .filter_map(|method| {
-            let name = match ascii_member_name(pool, method.name_index) {
-                Ok(Some(name)) => name,
-                Ok(None) => return None,
-                Err(error) => return Some(Err(error)),
-            };
-            Some((|| {
-                let descriptor =
-                    ascii(pool.get_utf8(method.descriptor_index)?, "method descriptor")?;
-                let signature = signature(&method.attributes, pool)?.unwrap_or(descriptor);
-                let exceptions = exceptions(&method.attributes, pool)?;
-                Ok(MethodInfo {
-                    method_name: name.to_compact_string(),
-                    jvm_descriptor: descriptor.to_compact_string(),
-                    signature: RawMethodSignature::from_data(signature, &|| exceptions.as_ref())
-                        .with_context(|| format!("Invalid method signature {signature}"))?,
-                    access_flags: method.access_flags,
+    let mut methods = Vec::with_capacity(class_file.methods.len());
+    let mut method_sites = Vec::with_capacity(class_file.methods.len());
+    for method in &class_file.methods {
+        let name = pool.get_utf8(method.name_index)?;
+        let descriptor = ascii(pool.get_utf8(method.descriptor_index)?, "method descriptor")?;
+        let site = if method.access_flags & ACC_SYNTHETIC == 0 && name.is_ascii() {
+            let site = RawReferenceSite::method(methods.len())?;
+            let parsed_signature = signature(&method.attributes, pool)?.unwrap_or(descriptor);
+            let method_exceptions = exceptions(&method.attributes, pool)?;
+            methods.push(MethodInfo {
+                method_name: name.to_compact_string(),
+                jvm_descriptor: descriptor.to_compact_string(),
+                signature: RawMethodSignature::from_data(parsed_signature, &|| {
+                    method_exceptions.as_ref()
                 })
-            })())
+                .with_context(|| format!("Invalid method signature {parsed_signature}"))?,
+                access_flags: method.access_flags,
+            });
+            site
+        } else {
+            references.add_extra_site(RawExtraSiteKind::Method, name, descriptor)?
+        };
+        method_sites.push(site);
+    }
+    references.collect(&class_file, &field_sites, &method_sites)?;
+
+    let super_class = (class_file.super_class != 0)
+        .then(|| {
+            ascii(
+                class_name(pool, class_file.super_class)?,
+                "super class name",
+            )
+            .map(|name| name.to_compact_string())
+        })
+        .transpose()?;
+    let interfaces = class_file
+        .interfaces
+        .iter()
+        .map(|index| {
+            ascii(class_name(pool, *index)?, "interface name").map(|name| name.to_compact_string())
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
 
@@ -84,11 +102,14 @@ pub(super) fn parse_class(
         class_name: converted.full_class_name,
         class_name_start_index: converted.class_name_start_index,
         access_flags: class_file.access_flags | converted.inner_class_access_flags,
+        super_class,
+        interfaces,
         signature: class_signature(&class_file, pool)?,
         enclosing_type: converted.enclosing_type,
         member_classes: converted.member_classes,
         fields,
         methods,
+        references: references.finish(),
     })
 }
 
@@ -181,13 +202,6 @@ fn ascii<'a>(value: &'a str, description: &str) -> anyhow::Result<&'a str> {
         .is_ascii()
         .then_some(value)
         .ok_or_else(|| anyhow!("{description} is not ASCII"))
-}
-
-fn ascii_member_name(pool: &ConstantPool, index: u16) -> anyhow::Result<Option<&str>> {
-    let name = pool.get_utf8(index)?;
-    // Declaration names share JIndex's compact ASCII search pool. Preserve the class and exclude
-    // only the unsupported declaration, matching the previous index format's boundary.
-    Ok(name.is_ascii().then_some(name))
 }
 
 struct ResolvedEnclosingMethod<'a> {

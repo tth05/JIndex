@@ -26,6 +26,7 @@ import java.util.zip.ZipFile;
 /** Records the mixed-source JIndex baseline against a TotalDebug runtime-source manifest. */
 public final class RuntimeCorpusBenchmark {
     private static final String MANIFEST_HEADER = "totaldebug-runtime-sources-v1";
+    private static final int REFERENCE_QUERY_LIMIT = 200;
     private static volatile Object blackhole;
 
     private RuntimeCorpusBenchmark() {
@@ -208,13 +209,68 @@ public final class RuntimeCorpusBenchmark {
                 contains,
                 EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
         ));
+        ReferenceMeasurement classReferences = measureReferences(
+                index,
+                ReferenceTarget.classTarget("net/minecraft/world/level/block/Block")
+        );
+        ReferenceMeasurement fieldReferences = measureReferences(
+                index,
+                ReferenceTarget.fieldTarget(
+                        "net/minecraft/world/level/block/Blocks",
+                        "AIR",
+                        "Lnet/minecraft/world/level/block/Block;"
+                )
+        );
+        ReferenceMeasurement methodReferences = measureReferences(
+                index,
+                ReferenceTarget.methodTarget(
+                        "net/minecraft/world/level/block/Block",
+                        "defaultBlockState",
+                        "()Lnet/minecraft/world/level/block/state/BlockState;"
+                )
+        );
+        ReferenceMeasurement literalReferences = measureLiteralReferences(index, "minecraft");
+        Measurement containsLiterals = measure(
+                10,
+                200,
+                () -> index.findLiteralsContaining("block", 200)
+        );
         return new QueryMeasurements(
                 exactClass,
                 prefixClasses,
                 containsClasses,
                 exactMethod,
                 prefixSymbols,
-                containsSymbols
+                containsSymbols,
+                classReferences,
+                fieldReferences,
+                methodReferences,
+                literalReferences,
+                containsLiterals
+        );
+    }
+
+    private static ReferenceMeasurement measureReferences(ClassIndex index, ReferenceTarget target) {
+        ReferenceSearchPage all = index.findReferences(target, Integer.MAX_VALUE);
+        int resultCount = all.results().length;
+        if (resultCount == 0) {
+            throw new IllegalStateException("Benchmark reference target has no usages: " + target);
+        }
+        return new ReferenceMeasurement(
+                resultCount,
+                measure(10, 200, () -> index.findReferences(target, REFERENCE_QUERY_LIMIT))
+        );
+    }
+
+    private static ReferenceMeasurement measureLiteralReferences(ClassIndex index, String literal) {
+        ReferenceSearchPage all = index.findLiteralReferences(literal, Integer.MAX_VALUE);
+        int resultCount = all.results().length;
+        if (resultCount == 0) {
+            throw new IllegalStateException("Benchmark literal has no usages: " + literal);
+        }
+        return new ReferenceMeasurement(
+                resultCount,
+                measure(10, 200, () -> index.findLiteralReferences(literal, REFERENCE_QUERY_LIMIT))
         );
     }
 
@@ -324,7 +380,12 @@ public final class RuntimeCorpusBenchmark {
                     "containsClasses": %s,
                     "exactMethod": %s,
                     "prefixSymbols": %s,
-                    "containsSymbols": %s
+                    "containsSymbols": %s,
+                    "classReferences": %s,
+                    "fieldReferences": %s,
+                    "methodReferences": %s,
+                    "literalReferences": %s,
+                    "containsLiterals": %s
                   }
                 }
                 """.formatted(
@@ -365,7 +426,12 @@ public final class RuntimeCorpusBenchmark {
                 queries.containsClasses().json(),
                 queries.exactMethod().json(),
                 queries.prefixSymbols().json(),
-                queries.containsSymbols().json()
+                queries.containsSymbols().json(),
+                queries.classReferences().json(),
+                queries.fieldReferences().json(),
+                queries.methodReferences().json(),
+                queries.literalReferences().json(),
+                queries.containsLiterals().json()
         );
     }
 
@@ -445,7 +511,18 @@ public final class RuntimeCorpusBenchmark {
             Measurement containsClasses,
             Measurement exactMethod,
             Measurement prefixSymbols,
-            Measurement containsSymbols
+            Measurement containsSymbols,
+            ReferenceMeasurement classReferences,
+            ReferenceMeasurement fieldReferences,
+            ReferenceMeasurement methodReferences,
+            ReferenceMeasurement literalReferences,
+            Measurement containsLiterals
     ) {
+    }
+
+    private record ReferenceMeasurement(int resultCount, Measurement latency) {
+        private String json() {
+            return "{\"resultCount\":%d,\"latency\":%s}".formatted(this.resultCount, this.latency.json());
+        }
     }
 }

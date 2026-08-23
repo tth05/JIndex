@@ -8,6 +8,9 @@ use std::cmp::Ordering;
 
 const SYMBOL_KIND_SHIFT: u64 = 62;
 const SYMBOL_ORDINAL_MASK: u64 = (1 << SYMBOL_KIND_SHIFT) - 1;
+const REFERENCE_SITE_KIND_SHIFT: u64 = 62;
+const REFERENCE_SITE_ORDINAL_SHIFT: u64 = 32;
+const REFERENCE_SITE_ORDINAL_MASK: u64 = (1 << 30) - 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -33,6 +36,119 @@ impl SymbolId {
     pub fn as_u64(self) -> u64 {
         self.0
     }
+
+    pub fn from_u64(value: u64) -> anyhow::Result<Self> {
+        let kind = value >> SYMBOL_KIND_SHIFT;
+        ensure!(
+            kind <= SymbolKind::Method as u64,
+            "Unknown symbol kind {kind}"
+        );
+        Ok(Self(value))
+    }
+
+    pub fn kind(self) -> SymbolKind {
+        match self.0 >> SYMBOL_KIND_SHIFT {
+            0 => SymbolKind::Class,
+            1 => SymbolKind::Field,
+            2 => SymbolKind::Method,
+            _ => unreachable!("Symbol IDs are validated when constructed"),
+        }
+    }
+
+    pub fn ordinal(self) -> u64 {
+        self.0 & SYMBOL_ORDINAL_MASK
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum ReferenceSiteKind {
+    Class = 0,
+    Field = 1,
+    Method = 2,
+    RecordComponent = 3,
+}
+
+#[derive(Clone, Copy, Debug, Readable, Writable)]
+pub struct PackedReferenceSite(u64);
+
+impl PackedReferenceSite {
+    pub(crate) fn new(kind: u8, ordinal: u32, occurrence_count: u32) -> anyhow::Result<Self> {
+        ensure!(kind <= 3, "Reference-site storage kind exceeds 2 bits");
+        ensure!(
+            u64::from(ordinal) <= REFERENCE_SITE_ORDINAL_MASK,
+            "Reference-site ordinal exceeds 30 bits"
+        );
+        ensure!(
+            occurrence_count > 0,
+            "Reference occurrence count must be positive"
+        );
+        Ok(Self(
+            (u64::from(kind) << REFERENCE_SITE_KIND_SHIFT)
+                | (u64::from(ordinal) << REFERENCE_SITE_ORDINAL_SHIFT)
+                | u64::from(occurrence_count),
+        ))
+    }
+
+    pub fn storage_kind(self) -> u8 {
+        (self.0 >> REFERENCE_SITE_KIND_SHIFT) as u8
+    }
+
+    pub fn ordinal(self) -> u32 {
+        ((self.0 >> REFERENCE_SITE_ORDINAL_SHIFT) & REFERENCE_SITE_ORDINAL_MASK) as u32
+    }
+
+    pub fn occurrence_count(self) -> u32 {
+        self.0 as u32
+    }
+
+    pub(crate) fn identity(self) -> u32 {
+        (self.0 >> REFERENCE_SITE_ORDINAL_SHIFT) as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug, Readable, Writable)]
+pub struct ExtraReferenceSite {
+    pub owner_class_index: u32,
+    pub kind: u8,
+    pub name_offset: u32,
+    pub descriptor_offset: u32,
+}
+
+#[derive(Default, Readable, Writable)]
+pub struct Utf8Pool {
+    data: Vec<u8>,
+}
+
+impl Utf8Pool {
+    pub(crate) fn add(&mut self, value: &str) -> anyhow::Result<u32> {
+        let length = u16::try_from(value.len())
+            .map_err(|_| anyhow!("UTF-8 pool value exceeds 65535 bytes"))?;
+        let offset =
+            u32::try_from(self.data.len()).map_err(|_| anyhow!("UTF-8 pool exceeds 4 GiB"))?;
+        self.data.extend_from_slice(&length.to_le_bytes());
+        self.data.extend_from_slice(value.as_bytes());
+        Ok(offset)
+    }
+
+    pub fn get(&self, offset: u32) -> &str {
+        let offset = offset as usize;
+        let length = u16::from_le_bytes([self.data[offset], self.data[offset + 1]]) as usize;
+        std::str::from_utf8(&self.data[offset + 2..offset + 2 + length])
+            .expect("Persisted UTF-8 pool contains invalid data")
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ReferenceIndexData {
+    pub extra_site_names: Utf8Pool,
+    pub extra_sites: Vec<ExtraReferenceSite>,
+    pub offsets: Vec<u32>,
+    pub sites: Vec<PackedReferenceSite>,
+    pub literal_offsets: Vec<u32>,
+    pub literal_values: Vec<u16>,
+    pub literal_posting_offsets: Vec<u32>,
+    pub literal_sites: Vec<PackedReferenceSite>,
 }
 
 #[derive(Clone, Copy, Debug, Readable, Writable)]
@@ -98,6 +214,14 @@ pub struct SemanticIndex {
     method_descriptors: Vec<u32>,
     field_search: Vec<PackedMemberId>,
     method_search: Vec<PackedMemberId>,
+    extra_site_names: Utf8Pool,
+    extra_sites: Vec<ExtraReferenceSite>,
+    reference_offsets: Vec<u32>,
+    reference_sites: Vec<PackedReferenceSite>,
+    literal_offsets: Vec<u32>,
+    literal_values: Vec<u16>,
+    literal_posting_offsets: Vec<u32>,
+    literal_sites: Vec<PackedReferenceSite>,
 }
 
 impl SemanticIndex {
@@ -111,6 +235,7 @@ impl SemanticIndex {
         method_descriptors: Vec<u32>,
         field_search: Vec<PackedMemberId>,
         method_search: Vec<PackedMemberId>,
+        references: ReferenceIndexData,
     ) -> Self {
         Self {
             class_source_ids,
@@ -121,6 +246,14 @@ impl SemanticIndex {
             method_descriptors,
             field_search,
             method_search,
+            extra_site_names: references.extra_site_names,
+            extra_sites: references.extra_sites,
+            reference_offsets: references.offsets,
+            reference_sites: references.sites,
+            literal_offsets: references.literal_offsets,
+            literal_values: references.literal_values,
+            literal_posting_offsets: references.literal_posting_offsets,
+            literal_sites: references.literal_sites,
         }
     }
 
@@ -134,6 +267,134 @@ impl SemanticIndex {
 
     pub fn method_count(&self) -> usize {
         self.method_descriptors.len()
+    }
+
+    pub fn reference_site_count(&self) -> usize {
+        self.reference_sites.len()
+    }
+
+    pub fn literal_count(&self) -> usize {
+        self.literal_offsets.len().saturating_sub(1)
+    }
+
+    pub fn literal_occurrence_count(&self) -> u64 {
+        self.literal_sites
+            .iter()
+            .map(|site| u64::from(site.occurrence_count()))
+            .sum()
+    }
+
+    pub fn find_literal(&self, value: &[u16]) -> Option<u32> {
+        let mut low = 0_usize;
+        let mut high = self.literal_count();
+        while low < high {
+            let middle = low + (high - low) / 2;
+            match self.literal(middle as u32).cmp(value) {
+                Ordering::Less => low = middle + 1,
+                Ordering::Greater => high = middle,
+                Ordering::Equal => return Some(middle as u32),
+            }
+        }
+        None
+    }
+
+    pub fn literal(&self, literal: u32) -> &[u16] {
+        let start = self.literal_offsets[literal as usize] as usize;
+        let end = self.literal_offsets[literal as usize + 1] as usize;
+        &self.literal_values[start..end]
+    }
+
+    pub fn literal_references(&self, literal: u32) -> &[PackedReferenceSite] {
+        let start = self.literal_posting_offsets[literal as usize] as usize;
+        let end = self.literal_posting_offsets[literal as usize + 1] as usize;
+        &self.literal_sites[start..end]
+    }
+
+    pub fn find_literals_containing(&self, query: &[u16], limit: usize) -> (Vec<u32>, bool) {
+        if query.is_empty() || limit == 0 {
+            return (Vec::new(), false);
+        }
+        let mut matches = Vec::with_capacity(limit.min(256));
+        for literal in 0..self.literal_count() {
+            if !self
+                .literal(literal as u32)
+                .windows(query.len())
+                .any(|window| window == query)
+            {
+                continue;
+            }
+            if matches.len() == limit {
+                return (matches, true);
+            }
+            matches.push(literal as u32);
+        }
+        (matches, false)
+    }
+
+    pub fn references_to(&self, target: SymbolId) -> anyhow::Result<&[PackedReferenceSite]> {
+        let target_index = self.target_storage_index(target)?;
+        let start = self.reference_offsets[target_index] as usize;
+        let end = self.reference_offsets[target_index + 1] as usize;
+        Ok(&self.reference_sites[start..end])
+    }
+
+    pub fn extra_site(&self, ordinal: u32) -> &ExtraReferenceSite {
+        &self.extra_sites[ordinal as usize]
+    }
+
+    pub fn extra_site_name(&self, site: &ExtraReferenceSite) -> &str {
+        self.extra_site_names.get(site.name_offset)
+    }
+
+    pub fn extra_site_descriptor(&self, site: &ExtraReferenceSite) -> &AsciiStr {
+        self.descriptor_pool.get(site.descriptor_offset)
+    }
+
+    pub fn member_from_ordinal(
+        &self,
+        kind: SymbolKind,
+        ordinal: u32,
+    ) -> anyhow::Result<PackedMemberId> {
+        let offsets = match kind {
+            SymbolKind::Field => &self.field_offsets,
+            SymbolKind::Method => &self.method_offsets,
+            SymbolKind::Class => return Err(anyhow!("Classes are not member ordinals")),
+        };
+        let total = *offsets.last().unwrap_or(&0);
+        ensure!(ordinal < total, "Member ordinal is out of range");
+        let class_index = offsets.partition_point(|offset| *offset <= ordinal) - 1;
+        PackedMemberId::new(
+            u32::try_from(class_index)?,
+            (ordinal - offsets[class_index]) as usize,
+        )
+    }
+
+    fn target_storage_index(&self, target: SymbolId) -> anyhow::Result<usize> {
+        let ordinal = usize::try_from(target.ordinal())?;
+        let class_count = self.class_source_ids.len();
+        match target.kind() {
+            SymbolKind::Class => {
+                ensure!(
+                    ordinal < class_count,
+                    "Class symbol ordinal is out of range"
+                );
+                Ok(ordinal)
+            }
+            SymbolKind::Field => {
+                ensure!(
+                    ordinal < self.field_count(),
+                    "Field symbol ordinal is out of range"
+                );
+                Ok(class_count + ordinal)
+            }
+            SymbolKind::Method => {
+                ensure!(
+                    ordinal < self.method_count(),
+                    "Method symbol ordinal is out of range"
+                );
+                Ok(class_count + self.field_count() + ordinal)
+            }
+        }
     }
 
     pub fn descriptor(&self, kind: SymbolKind, class_index: u32, member_index: u16) -> &AsciiStr {

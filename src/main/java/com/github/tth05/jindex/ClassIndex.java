@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
@@ -132,6 +133,119 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         return executeWhileOpen(this::getStatisticsNative);
     }
 
+    /**
+     * Returns a bounded page of indexed declaration sites that reference the target.
+     *
+     * @param target exact declaration whose incoming references should be returned
+     * @param limit maximum number of declaration sites to return
+     * @return the matching declaration sites and truncation state
+     */
+    public ReferenceSearchPage findReferences(ReferenceTarget target, int limit) {
+        Objects.requireNonNull(target, "target");
+        requirePositiveLimit(limit);
+        return executeWhileOpen(() -> findReferencesNative(
+                target.kind().ordinal(),
+                target.ownerInternalName(),
+                target.name(),
+                target.descriptor(),
+                null,
+                limit
+        ));
+    }
+
+    /**
+     * Returns a bounded page of indexed declaration sites from the selected sources that reference the target.
+     * Passing no source IDs selects no sources; use {@link #findReferences(ReferenceTarget, int)} for all sources.
+     *
+     * @param target exact declaration whose incoming references should be returned
+     * @param limit maximum number of declaration sites to return
+     * @param sourceIds opaque source IDs to include
+     * @return the matching declaration sites and truncation state
+     */
+    public ReferenceSearchPage findReferences(ReferenceTarget target, int limit, int... sourceIds) {
+        Objects.requireNonNull(target, "target");
+        requirePositiveLimit(limit);
+        int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
+        return executeWhileOpen(() -> findReferencesNative(
+                target.kind().ordinal(),
+                target.ownerInternalName(),
+                target.name(),
+                target.descriptor(),
+                normalizedSourceIds,
+                limit
+        ));
+    }
+
+    /**
+     * Returns a bounded page of indexed declaration sites containing the exact Java string literal.
+     *
+     * @param literal exact Java string value
+     * @param limit maximum number of declaration sites to return
+     * @return the matching declaration sites and truncation state
+     */
+    public ReferenceSearchPage findLiteralReferences(String literal, int limit) {
+        Objects.requireNonNull(literal, "literal");
+        requirePositiveLimit(limit);
+        return executeWhileOpen(() -> findLiteralReferencesNative(literal, null, limit));
+    }
+
+    /**
+     * Returns a bounded page of indexed declaration sites from the selected sources containing the exact Java
+     * string literal. Passing no source IDs selects no sources; use {@link #findLiteralReferences(String, int)} for
+     * all sources.
+     *
+     * @param literal exact Java string value
+     * @param limit maximum number of declaration sites to return
+     * @param sourceIds opaque source IDs to include
+     * @return the matching declaration sites and truncation state
+     */
+    public ReferenceSearchPage findLiteralReferences(String literal, int limit, int... sourceIds) {
+        Objects.requireNonNull(literal, "literal");
+        requirePositiveLimit(limit);
+        int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
+        return executeWhileOpen(() -> findLiteralReferencesNative(literal, normalizedSourceIds, limit));
+    }
+
+    /**
+     * Finds distinct Java string values containing the exact UTF-16 query.
+     *
+     * @param query exact UTF-16 substring to match
+     * @param limit maximum number of values to return
+     * @return the matching values and truncation state
+     */
+    public LiteralSearchPage findLiteralsContaining(String query, int limit) {
+        Objects.requireNonNull(query, "query");
+        requirePositiveLimit(limit);
+        return executeWhileOpen(() -> findLiteralsContainingNative(query, limit));
+    }
+
+    private static void requirePositiveLimit(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+    }
+
+    private static int[] normalizeSourceIds(int[] sourceIds) {
+        Objects.requireNonNull(sourceIds, "sourceIds");
+        int[] normalized = sourceIds.clone();
+        for (int sourceId : normalized) {
+            if (sourceId < 0) {
+                throw new IllegalArgumentException("sourceIds must not contain negative values");
+            }
+        }
+        Arrays.sort(normalized);
+        if (normalized.length < 2) {
+            return normalized;
+        }
+        int uniqueCount = 1;
+        for (int index = 1; index < normalized.length; index++) {
+            if (normalized[index] != normalized[uniqueCount - 1]) {
+                normalized[uniqueCount++] = normalized[index];
+            }
+        }
+        return Arrays.copyOf(normalized, uniqueCount);
+    }
+
     public void saveToFile(String filePath) {
         executeWhileOpen(() -> saveToFileNative(filePath));
     }
@@ -191,6 +305,19 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     private native SymbolSearchResult[] findSymbolsNative(String query, SearchOptions options, int kindMask);
 
     private native IndexStatistics getStatisticsNative();
+
+    private native ReferenceSearchPage findReferencesNative(
+            int targetKind,
+            String ownerInternalName,
+            String name,
+            String descriptor,
+            int[] sourceIds,
+            int limit
+    );
+
+    private native ReferenceSearchPage findLiteralReferencesNative(String literal, int[] sourceIds, int limit);
+
+    private native LiteralSearchPage findLiteralsContainingNative(String query, int limit);
 
     private native IndexedPackage findPackageNative(String packageName);
 
