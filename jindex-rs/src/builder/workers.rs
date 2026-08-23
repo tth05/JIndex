@@ -11,7 +11,6 @@ use cafebabe::constant_pool::NameAndType;
 use cafebabe::{parse_class_with_options, MethodAccessFlags, ParseOptions};
 use compact_str::{CompactString, ToCompactString};
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{Cursor, Read};
@@ -33,7 +32,7 @@ where
         .collect::<anyhow::Result<Vec<O>>>()?)
 }
 
-fn process_jar_worker(file_name: String) -> anyhow::Result<Vec<ClassInfo>> {
+fn process_jar_worker((source_id, file_name): (u32, String)) -> anyhow::Result<Vec<ClassInfo>> {
     let mut file_buf = Vec::new();
     let mut output = Vec::new();
     let file_path = Path::new(&file_name)
@@ -68,7 +67,7 @@ fn process_jar_worker(file_name: String) -> anyhow::Result<Vec<ClassInfo>> {
         // NOTE: While processing the class immediately makes this a bit slower, because the
         // workload is split less evenly (e.g. a single jar file has way more classes than a
         // different one), we get the benefit of using way less memory while indexing.
-        output.push(match process_class(&data) {
+        output.push(match process_class(&data, source_id, SourcePriority::Archive) {
             Ok(x) => x,
             Err(_) => continue,
         });
@@ -100,11 +99,15 @@ macro_rules! get_attribute_data {
     };
 }
 
-fn process_class_bytes_worker(bytes_queue: Vec<u8>) -> anyhow::Result<ClassInfo> {
-    process_class(&bytes_queue)
+fn process_class_bytes_worker((source_id, bytes_queue): (u32, Vec<u8>)) -> anyhow::Result<ClassInfo> {
+    process_class(&bytes_queue, source_id, SourcePriority::Direct)
 }
 
-fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
+fn process_class(
+    bytes: &[u8],
+    source_id: u32,
+    source_priority: SourcePriority,
+) -> anyhow::Result<ClassInfo> {
     let class_file = parse_class_with_options(bytes, ParseOptions::default().parse_bytecode(false))
         .map_err(|parse_error| anyhow!("{}", parse_error))
         .with_context(|| format!("Failed to parse class file {:?}", bytes))?;
@@ -139,6 +142,8 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
     )?;
 
     Ok(ClassInfo {
+        source_id,
+        source_priority,
         package_name,
         class_name: full_class_name,
         class_name_start_index,
@@ -169,6 +174,7 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
                         .ok()
                         .map(|signature_type| FieldInfo {
                             field_name: name,
+                            jvm_descriptor: f.descriptor.to_compact_string(),
                             descriptor: signature_type,
                             access_flags: f.access_flags,
                         })
@@ -206,6 +212,7 @@ fn process_class(bytes: &[u8]) -> anyhow::Result<ClassInfo> {
                     .ok()
                     .map(|signature_type| MethodInfo {
                         method_name: name,
+                        jvm_descriptor: m.descriptor.to_compact_string(),
                         signature: signature_type,
                         access_flags: m.access_flags,
                     })
@@ -226,23 +233,31 @@ pub fn create_class_index_from_sources(
     class_bytes: Vec<Vec<u8>>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
+    let archive_count = u32::try_from(jar_names.len())
+        .map_err(|_| anyhow!("More than 4294967295 archive sources"))?;
+    let jar_sources = jar_names
+        .into_iter()
+        .enumerate()
+        .map(|(index, path)| (index as u32, path))
+        .collect();
+    let direct_sources = class_bytes
+        .into_iter()
+        .enumerate()
+        .map(|(index, bytes)| {
+            let source_id = archive_count
+                .checked_add(index as u32)
+                .ok_or_else(|| anyhow!("More than 4294967295 total sources"))?;
+            Ok((source_id, bytes))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let (jar_result, class_bytes_result) = rayon::join(
-        || do_multi_threaded(jar_names, &process_jar_worker),
-        || do_multi_threaded(class_bytes, &process_class_bytes_worker),
+        || do_multi_threaded(jar_sources, &process_jar_worker),
+        || do_multi_threaded(direct_sources, &process_class_bytes_worker),
     );
 
     let mut jar_class_infos: Vec<ClassInfo> = jar_result?.into_iter().flatten().collect();
     let class_bytes_infos = class_bytes_result?;
 
-    // Direct class bytes are authoritative when the same class also exists in an archive.
-    let direct_class_names: FxHashSet<(&str, &str)> = class_bytes_infos
-        .iter()
-        .map(|info| (info.package_name.as_str(), info.class_name.as_str()))
-        .collect();
-    jar_class_infos.retain(|info| {
-        !direct_class_names.contains(&(info.package_name.as_str(), info.class_name.as_str()))
-    });
-    drop(direct_class_names);
     jar_class_infos.extend(class_bytes_infos);
 
     let mut info = BuildTimeInfo {
@@ -260,28 +275,51 @@ fn create_class_index_from_infos(
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
 
-    //Removes duplicate classes
+    // Select one deterministic source for each class. Direct class bytes have precedence over
+    // archives, then the caller's source order decides between inputs of the same kind.
     class_info_list.par_sort_unstable_by(|a, b| {
         a.class_name
             .cmp(&b.class_name)
             .then_with(|| a.package_name.cmp(&b.package_name))
+            .then_with(|| a.source_priority.cmp(&b.source_priority))
+            .then_with(|| a.source_id.cmp(&b.source_id))
     });
-    class_info_list
-        .dedup_by(|a, b| a.class_name.eq(&b.class_name) && a.package_name.eq(&b.package_name));
+    let mut selected_classes = Vec::with_capacity(class_info_list.len());
+    for class_info in class_info_list {
+        let duplicate = selected_classes.last().is_some_and(|previous: &ClassInfo| {
+            previous.class_name == class_info.class_name
+                && previous.package_name == class_info.package_name
+        });
+        if !duplicate {
+            selected_classes.push(class_info);
+        }
+    }
+    let class_info_list = selected_classes;
 
     let mut build_time_info = BuildTimeInfo {
         class_reading_time: now.elapsed().as_millis(),
         ..Default::default()
     };
 
-    let method_count = class_info_list.iter().map(|e| e.methods.len() as u32).sum();
+    let field_count = class_info_list.iter().map(|entry| entry.fields.len() as u32).sum();
+    let method_count = class_info_list
+        .iter()
+        .map(|entry| entry.methods.len() as u32)
+        .sum();
 
     let (other_info, class_index) = ClassIndexBuilder::default()
+        .with_expected_field_count(field_count)
         .with_expected_method_count(method_count)
         .build(class_info_list)?;
 
     build_time_info.merge(other_info);
     Ok((build_time_info, class_index))
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum SourcePriority {
+    Direct,
+    Archive,
 }
 
 struct ConvertedInnerClassInfo {

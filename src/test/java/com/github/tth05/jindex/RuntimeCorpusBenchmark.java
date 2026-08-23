@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -63,6 +64,7 @@ public final class RuntimeCorpusBenchmark {
                 requireClass(index, "java/lang", "String");
 
                 queryMeasurements = measureQueries(index);
+                IndexStatistics statistics = index.getStatistics();
 
                 long saveStarted = System.nanoTime();
                 index.saveToFile(persistedIndex.toString());
@@ -78,6 +80,7 @@ public final class RuntimeCorpusBenchmark {
                         sourcePreparationNanos,
                         buildNanos,
                         nativeBuildTimes,
+                        statistics,
                         saveNanos,
                         Files.size(persistedIndex),
                         loadMeasurements,
@@ -190,7 +193,29 @@ public final class RuntimeCorpusBenchmark {
         ));
         Measurement prefixClasses = measure(15, 200, () -> index.findClasses("Block", prefix));
         Measurement containsClasses = measure(15, 200, () -> index.findClasses("block", contains));
-        return new QueryMeasurements(exactClass, prefixClasses, containsClasses);
+        Measurement exactMethod = measure(15, 500, () -> index.findSymbols(
+                "defaultBlockState",
+                prefix,
+                EnumSet.of(SymbolKind.METHOD)
+        ));
+        Measurement prefixSymbols = measure(15, 200, () -> index.findSymbols(
+                "get",
+                prefix,
+                EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
+        ));
+        Measurement containsSymbols = measure(15, 200, () -> index.findSymbols(
+                "block",
+                contains,
+                EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
+        ));
+        return new QueryMeasurements(
+                exactClass,
+                prefixClasses,
+                containsClasses,
+                exactMethod,
+                prefixSymbols,
+                containsSymbols
+        );
     }
 
     private static Measurement measure(int warmups, int samples, Supplier<?> operation) {
@@ -252,6 +277,7 @@ public final class RuntimeCorpusBenchmark {
             long sourcePreparationNanos,
             long buildNanos,
             BuildTimeInfo nativeBuildTimes,
+            IndexStatistics statistics,
             long saveNanos,
             long persistedBytes,
             LoadMeasurements loads,
@@ -279,6 +305,12 @@ public final class RuntimeCorpusBenchmark {
                   "buildNanos": %d,
                   "nativeClassReadingMillis": %d,
                   "nativeIndexingMillis": %d,
+                  "selectedClassCount": %d,
+                  "fieldCount": %d,
+                  "methodCount": %d,
+                  "referenceSiteCount": %d,
+                  "literalCount": %d,
+                  "literalOccurrenceCount": %d,
                   "saveNanos": %d,
                   "persistedBytes": %d,
                   "firstLoadNanos": %d,
@@ -289,7 +321,10 @@ public final class RuntimeCorpusBenchmark {
                   "queries": {
                     "exactClass": %s,
                     "prefixClasses": %s,
-                    "containsClasses": %s
+                    "containsClasses": %s,
+                    "exactMethod": %s,
+                    "prefixSymbols": %s,
+                    "containsSymbols": %s
                   }
                 }
                 """.formatted(
@@ -312,6 +347,12 @@ public final class RuntimeCorpusBenchmark {
                 buildNanos,
                 nativeBuildTimes.getClassReadingTime(),
                 nativeBuildTimes.getIndexingTime(),
+                statistics.classCount(),
+                statistics.fieldCount(),
+                statistics.methodCount(),
+                statistics.referenceSiteCount(),
+                statistics.literalCount(),
+                statistics.literalOccurrenceCount(),
                 saveNanos,
                 persistedBytes,
                 loads.firstNanos(),
@@ -321,7 +362,10 @@ public final class RuntimeCorpusBenchmark {
                 loads.firstDeserializeMillis(),
                 queries.exactClass().json(),
                 queries.prefixClasses().json(),
-                queries.containsClasses().json()
+                queries.containsClasses().json(),
+                queries.exactMethod().json(),
+                queries.prefixSymbols().json(),
+                queries.containsSymbols().json()
         );
     }
 
@@ -398,7 +442,10 @@ public final class RuntimeCorpusBenchmark {
     private record QueryMeasurements(
             Measurement exactClass,
             Measurement prefixClasses,
-            Measurement containsClasses
+            Measurement containsClasses,
+            Measurement exactMethod,
+            Measurement prefixSymbols,
+            Measurement containsSymbols
     ) {
     }
 }

@@ -7,6 +7,7 @@ import java.lang.ref.WeakReference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -98,6 +99,38 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         throw new UnsupportedOperationException();
     }
 
+    /**
+     * Searches field and method declarations in one native call. Results retain the exact JVM descriptor and the
+     * opaque source ID selected for the declaring class.
+     *
+     * @param query the member-name query
+     * @param options matching and limit options
+     * @param kinds field and method kinds to include
+     * @return deterministically ordered matching declarations
+     */
+    public SymbolSearchResult[] findSymbols(
+            String query,
+            SearchOptions options,
+            EnumSet<SymbolKind> kinds
+    ) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(options, "options");
+        Objects.requireNonNull(kinds, "kinds");
+        int kindMask = 0;
+        if (kinds.contains(SymbolKind.FIELD)) {
+            kindMask |= 1;
+        }
+        if (kinds.contains(SymbolKind.METHOD)) {
+            kindMask |= 2;
+        }
+        int finalKindMask = kindMask;
+        return executeWhileOpen(() -> findSymbolsNative(query, options, finalKindMask));
+    }
+
+    public IndexStatistics getStatistics() {
+        return executeWhileOpen(this::getStatisticsNative);
+    }
+
     public void saveToFile(String filePath) {
         executeWhileOpen(() -> saveToFileNative(filePath));
     }
@@ -145,6 +178,10 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     private native IndexedClass findClassNative(String packageName, String className);
 
     private native IndexedClass[] findClassesNative(String query, SearchOptions options);
+
+    private native SymbolSearchResult[] findSymbolsNative(String query, SearchOptions options, int kindMask);
+
+    private native IndexStatistics getStatisticsNative();
 
     private native IndexedPackage findPackageNative(String packageName);
 

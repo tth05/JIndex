@@ -8,6 +8,7 @@ use crate::all_direct_super_types;
 use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
 use crate::package_index::{IndexedPackage, PackageIndex};
+use crate::semantic_index::SemanticIndex;
 use crate::rsplit_once;
 
 pub struct ClassIndex {
@@ -15,6 +16,7 @@ pub struct ClassIndex {
     class_prefix_range_map: FxHashMap<u8, Range<u32>>,
     package_index: PackageIndex,
     classes: Vec<IndexedClass>,
+    semantic_index: SemanticIndex,
 }
 
 impl ClassIndex {
@@ -22,6 +24,7 @@ impl ClassIndex {
         constant_pool: ClassIndexConstantPool,
         package_index: PackageIndex,
         classes: Vec<IndexedClass>,
+        semantic_index: SemanticIndex,
     ) -> Self {
         //Construct prefix range map
         let mut prefix_count_map: FxHashMap<u8, u32> = FxHashMap::default();
@@ -58,6 +61,7 @@ impl ClassIndex {
             classes,
             package_index,
             class_prefix_range_map: range_map,
+            semantic_index,
         }
     }
 
@@ -339,12 +343,20 @@ impl ClassIndex {
         &self.classes
     }
 
+    pub fn class_count(&self) -> usize {
+        self.classes.len()
+    }
+
     pub fn package_index(&self) -> &PackageIndex {
         &self.package_index
     }
 
     pub fn constant_pool(&self) -> &ClassIndexConstantPool {
         &self.constant_pool
+    }
+
+    pub fn semantic_index(&self) -> &SemanticIndex {
+        &self.semantic_index
     }
 
     pub fn class_at_index(&self, index: u32) -> &IndexedClass {

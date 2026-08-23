@@ -44,11 +44,13 @@ macro_rules! propagate_error {
         match $result {
             Ok(value) => value,
             Err(error) => {
-                $env.throw_new(
+                match $env.throw_new(
                     jni_str!("com/github/tth05/jindex/ClassIndexBuildingException"),
                     JNIString::new(error.to_string()),
-                )
-                .expect("Failed to throw exception");
+                ) {
+                    Err(jni::errors::Error::JavaException) => {}
+                    other => panic!("Failed to throw ClassIndexBuildingException: {:?}", other),
+                }
                 return Ok($return_value);
             }
         }

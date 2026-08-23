@@ -6,12 +6,16 @@ use crate::builder::BuildTimeInfo;
 use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
 use crate::package_index::IndexedPackage;
-use anyhow::Context as AnyhowContext;
+use anyhow::{bail, ensure, Context as AnyhowContext};
 use speedy::{Context, Readable, Reader, Writable, Writer};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
+
+const SNAPSHOT_MAGIC: &[u8; 8] = b"JINDEX\0\0";
+const SNAPSHOT_VERSION: u16 = 1;
+const SNAPSHOT_HEADER_LENGTH: usize = SNAPSHOT_MAGIC.len() + size_of::<u16>();
 
 pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
@@ -31,7 +35,26 @@ pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo
     };
 
     let now = Instant::now();
-    let result = ClassIndex::read_from_buffer(&output_buf)
+    ensure!(
+        output_buf.len() >= SNAPSHOT_HEADER_LENGTH,
+        "Unsupported JIndex snapshot: missing format header"
+    );
+    ensure!(
+        &output_buf[..SNAPSHOT_MAGIC.len()] == SNAPSHOT_MAGIC,
+        "Unsupported JIndex snapshot: invalid magic"
+    );
+    let version = u16::from_le_bytes([
+        output_buf[SNAPSHOT_MAGIC.len()],
+        output_buf[SNAPSHOT_MAGIC.len() + 1],
+    ]);
+    if version != SNAPSHOT_VERSION {
+        bail!(
+            "Unsupported JIndex snapshot version {}; expected {}",
+            version,
+            SNAPSHOT_VERSION
+        );
+    }
+    let result = ClassIndex::read_from_buffer(&output_buf[SNAPSHOT_HEADER_LENGTH..])
         .with_context(|| "Failed to deserialize ClassIndex")?;
     info.deserialization_time = now.elapsed().as_millis();
 
@@ -39,11 +62,21 @@ pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo
 }
 
 pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) -> anyhow::Result<()> {
-    let mut file = ZipWriter::new(OpenOptions::new().write(true).create(true).open(path)?);
+    let mut file = ZipWriter::new(
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?,
+    );
 
-    let serialized_buf = class_index
+    let payload = class_index
         .write_to_vec()
         .with_context(|| "ClassIndex serialization failed")?;
+    let mut serialized_buf = Vec::with_capacity(SNAPSHOT_HEADER_LENGTH + payload.len());
+    serialized_buf.extend_from_slice(SNAPSHOT_MAGIC);
+    serialized_buf.extend_from_slice(&SNAPSHOT_VERSION.to_le_bytes());
+    serialized_buf.extend_from_slice(&payload);
 
     file.start_file("index", FileOptions::default())
         .with_context(|| "Failed to start file")?;
@@ -62,6 +95,7 @@ where
             reader.read_value()?,
             reader.read_value()?,
             reader.read_value()?,
+            reader.read_value()?,
         ))
     }
 }
@@ -74,6 +108,7 @@ where
         self.constant_pool().write_to(writer)?;
         self.package_index().write_to(writer)?;
         self.classes().write_to(writer)?;
+        self.semantic_index().write_to(writer)?;
         Ok(())
     }
 }

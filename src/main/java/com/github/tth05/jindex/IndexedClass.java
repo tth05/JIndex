@@ -147,6 +147,13 @@ public class IndexedClass extends ClassIndexChildObject {
         return executeWhileOwnerOpen(this::getAccessFlagsNative);
     }
 
+    /**
+     * @return the opaque ID of the input source that supplied this class
+     */
+    public int getSourceId() {
+        return executeWhileOwnerOpen(this::getSourceIdNative);
+    }
+
     private native String getNameNative();
 
     private native String getSourceNameNative();
@@ -176,6 +183,8 @@ public class IndexedClass extends ClassIndexChildObject {
     private native IndexedMethod[] getMethodsNative();
 
     private native int getAccessFlagsNative();
+
+    private native int getSourceIdNative();
 
     @Override
     public String toString() {

@@ -9,6 +9,7 @@ pub mod class_index_members;
 pub mod constant_pool;
 pub mod io;
 pub mod package_index;
+pub mod semantic_index;
 pub mod signature;
 
 pub mod jni;

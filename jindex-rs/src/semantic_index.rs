@@ -1,0 +1,422 @@
+use crate::class_index::ClassIndex;
+use crate::class_index_members::IndexedClass;
+use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
+use anyhow::{anyhow, ensure};
+use ascii::AsciiStr;
+use speedy::{Readable, Writable};
+use std::cmp::Ordering;
+
+const SYMBOL_KIND_SHIFT: u64 = 62;
+const SYMBOL_ORDINAL_MASK: u64 = (1 << SYMBOL_KIND_SHIFT) - 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum SymbolKind {
+    Class = 0,
+    Field = 1,
+    Method = 2,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SymbolId(u64);
+
+impl SymbolId {
+    pub fn new(kind: SymbolKind, ordinal: u64) -> anyhow::Result<Self> {
+        ensure!(
+            ordinal <= SYMBOL_ORDINAL_MASK,
+            "Symbol ordinal {} exceeds the supported range",
+            ordinal
+        );
+        Ok(Self(((kind as u64) << SYMBOL_KIND_SHIFT) | ordinal))
+    }
+
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Readable, Writable)]
+pub struct PackedMemberId(u64);
+
+impl PackedMemberId {
+    pub fn new(class_index: u32, member_index: usize) -> anyhow::Result<Self> {
+        let member_index = u16::try_from(member_index)
+            .map_err(|_| anyhow!("A class has more than 65535 members of one kind"))?;
+        Ok(Self(
+            (u64::from(class_index) << 16) | u64::from(member_index),
+        ))
+    }
+
+    pub fn class_index(self) -> u32 {
+        (self.0 >> 16) as u32
+    }
+
+    pub fn member_index(self) -> u16 {
+        self.0 as u16
+    }
+}
+
+#[derive(Default, Readable, Writable)]
+pub struct DescriptorPool {
+    data: Vec<u8>,
+}
+
+impl DescriptorPool {
+    pub fn add(&mut self, descriptor: &str) -> anyhow::Result<u32> {
+        ensure!(descriptor.is_ascii(), "JVM descriptor is not ASCII");
+        let length = u16::try_from(descriptor.len())
+            .map_err(|_| anyhow!("JVM descriptor exceeds 65535 bytes"))?;
+        let offset =
+            u32::try_from(self.data.len()).map_err(|_| anyhow!("Descriptor pool exceeds 4 GiB"))?;
+        self.data.reserve(2 + descriptor.len());
+        self.data.extend_from_slice(&length.to_le_bytes());
+        self.data.extend_from_slice(descriptor.as_bytes());
+        Ok(offset)
+    }
+
+    pub fn get(&self, offset: u32) -> &AsciiStr {
+        let offset = offset as usize;
+        let length = u16::from_le_bytes([
+            *self.data.get(offset).expect("Invalid descriptor offset"),
+            *self
+                .data
+                .get(offset + 1)
+                .expect("Invalid descriptor length"),
+        ]) as usize;
+        let bytes = &self.data[offset + 2..offset + 2 + length];
+        unsafe { AsciiStr::from_ascii_unchecked(bytes) }
+    }
+}
+
+#[derive(Default, Readable, Writable)]
+pub struct SemanticIndex {
+    class_source_ids: Vec<u32>,
+    descriptor_pool: DescriptorPool,
+    field_offsets: Vec<u32>,
+    method_offsets: Vec<u32>,
+    field_descriptors: Vec<u32>,
+    method_descriptors: Vec<u32>,
+    field_search: Vec<PackedMemberId>,
+    method_search: Vec<PackedMemberId>,
+}
+
+impl SemanticIndex {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        class_source_ids: Vec<u32>,
+        descriptor_pool: DescriptorPool,
+        field_offsets: Vec<u32>,
+        method_offsets: Vec<u32>,
+        field_descriptors: Vec<u32>,
+        method_descriptors: Vec<u32>,
+        field_search: Vec<PackedMemberId>,
+        method_search: Vec<PackedMemberId>,
+    ) -> Self {
+        Self {
+            class_source_ids,
+            descriptor_pool,
+            field_offsets,
+            method_offsets,
+            field_descriptors,
+            method_descriptors,
+            field_search,
+            method_search,
+        }
+    }
+
+    pub fn class_source_id(&self, class_index: u32) -> u32 {
+        self.class_source_ids[class_index as usize]
+    }
+
+    pub fn field_count(&self) -> usize {
+        self.field_descriptors.len()
+    }
+
+    pub fn method_count(&self) -> usize {
+        self.method_descriptors.len()
+    }
+
+    pub fn descriptor(&self, kind: SymbolKind, class_index: u32, member_index: u16) -> &AsciiStr {
+        let (offsets, descriptors) = match kind {
+            SymbolKind::Field => (&self.field_offsets, &self.field_descriptors),
+            SymbolKind::Method => (&self.method_offsets, &self.method_descriptors),
+            SymbolKind::Class => panic!("Classes do not have JVM descriptors"),
+        };
+        let global_index = offsets[class_index as usize] as usize + member_index as usize;
+        self.descriptor_pool.get(descriptors[global_index])
+    }
+
+    pub fn symbol_id(
+        &self,
+        kind: SymbolKind,
+        class_index: u32,
+        member_index: u16,
+    ) -> anyhow::Result<SymbolId> {
+        let ordinal = match kind {
+            SymbolKind::Class => u64::from(class_index),
+            SymbolKind::Field => {
+                u64::from(self.field_offsets[class_index as usize]) + u64::from(member_index)
+            }
+            SymbolKind::Method => {
+                u64::from(self.method_offsets[class_index as usize]) + u64::from(member_index)
+            }
+        };
+        SymbolId::new(kind, ordinal)
+    }
+
+    pub fn find_members(
+        &self,
+        class_index: &ClassIndex,
+        query: &AsciiStr,
+        options: SearchOptions,
+        include_fields: bool,
+        include_methods: bool,
+    ) -> Vec<MemberSearchResult> {
+        if query.is_empty() || options.limit == 0 {
+            return Vec::new();
+        }
+
+        let included_kind_count = usize::from(include_fields) + usize::from(include_methods);
+        let mut results =
+            Vec::with_capacity(options.limit.min(256).saturating_mul(included_kind_count));
+        if include_fields {
+            self.collect_matches(
+                class_index,
+                query,
+                options,
+                SymbolKind::Field,
+                &self.field_search,
+                &mut results,
+            );
+        }
+        if include_methods {
+            self.collect_matches(
+                class_index,
+                query,
+                options,
+                SymbolKind::Method,
+                &self.method_search,
+                &mut results,
+            );
+        }
+
+        results.sort_unstable_by(|left, right| {
+            left.match_offset
+                .cmp(&right.match_offset)
+                .then_with(|| compare_member_names(class_index, *left, *right))
+                .then_with(|| (left.kind as u8).cmp(&(right.kind as u8)))
+                .then_with(|| left.member.class_index().cmp(&right.member.class_index()))
+                .then_with(|| left.member.member_index().cmp(&right.member.member_index()))
+        });
+        results.truncate(options.limit);
+        results
+    }
+
+    fn collect_matches(
+        &self,
+        class_index: &ClassIndex,
+        query: &AsciiStr,
+        options: SearchOptions,
+        kind: SymbolKind,
+        members: &[PackedMemberId],
+        output: &mut Vec<MemberSearchResult>,
+    ) {
+        if matches!(options.search_mode, SearchMode::Contains) {
+            self.collect_contains_matches(class_index, query, options, kind, output);
+            return;
+        }
+
+        let start = members.partition_point(|member| {
+            compare_ascii_folded(member_name(class_index, kind, *member), query).is_lt()
+        });
+        let mut match_count = 0;
+        for member in &members[start..] {
+            let name = member_name(class_index, kind, *member);
+            if !starts_with_ascii_ignore_case(name, query) {
+                break;
+            }
+            if let Some(match_offset) = search_ascii(name, query, options) {
+                output.push(MemberSearchResult {
+                    kind,
+                    member: *member,
+                    match_offset,
+                });
+                match_count += 1;
+                if match_count >= options.limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn collect_contains_matches(
+        &self,
+        class_index: &ClassIndex,
+        query: &AsciiStr,
+        options: SearchOptions,
+        kind: SymbolKind,
+        output: &mut Vec<MemberSearchResult>,
+    ) {
+        let constant_pool = class_index.constant_pool();
+        for (class_ordinal, class) in class_index.classes().iter().enumerate() {
+            match kind {
+                SymbolKind::Field => {
+                    for (member_ordinal, field) in class.fields().iter().enumerate() {
+                        let name = field.field_name(constant_pool);
+                        if let Some(match_offset) = search_ascii(name, query, options) {
+                            output.push(MemberSearchResult {
+                                kind,
+                                member: PackedMemberId::new(class_ordinal as u32, member_ordinal)
+                                    .expect("Indexed field no longer fits its stored identifier"),
+                                match_offset,
+                            });
+                        }
+                    }
+                }
+                SymbolKind::Method => {
+                    for (member_ordinal, method) in class.methods().iter().enumerate() {
+                        let name = method.method_name(constant_pool);
+                        if let Some(match_offset) = search_ascii(name, query, options) {
+                            output.push(MemberSearchResult {
+                                kind,
+                                member: PackedMemberId::new(class_ordinal as u32, member_ordinal)
+                                    .expect("Indexed method no longer fits its stored identifier"),
+                                match_offset,
+                            });
+                        }
+                    }
+                }
+                SymbolKind::Class => panic!("Class is not a member kind"),
+            }
+        }
+    }
+}
+
+pub(crate) fn sort_members_for_search(
+    classes: &[IndexedClass],
+    constant_pool: &ClassIndexConstantPool,
+    kind: SymbolKind,
+    members: &mut [PackedMemberId],
+) {
+    members.sort_unstable_by(|left, right| {
+        let left_name = member_name_from_parts(classes, constant_pool, kind, *left);
+        let right_name = member_name_from_parts(classes, constant_pool, kind, *right);
+        compare_ascii_folded(left_name, right_name)
+            .then_with(|| left_name.cmp(right_name))
+            .then_with(|| left.class_index().cmp(&right.class_index()))
+            .then_with(|| left.member_index().cmp(&right.member_index()))
+    });
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MemberSearchResult {
+    pub kind: SymbolKind,
+    pub member: PackedMemberId,
+    pub match_offset: usize,
+}
+
+fn member_name<'a>(
+    index: &'a ClassIndex,
+    kind: SymbolKind,
+    member: PackedMemberId,
+) -> &'a AsciiStr {
+    member_name_from_parts(index.classes(), index.constant_pool(), kind, member)
+}
+
+fn member_name_from_parts<'a>(
+    classes: &'a [IndexedClass],
+    constant_pool: &'a ClassIndexConstantPool,
+    kind: SymbolKind,
+    member: PackedMemberId,
+) -> &'a AsciiStr {
+    let class = &classes[member.class_index() as usize];
+    match kind {
+        SymbolKind::Field => {
+            class.fields()[member.member_index() as usize].field_name(constant_pool)
+        }
+        SymbolKind::Method => {
+            class.methods()[member.member_index() as usize].method_name(constant_pool)
+        }
+        SymbolKind::Class => panic!("Class is not a member kind"),
+    }
+}
+
+fn compare_member_names(
+    index: &ClassIndex,
+    left: MemberSearchResult,
+    right: MemberSearchResult,
+) -> Ordering {
+    let left_name = member_name(index, left.kind, left.member);
+    let right_name = member_name(index, right.kind, right.member);
+    compare_ascii_folded(left_name, right_name).then_with(|| left_name.cmp(right_name))
+}
+
+fn compare_ascii_folded(left: &AsciiStr, right: &AsciiStr) -> Ordering {
+    left.as_bytes()
+        .iter()
+        .map(u8::to_ascii_lowercase)
+        .cmp(right.as_bytes().iter().map(u8::to_ascii_lowercase))
+}
+
+fn starts_with_ascii_ignore_case(value: &AsciiStr, prefix: &AsciiStr) -> bool {
+    value.len() >= prefix.len()
+        && value.as_bytes()[..prefix.len()]
+            .iter()
+            .zip(prefix.as_bytes())
+            .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+}
+
+fn search_ascii(value: &AsciiStr, query: &AsciiStr, options: SearchOptions) -> Option<usize> {
+    if query.len() > value.len() {
+        return None;
+    }
+    let last_start = match options.search_mode {
+        SearchMode::Prefix => 0,
+        SearchMode::Contains => value.len() - query.len(),
+    };
+    for start in 0..=last_start {
+        let matches = value.as_bytes()[start..start + query.len()]
+            .iter()
+            .zip(query.as_bytes().iter())
+            .enumerate()
+            .all(|(offset, (actual, expected))| match options.match_mode {
+                MatchMode::MatchCase => actual == expected,
+                MatchMode::IgnoreCase => actual.eq_ignore_ascii_case(expected),
+                MatchMode::MatchCaseFirstCharOnly if start == 0 && offset == 0 => {
+                    actual == expected
+                }
+                MatchMode::MatchCaseFirstCharOnly => actual.eq_ignore_ascii_case(expected),
+            });
+        if matches {
+            return Some(start);
+        }
+        if matches!(options.search_mode, SearchMode::Prefix) {
+            break;
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_member_id_is_eight_bytes() {
+        assert_eq!(std::mem::size_of::<PackedMemberId>(), 8);
+    }
+
+    #[test]
+    fn descriptor_pool_accepts_descriptors_longer_than_legacy_names() {
+        let descriptor = format!("({})V", "Ljava/lang/String;".repeat(20));
+        let mut pool = DescriptorPool::default();
+        let offset = pool.add(&descriptor).unwrap();
+        assert_eq!(pool.get(offset).as_str(), descriptor);
+    }
+
+    #[test]
+    fn symbol_ids_are_tagged_without_losing_the_ordinal() {
+        let id = SymbolId::new(SymbolKind::Method, 123_456).unwrap();
+        assert_eq!(id.as_u64(), (2_u64 << SYMBOL_KIND_SHIFT) | 123_456);
+    }
+}

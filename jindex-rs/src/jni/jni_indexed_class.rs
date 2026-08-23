@@ -159,6 +159,26 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getAcces
 
 #[no_mangle]
 /// # Safety
+/// The pointer fields have to identify a live class index and one of its classes.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSourceIdNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+) -> jint {
+    with_jni_env!(env, {
+        let (_, class_index) = get_class_index(env, &this);
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        class_index
+            .semantic_index()
+            .class_source_id(indexed_class.index()) as jint
+    })
+}
+
+#[no_mangle]
+/// # Safety
 /// The pointer field has to be valid...
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getFieldsNative(
     mut env: EnvUnowned<'_>,

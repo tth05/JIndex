@@ -14,6 +14,7 @@ import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -97,7 +98,10 @@ public class BasicTest {
             );
             byte[] directClass = compileFixture(
                     workspace.resolve("direct-compile"),
-                    "package mixed; public class Fixture { public int directField; }"
+                    "package mixed; public class Fixture {"
+                            + " public int directField;"
+                            + " public String directMethod(int value) { return Integer.toString(value); }"
+                            + " }"
             );
             Path archive = workspace.resolve("fixture.jar");
             try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {
@@ -112,8 +116,72 @@ public class BasicTest {
             )) {
                 IndexedClass fixture = mixedIndex.findClass("mixed", "Fixture");
                 assertNotNull(fixture);
+                assertEquals(1, fixture.getSourceId());
                 assertTrue(Arrays.stream(fixture.getFields()).anyMatch(field -> field.getName().equals("directField")));
                 assertFalse(Arrays.stream(fixture.getFields()).anyMatch(field -> field.getName().equals("archiveField")));
+
+                SymbolSearchResult[] symbols = mixedIndex.findSymbols(
+                        "direct",
+                        SearchOptions.with(
+                                SearchOptions.SearchMode.PREFIX,
+                                SearchOptions.MatchMode.IGNORE_CASE,
+                                10
+                        ),
+                        EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
+                );
+                assertArrayEquals(
+                        new String[]{"directField:I", "directMethod:(I)Ljava/lang/String;"},
+                        Arrays.stream(symbols)
+                                .map(symbol -> symbol.name() + ":" + symbol.descriptor())
+                                .toArray(String[]::new)
+                );
+                assertTrue(Arrays.stream(symbols).allMatch(symbol -> symbol.sourceId() == 1));
+                assertTrue(Arrays.stream(symbols).allMatch(symbol -> symbol.ownerInternalName().equals("mixed/Fixture")));
+                assertEquals(2, Arrays.stream(symbols).mapToLong(SymbolSearchResult::symbolId).distinct().count());
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
+    public void testSymbolSearchRanksAcrossKindsBeforeApplyingLimit() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-symbol-order-");
+        try {
+            byte[] fixture = compileFixture(
+                    workspace.resolve("compile"),
+                    "package mixed; public class Fixture {"
+                            + " public int matchZ;"
+                            + " public void matchA() {}"
+                            + " }"
+            );
+            try (ClassIndex fixtureIndex = ClassIndex.fromBytes(List.of(fixture))) {
+                SymbolSearchResult[] symbols = fixtureIndex.findSymbols(
+                        "match",
+                        SearchOptions.with(
+                                SearchOptions.SearchMode.PREFIX,
+                                SearchOptions.MatchMode.IGNORE_CASE,
+                                1
+                        ),
+                        EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
+                );
+                assertEquals(1, symbols.length);
+                assertEquals(SymbolKind.METHOD, symbols[0].kind());
+                assertEquals("matchA", symbols[0].name());
+
+                SymbolSearchResult[] contains = fixtureIndex.findSymbols(
+                        "atch",
+                        SearchOptions.with(
+                                SearchOptions.SearchMode.CONTAINS,
+                                SearchOptions.MatchMode.IGNORE_CASE,
+                                10
+                        ),
+                        EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
+                );
+                assertArrayEquals(
+                        new String[]{"matchA", "matchZ"},
+                        Arrays.stream(contains).map(SymbolSearchResult::name).toArray(String[]::new)
+                );
             }
         } finally {
             deleteTree(workspace);
@@ -208,6 +276,64 @@ public class BasicTest {
                 .anyMatch(method -> method.getName().equals("lastIndexOf")));
     }
 
+    @Test
+    public void testSymbolSearchSurvivesPersistence() {
+        IndexStatistics statistics = index.getStatistics();
+        assertTrue(statistics.classCount() > 0);
+        assertTrue(statistics.fieldCount() > 0);
+        assertTrue(statistics.methodCount() > 0);
+        assertEquals(0, statistics.referenceSiteCount());
+        SymbolSearchResult[] results = index.findSymbols(
+                "lastIndexOf",
+                SearchOptions.with(
+                        SearchOptions.SearchMode.PREFIX,
+                        SearchOptions.MatchMode.MATCH_CASE,
+                        100
+                ),
+                EnumSet.of(SymbolKind.METHOD)
+        );
+
+        assertTrue(Arrays.stream(results).anyMatch(result ->
+                result.kind() == SymbolKind.METHOD
+                        && result.ownerInternalName().equals("java/lang/String")
+                        && result.name().equals("lastIndexOf")
+                        && result.descriptor().equals("(I)I")
+        ));
+        assertEquals(0, index.findClass("java/lang", "String").getSourceId());
+        assertEquals(
+                0,
+                index.findSymbols(
+                        "lastIndexOf",
+                        SearchOptions.defaultOptions(),
+                        EnumSet.noneOf(SymbolKind.class)
+                ).length
+        );
+    }
+
+    @Test
+    public void testSnapshotFormatFailsExactly() throws Exception {
+        Path malformed = Files.createTempFile("jindex-malformed-", ".zip");
+        Path unsupported = Files.createTempFile("jindex-unsupported-", ".zip");
+        try {
+            writeIndexPayload(malformed, new byte[]{1, 2, 3});
+            ClassIndexBuildingException missingHeader = assertThrows(
+                    ClassIndexBuildingException.class,
+                    () -> ClassIndex.fromFile(malformed.toString())
+            );
+            assertTrue(missingHeader.getMessage().contains("missing format header"));
+
+            writeIndexPayload(unsupported, new byte[]{'J', 'I', 'N', 'D', 'E', 'X', 0, 0, 2, 0});
+            ClassIndexBuildingException unknownVersion = assertThrows(
+                    ClassIndexBuildingException.class,
+                    () -> ClassIndex.fromFile(unsupported.toString())
+            );
+            assertTrue(unknownVersion.getMessage().contains("snapshot version 2; expected 1"));
+        } finally {
+            Files.deleteIfExists(malformed);
+            Files.deleteIfExists(unsupported);
+        }
+    }
+
     private static void assertClosed(Executable operation) {
         IllegalStateException exception = assertThrows(IllegalStateException.class, operation);
         assertEquals("Class index is closed", exception.getMessage());
@@ -231,6 +357,14 @@ public class BasicTest {
         assertNotNull(compiler);
         assertEquals(0, compiler.run(null, null, null, "-d", classes.toString(), source.toString()));
         return Files.readAllBytes(classes.resolve("mixed/Fixture.class"));
+    }
+
+    private static void writeIndexPayload(Path output, byte[] payload) throws Exception {
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(output))) {
+            zip.putNextEntry(new ZipEntry("index"));
+            zip.write(payload);
+            zip.closeEntry();
+        }
     }
 
     private static void deleteTree(Path root) throws Exception {

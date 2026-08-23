@@ -44,6 +44,39 @@ Current query latency:
 | Case-insensitive class prefix | 77.4 us | 136.0 us |
 | Case-insensitive class contains | 236.5 us | 305.0 us |
 
+## Flattened declaration slice
+
+The first 1.1 implementation slice stores source IDs, exact JVM descriptors, typed field and method IDs, and name-sorted member lookup tables. The run below uses the same manifest and fresh-JVM process shape as the baseline.
+
+| Measurement | Metadata baseline | Declaration slice |
+|---|---:|---:|
+| Selected classes | 170,213 | 170,213 |
+| Fields | not recorded | 584,761 |
+| Methods | not recorded | 1,244,579 |
+| Java-observed native build call | 2,786.1 ms | 6,584.5 ms |
+| Native class reading | 1,304 ms | 1,766 ms |
+| Native index construction | 1,010 ms | 4,147 ms |
+| Save compressed index | 2,288.9 ms | 4,156.9 ms |
+| Persisted index size | 15,562,682 bytes | 27,562,209 bytes |
+| First load | 320.6 ms | 470.4 ms |
+| Warm load p50 | 263.9 ms | 405.6 ms |
+| Warm load p95 | 338.9 ms | 516.5 ms |
+| Peak process working set | 1,724,370,944 bytes | 1,930,379,264 bytes |
+
+Member query latency:
+
+| Query | p50 | p95 |
+|---|---:|---:|
+| Exact method-name prefix | 25.5 us | 57.2 us |
+| Case-insensitive field and method prefix | 329.5 us | 584.1 us |
+| Case-insensitive field and method contains | 67.4 ms | 77.8 ms |
+
+Prefix lookup binary-searches name-sorted packed member IDs and reads at most the requested result range. Contains lookup walks each class's contiguous field and method arrays. The contains result includes both kinds. An earlier 31.6 ms prototype omitted methods whenever fields filled the result limit, so it is not a valid comparison point.
+
+The declaration slice increases persisted size by 12.0 MB and peak working set by 206.0 MB. Most of the retained increase comes from 1,829,340 packed member IDs plus exact descriptor storage. The sort and larger compressed snapshot account for most of the cold-build and save cost. These costs stay visible while the reference representation is developed. They are not treated as free or hidden inside the original baseline.
+
+The full Java/native suite passed 11 tests after this run. It covers mixed-source precedence, source identity, cross-kind result limits, prefix and contains ordering, exact descriptors, persistence, lifecycle safety, and precise snapshot-version failures.
+
 ## Comparison rules
 
 Every format experiment must use the same manifest, Java runtime, and benchmark process shape. Report at least:

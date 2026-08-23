@@ -17,6 +17,7 @@ use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{get_class_index, init_field_ids};
 use crate::jni::{get_enum_ordinal, propagate_error, with_jni_env};
 use crate::package_index::IndexedPackage;
+use crate::semantic_index::SymbolKind;
 
 #[no_mangle]
 /// # Safety
@@ -217,6 +218,35 @@ unsafe fn convert_build_time_info(env: &mut Env<'_>, info: BuildTimeInfo) -> job
     .into_raw()
 }
 
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getStatisticsNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+) -> jobject {
+    with_jni_env!(env, {
+        let (_, class_index) = get_class_index(env, &this);
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/IndexStatistics"))
+            .expect("Unable to find statistics class");
+        env.new_object(
+            &result_class,
+            jni_sig!("(JJJJJJ)V"),
+            &[
+                JValue::Long(class_index.class_count() as jlong),
+                JValue::Long(class_index.semantic_index().field_count() as jlong),
+                JValue::Long(class_index.semantic_index().method_count() as jlong),
+                JValue::Long(0),
+                JValue::Long(0),
+                JValue::Long(0),
+            ],
+        )
+        .expect("Unable to create statistics")
+        .into_raw()
+    })
+}
+
 macro_rules! java_to_ascii_string {
     ($env:expr, $jstring:ident) => {
         java_to_ascii_string!($env, $jstring, |s| s)
@@ -227,11 +257,13 @@ macro_rules! java_to_ascii_string {
         match env_str.into_ascii_string() {
             Ok(s) => s,
             Err(e) => {
-                $env.throw_new(
+                match $env.throw_new(
                     jni_str!("java/lang/IllegalArgumentException"),
                     JNIString::new(format!("'{}' is not an ASCII string", e.into_source())),
-                )
-                .expect("Unable to throw exception");
+                ) {
+                    Err(jni::errors::Error::JavaException) => {}
+                    other => panic!("Failed to throw IllegalArgumentException: {:?}", other),
+                }
                 return Ok(JObject::null().into_raw());
             }
         }
@@ -282,6 +314,94 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
             result_array
                 .set_element(env, index, &object)
                 .expect("Failed to set element into result array");
+        }
+
+        result_array.into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbolsNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    input: JString,
+    options: JObject,
+    kind_mask: jni::sys::jint,
+) -> jobjectArray {
+    with_jni_env!(env, {
+        let input = java_to_ascii_string!(env, input);
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/SymbolSearchResult"))
+            .expect("Result class not found");
+        let (_, class_index) = get_class_index(env, &this);
+        let results = class_index.semantic_index().find_members(
+            class_index,
+            &input,
+            propagate_error!(
+                env,
+                convert_search_options(env, options),
+                JObject::null().into_raw()
+            ),
+            kind_mask & 1 != 0,
+            kind_mask & 2 != 0,
+        );
+        let result_array = env
+            .new_object_array(results.len() as i32, &result_class, JObject::null())
+            .expect("Failed to create result array");
+
+        for (index, result) in results.into_iter().enumerate() {
+            env.with_local_frame(8, |env| -> jni::errors::Result<()> {
+                let owner = class_index.class_at_index(result.member.class_index());
+                let (name, access_flags) = match result.kind {
+                    SymbolKind::Field => {
+                        let field = &owner.fields()[result.member.member_index() as usize];
+                        (
+                            field.field_name(class_index.constant_pool()),
+                            field.access_flags(),
+                        )
+                    }
+                    SymbolKind::Method => {
+                        let method = &owner.methods()[result.member.member_index() as usize];
+                        (
+                            method.method_name(class_index.constant_pool()),
+                            method.access_flags(),
+                        )
+                    }
+                    SymbolKind::Class => unreachable!(),
+                };
+                let symbol_id = class_index
+                    .semantic_index()
+                    .symbol_id(result.kind, result.member.class_index(), result.member.member_index())
+                    .expect("Invalid symbol ordinal");
+                let owner_name = env.new_string(owner.class_name_with_package(
+                    class_index.package_index(),
+                    class_index.constant_pool(),
+                ))?;
+                let name = env.new_string(name)?;
+                let descriptor = env.new_string(class_index.semantic_index().descriptor(
+                    result.kind,
+                    result.member.class_index(),
+                    result.member.member_index(),
+                ))?;
+                let object = env.new_object(
+                    &result_class,
+                    jni_sig!("(JILjava/lang/String;Ljava/lang/String;Ljava/lang/String;II)V"),
+                    &[
+                        JValue::Long(symbol_id.as_u64() as jlong),
+                        JValue::Int(result.kind as i32),
+                        JValue::Object(&owner_name),
+                        JValue::Object(&name),
+                        JValue::Object(&descriptor),
+                        JValue::Int(class_index.semantic_index().class_source_id(owner.index()) as i32),
+                        JValue::Int(access_flags as i32),
+                    ],
+                )?;
+                result_array.set_element(env, index, &object)?;
+                Ok(())
+            })
+            .expect("Failed to create symbol result");
         }
 
         result_array.into_raw()
