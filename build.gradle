@@ -31,6 +31,18 @@ tasks.register('benchmarkInitialIndex', JavaExec) {
     mainClass = 'com.github.tth05.jindex.InitialIndexBenchmark'
 }
 
+tasks.register('benchmarkRuntimeCorpus', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.github.tth05.jindex.RuntimeCorpusBenchmark'
+
+    def benchmarkManifest = providers.gradleProperty('benchmarkManifest')
+    def benchmarkOutput = providers.gradleProperty('benchmarkOutput')
+    doFirst {
+        args benchmarkManifest.get(), benchmarkOutput.get()
+    }
+}
+
 def rustProjectDirectory = file("${projectDir}/jindex-rs")
 def nativeLibrary = file("${rustProjectDirectory}/target/release/jindex_rs.dll")
 def generatedNativeResources = layout.buildDirectory.dir('generated-resources/jindex')
