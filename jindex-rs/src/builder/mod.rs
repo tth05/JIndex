@@ -10,8 +10,6 @@ use crate::semantic_index::{
     sort_members_for_search, DescriptorPool, PackedMemberId, SemanticIndex, SymbolKind,
 };
 use anyhow::anyhow;
-use ascii::{AsciiChar, AsciiStr, AsciiString};
-use cafebabe::{FieldAccessFlags, MethodAccessFlags};
 use compact_str::CompactString;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -19,6 +17,7 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::time::Instant;
 
 pub mod workers;
+mod classfile_parser;
 
 pub(crate) type ClassToIndexMap<'a> = FxHashMap<(&'a str, &'a str), (u32, &'a IndexedClass)>;
 
@@ -171,7 +170,7 @@ impl ClassIndexBuilder {
 
                 indexed_fields.push(IndexedField::new(
                     field_name_index,
-                    field_info.access_flags.bits(),
+                    field_info.access_flags,
                     field_info.descriptor.to_indexed_type(
                         &mut constant_pool,
                         &mut constant_pool_map,
@@ -206,7 +205,7 @@ impl ClassIndexBuilder {
 
                 indexed_methods.push(IndexedMethod::new(
                     method_name_index,
-                    method_info.access_flags.bits(),
+                    method_info.access_flags,
                     method_info.signature.to_indexed_type(
                         &mut constant_pool,
                         &mut constant_pool_map,
@@ -375,7 +374,7 @@ struct FieldInfo {
     pub field_name: CompactString,
     pub jvm_descriptor: CompactString,
     pub descriptor: RawSignatureType,
-    pub access_flags: FieldAccessFlags,
+    pub access_flags: u16,
 }
 
 #[derive(Debug)]
@@ -383,7 +382,7 @@ struct MethodInfo {
     pub method_name: CompactString,
     pub jvm_descriptor: CompactString,
     pub signature: RawMethodSignature,
-    pub access_flags: MethodAccessFlags,
+    pub access_flags: u16,
 }
 
 #[derive(Debug, Default)]

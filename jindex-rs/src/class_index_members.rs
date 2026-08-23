@@ -6,9 +6,10 @@ use crate::signature::{
 };
 use ascii::{AsAsciiStr, AsciiStr, AsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell};
-use cafebabe::MethodAccessFlags;
 use once_cell::unsync::OnceCell;
 use speedy::{Readable, Writable};
+
+const ACC_PRIVATE: u16 = 0x0002;
 
 pub struct IndexedClass {
     index: OnceCell<u32>,
@@ -73,13 +74,17 @@ impl IndexedClass {
     ) -> AsciiString {
         self.name_with_package(self.class_name(constant_pool), package_index, constant_pool)
     }
-    
+
     pub fn simple_class_name_with_package(
         &self,
         package_index: &PackageIndex,
         constant_pool: &ClassIndexConstantPool,
     ) -> AsciiString {
-        self.name_with_package(self.simple_class_name(constant_pool), package_index, constant_pool)
+        self.name_with_package(
+            self.simple_class_name(constant_pool),
+            package_index,
+            constant_pool,
+        )
     }
 
     fn name_with_package(
@@ -250,7 +255,7 @@ impl IndexedMethod {
 
     pub fn overrides(&self, base_method: &IndexedMethod) -> bool {
         // If the target method is private, we can't override it
-        if MethodAccessFlags::PRIVATE.bits() & base_method.access_flags != 0 {
+        if ACC_PRIVATE & base_method.access_flags != 0 {
             return false;
         }
 

@@ -33,12 +33,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "bitflags"
-version = "1.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
-
-[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -49,15 +43,6 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
-
-[[package]]
-name = "cafebabe"
-version = "0.5.0"
-source = "git+https://github.com/tth05/cafebabe?rev=db42ccd08d75e1ce3c83ffb026a6e26aa0b5ab72#db42ccd08d75e1ce3c83ffb026a6e26aa0b5ab72"
-dependencies = [
- "bitflags",
- "cesu8",
-]
 
 [[package]]
 name = "castaway"
@@ -77,12 +62,6 @@ dependencies = [
  "find-msvc-tools",
  "shlex",
 ]
-
-[[package]]
-name = "cesu8"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
 name = "cfg-if"
@@ -180,9 +159,9 @@ dependencies = [
  "anyhow",
  "ascii",
  "atomic_refcell",
- "cafebabe",
  "compact_str",
  "jni",
+ "jvmti-bindings",
  "mimalloc",
  "once_cell",
  "rayon",
@@ -239,6 +218,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "jvmti-bindings"
+version = "3.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe66104d0666e97ebcdda2a31ef46270fdb2452637d48796f828c4f238bf5303"
 
 [[package]]
 name = "libmimalloc-sys"

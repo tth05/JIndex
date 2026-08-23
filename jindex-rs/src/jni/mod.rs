@@ -2,9 +2,10 @@ use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
 use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, SignatureType};
 use ascii::AsAsciiStr;
-use cafebabe::attributes::InnerClassAccessFlags;
 use jni::objects::JObject;
 use jni::{jni_sig, jni_str, Env};
+
+const ACC_STATIC: u16 = 0x0008;
 
 mod cache;
 pub mod jni_class_index;
@@ -46,7 +47,7 @@ macro_rules! propagate_error {
             Err(error) => {
                 match $env.throw_new(
                     jni_str!("com/github/tth05/jindex/ClassIndexBuildingException"),
-                    JNIString::new(error.to_string()),
+                    JNIString::new(format!("{error:#}")),
                 ) {
                     Err(jni::errors::Error::JavaException) => {}
                     other => panic!("Failed to throw ClassIndexBuildingException: {:?}", other),
@@ -77,7 +78,7 @@ fn collect_type_parameters<'a>(
     }
 
     // Don't check enclosing classes for static inner classes
-    if current_class.access_flags() & InnerClassAccessFlags::STATIC.bits() != 0 {
+    if current_class.access_flags() & ACC_STATIC != 0 {
         return;
     }
 

@@ -77,6 +77,14 @@ The declaration slice increases persisted size by 12.0 MB and peak working set b
 
 The full Java/native suite passed 11 tests after this run. It covers mixed-source precedence, source identity, cross-kind result limits, prefix and contains ordering, exact descriptors, persistence, lifecycle safety, and precise snapshot-version failures.
 
+## Class-file parser prerequisite
+
+Reference extraction needs code, bootstrap methods, annotations, records, sealed-class metadata, and the newer constant-pool forms in one parse. The pinned `cafebabe` fork deliberately disabled most attribute parsing, so JIndex now uses `jvmti-bindings` 3.0.2 and removes the old parser.
+
+The migration was checked against the same production corpus. It selects exactly 170,213 classes, 584,761 fields, and 1,244,579 methods, matching the declaration slice. The persisted file differs by 11 bytes because the parser representations are not byte-identical before compression. A clean 13-test suite covers records, sealed classes, string-concat bootstrap metadata, source precedence, persistence, and lifecycle behavior.
+
+One production class contains the method `generateGrötzschGraph`. JVM member names may be Unicode, but JIndex's compact declaration-name pool and search API remain ASCII-only. The builder therefore retains that class and its 77 supported methods while excluding the one unsupported declaration, which is the previous format's behavior. Other parse failures now identify the archive and entry and fail the build instead of silently omitting a class.
+
 ## Comparison rules
 
 Every format experiment must use the same manifest, Java runtime, and benchmark process shape. Report at least:

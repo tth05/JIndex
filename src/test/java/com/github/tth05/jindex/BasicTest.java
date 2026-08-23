@@ -215,6 +215,65 @@ public class BasicTest {
     }
 
     @Test
+    public void testJava21ClassFileStructuresAreIndexed() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-java21-classfile-");
+        try {
+            byte[] record = compileFixture(
+                    workspace.resolve("record"),
+                    "package mixed; public record Fixture(int value) {"
+                            + " public String display() { return \"value=\" + value; }"
+                            + " }"
+            );
+            byte[] sealedClass = compileFixture(
+                    workspace.resolve("sealed"),
+                    "package mixed; public sealed class Fixture permits Fixture.Child {"
+                            + " public static final class Child extends Fixture {}"
+                            + " }"
+            );
+
+            try (ClassIndex recordIndex = ClassIndex.fromBytes(List.of(record));
+                 ClassIndex sealedIndex = ClassIndex.fromBytes(List.of(sealedClass))) {
+                IndexedClass indexedRecord = recordIndex.findClass("mixed", "Fixture");
+                assertNotNull(indexedRecord);
+                assertTrue(Arrays.stream(indexedRecord.getFields())
+                        .anyMatch(field -> field.getName().equals("value")));
+                assertTrue(Arrays.stream(indexedRecord.getMethods())
+                        .anyMatch(method -> method.getName().equals("display")));
+                assertNotNull(sealedIndex.findClass("mixed", "Fixture"));
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
+    public void testNonAsciiMemberDoesNotExcludeItsClass() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-unicode-member-");
+        try {
+            byte[] fixture = compileFixture(
+                    workspace.resolve("compile"),
+                    "package mixed; public class Fixture {"
+                            + " public int supportedField;"
+                            + " public void supportedMethod() {}"
+                            + " public void generateGrötzschGraph() {}"
+                            + " }"
+            );
+            try (ClassIndex fixtureIndex = ClassIndex.fromBytes(List.of(fixture))) {
+                IndexedClass indexedClass = fixtureIndex.findClass("mixed", "Fixture");
+                assertNotNull(indexedClass);
+                assertTrue(Arrays.stream(indexedClass.getFields())
+                        .anyMatch(field -> field.getName().equals("supportedField")));
+                assertTrue(Arrays.stream(indexedClass.getMethods())
+                        .anyMatch(method -> method.getName().equals("supportedMethod")));
+                assertFalse(Arrays.stream(indexedClass.getMethods())
+                        .anyMatch(method -> method.getName().equals("generateGrötzschGraph")));
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
     public void testCloseIsIdempotentAndGuardsIndexOperations() {
         ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
         closedIndex.close();
