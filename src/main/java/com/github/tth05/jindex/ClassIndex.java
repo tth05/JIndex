@@ -7,6 +7,7 @@ import java.lang.ref.WeakReference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
@@ -171,7 +172,14 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private native BuildTimeInfo createClassIndexFromJars(List<String> classes);
 
-    private native BuildTimeInfo createClassIndexFromSources(List<String> jarFilePaths, List<byte[]> classes);
+    private native BuildTimeInfo createClassIndexFromExplicitSources(
+            List<String> jarFilePaths,
+            int[] jarSourceIds,
+            int[] jarInputOrders,
+            List<byte[]> classes,
+            int[] classSourceIds,
+            int[] classInputOrders
+    );
 
     private native BuildTimeInfo loadClassIndexFromFile(String filePath);
 
@@ -313,8 +321,70 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     public static ClassIndex fromSources(List<String> jarFilePaths, List<byte[]> classes) {
         Objects.requireNonNull(jarFilePaths, "jarFilePaths");
         Objects.requireNonNull(classes, "classes");
+        List<IndexSource> sources = new ArrayList<>(Math.addExact(jarFilePaths.size(), classes.size()));
+        for (int index = 0; index < classes.size(); index++) {
+            sources.add(IndexSource.classFile(Math.addExact(jarFilePaths.size(), index), classes.get(index)));
+        }
+        for (int index = 0; index < jarFilePaths.size(); index++) {
+            sources.add(IndexSource.archive(index, jarFilePaths.get(index)));
+        }
+        return fromSources(sources);
+    }
+
+    /**
+     * Creates a class index from ordered inputs with caller-owned source IDs. Earlier inputs win
+     * when multiple sources define the same class. A source ID may be shared by any number of
+     * archive and class-file inputs.
+     *
+     * @param sources inputs in descending precedence order
+     * @return the class index
+     */
+    public static ClassIndex fromSources(List<? extends IndexSource> sources) {
+        Objects.requireNonNull(sources, "sources");
+        List<? extends IndexSource> orderedSources = List.copyOf(sources);
+        int archiveCount = 0;
+        int classCount = 0;
+        for (IndexSource source : orderedSources) {
+            switch (source) {
+                case IndexSource.Archive ignored -> archiveCount++;
+                case IndexSource.ClassFile ignored -> classCount++;
+            }
+        }
+
+        List<String> jarFilePaths = new ArrayList<>(archiveCount);
+        int[] jarSourceIds = new int[archiveCount];
+        int[] jarInputOrders = new int[archiveCount];
+        List<byte[]> classes = new ArrayList<>(classCount);
+        int[] classSourceIds = new int[classCount];
+        int[] classInputOrders = new int[classCount];
+        int archiveIndex = 0;
+        int classIndex = 0;
+        for (int inputOrder = 0; inputOrder < orderedSources.size(); inputOrder++) {
+            switch (orderedSources.get(inputOrder)) {
+                case IndexSource.Archive archive -> {
+                    jarFilePaths.add(archive.path());
+                    jarSourceIds[archiveIndex] = archive.sourceId();
+                    jarInputOrders[archiveIndex] = inputOrder;
+                    archiveIndex++;
+                }
+                case IndexSource.ClassFile classFile -> {
+                    classes.add(classFile.bytes());
+                    classSourceIds[classIndex] = classFile.sourceId();
+                    classInputOrders[classIndex] = inputOrder;
+                    classIndex++;
+                }
+            }
+        }
+
         ClassIndex c = new ClassIndex();
-        c.buildTimeInfo = c.createClassIndexFromSources(jarFilePaths, classes);
+        c.buildTimeInfo = c.createClassIndexFromExplicitSources(
+                jarFilePaths,
+                jarSourceIds,
+                jarInputOrders,
+                classes,
+                classSourceIds,
+                classInputOrders
+        );
         c.registerCleanup();
         return c;
     }

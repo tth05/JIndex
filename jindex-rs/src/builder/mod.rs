@@ -358,7 +358,7 @@ impl Default for ClassIndexBuilder {
 #[derive(Debug)]
 struct ClassInfo {
     pub source_id: u32,
-    pub source_priority: workers::SourcePriority,
+    pub input_order: u32,
     pub package_name: CompactString,
     pub class_name: CompactString,
     pub class_name_start_index: usize,

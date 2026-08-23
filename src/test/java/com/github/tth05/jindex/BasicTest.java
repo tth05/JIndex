@@ -139,6 +139,32 @@ public class BasicTest {
                 assertTrue(Arrays.stream(symbols).allMatch(symbol -> symbol.ownerInternalName().equals("mixed/Fixture")));
                 assertEquals(2, Arrays.stream(symbols).mapToLong(SymbolSearchResult::symbolId).distinct().count());
             }
+
+            try (ClassIndex explicitIndex = ClassIndex.fromSources(List.of(
+                    IndexSource.classFile(42, directClass),
+                    IndexSource.classFile(42, readClassBytes(java.util.ArrayList.class)),
+                    IndexSource.archive(7, archive.toString())
+            ))) {
+                IndexedClass fixture = explicitIndex.findClass("mixed", "Fixture");
+                IndexedClass arrayList = explicitIndex.findClass("java/util", "ArrayList");
+                assertNotNull(fixture);
+                assertNotNull(arrayList);
+                assertEquals(42, fixture.getSourceId());
+                assertEquals(42, arrayList.getSourceId());
+                assertTrue(Arrays.stream(fixture.getFields())
+                        .anyMatch(field -> field.getName().equals("directField")));
+            }
+
+            try (ClassIndex archiveFirst = ClassIndex.fromSources(List.of(
+                    IndexSource.archive(7, archive.toString()),
+                    IndexSource.classFile(42, directClass)
+            ))) {
+                IndexedClass fixture = archiveFirst.findClass("mixed", "Fixture");
+                assertNotNull(fixture);
+                assertEquals(7, fixture.getSourceId());
+                assertTrue(Arrays.stream(fixture.getFields())
+                        .anyMatch(field -> field.getName().equals("archiveField")));
+            }
         } finally {
             deleteTree(workspace);
         }

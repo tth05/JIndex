@@ -1,10 +1,11 @@
 use crate::builder::workers::{
     create_class_index_from_bytes, create_class_index_from_jars, create_class_index_from_sources,
+    ArchiveSource, DirectSource,
 };
 use crate::builder::BuildTimeInfo;
-use anyhow::anyhow;
+use anyhow::{anyhow, ensure};
 use ascii::IntoAsciiString;
-use jni::objects::{JByteArray, JList, JObject, JString, JValue};
+use jni::objects::{JByteArray, JIntArray, JList, JObject, JString, JValue};
 use jni::strings::JNIString;
 use jni::sys::{jlong, jobject, jobjectArray};
 use jni::{jni_sig, jni_str, Env, EnvUnowned};
@@ -109,11 +110,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromSources(
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromExplicitSources(
     mut env: EnvUnowned<'_>,
     this: JObject,
     jar_names_list: JObject,
+    jar_source_ids_array: JObject,
+    jar_input_orders_array: JObject,
     byte_array_list: JObject,
+    class_source_ids_array: JObject,
+    class_input_orders_array: JObject,
 ) -> jobject {
     with_jni_env!(env, {
         propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
@@ -126,6 +131,26 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
             let string = env.cast_local::<JString>(value).unwrap();
             jar_names.push(string.try_to_string(env).expect("Not a string"));
         }
+        let jar_source_ids = propagate_error!(
+            env,
+            read_nonnegative_int_array(
+                env,
+                jar_source_ids_array,
+                jar_list_size as usize,
+                "jarSourceIds"
+            ),
+            JObject::null().into_raw()
+        );
+        let jar_input_orders = propagate_error!(
+            env,
+            read_nonnegative_int_array(
+                env,
+                jar_input_orders_array,
+                jar_list_size as usize,
+                "jarInputOrders"
+            ),
+            JObject::null().into_raw()
+        );
 
         let java_byte_list = env.cast_local::<JList>(byte_array_list).unwrap();
         let byte_list_size = java_byte_list.size(env).unwrap();
@@ -135,10 +160,51 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
             let byte_array = env.cast_local::<JByteArray>(value).unwrap();
             class_bytes.push(env.convert_byte_array(&byte_array).unwrap());
         }
+        let class_source_ids = propagate_error!(
+            env,
+            read_nonnegative_int_array(
+                env,
+                class_source_ids_array,
+                byte_list_size as usize,
+                "classSourceIds"
+            ),
+            JObject::null().into_raw()
+        );
+        let class_input_orders = propagate_error!(
+            env,
+            read_nonnegative_int_array(
+                env,
+                class_input_orders_array,
+                byte_list_size as usize,
+                "classInputOrders"
+            ),
+            JObject::null().into_raw()
+        );
+
+        let jar_sources = jar_names
+            .into_iter()
+            .zip(jar_source_ids)
+            .zip(jar_input_orders)
+            .map(|((file_name, source_id), input_order)| ArchiveSource {
+                source_id,
+                input_order,
+                file_name,
+            })
+            .collect();
+        let direct_sources = class_bytes
+            .into_iter()
+            .zip(class_source_ids)
+            .zip(class_input_orders)
+            .map(|((bytes, source_id), input_order)| DirectSource {
+                source_id,
+                input_order,
+                bytes,
+            })
+            .collect();
 
         let (info, class_index) = propagate_error!(
             env,
-            create_class_index_from_sources(jar_names, class_bytes),
+            create_class_index_from_sources(jar_sources, direct_sources),
             JObject::null().into_raw()
         );
 
@@ -152,6 +218,31 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClas
 
         convert_build_time_info(env, info)
     })
+}
+
+fn read_nonnegative_int_array(
+    env: &mut Env<'_>,
+    array: JObject<'_>,
+    expected_length: usize,
+    name: &str,
+) -> anyhow::Result<Vec<u32>> {
+    let array = env.cast_local::<JIntArray>(array)?;
+    let length = array.len(env)?;
+    ensure!(
+        length == expected_length,
+        "{} has length {}; expected {}",
+        name,
+        length,
+        expected_length
+    );
+    let mut values = vec![0; length];
+    array.get_region(env, 0, &mut values)?;
+    values
+        .into_iter()
+        .map(|value| {
+            u32::try_from(value).map_err(|_| anyhow!("{} contains a negative value", name))
+        })
+        .collect()
 }
 
 #[no_mangle]
@@ -373,7 +464,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
                 };
                 let symbol_id = class_index
                     .semantic_index()
-                    .symbol_id(result.kind, result.member.class_index(), result.member.member_index())
+                    .symbol_id(
+                        result.kind,
+                        result.member.class_index(),
+                        result.member.member_index(),
+                    )
                     .expect("Invalid symbol ordinal");
                 let owner_name = env.new_string(owner.class_name_with_package(
                     class_index.package_index(),
@@ -394,7 +489,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
                         JValue::Object(&owner_name),
                         JValue::Object(&name),
                         JValue::Object(&descriptor),
-                        JValue::Int(class_index.semantic_index().class_source_id(owner.index()) as i32),
+                        JValue::Int(
+                            class_index.semantic_index().class_source_id(owner.index()) as i32
+                        ),
                         JValue::Int(access_flags as i32),
                     ],
                 )?;
