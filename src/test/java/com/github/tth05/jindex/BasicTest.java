@@ -509,26 +509,22 @@ public class BasicTest {
     }
 
     @Test
-    public void testSnapshotFormatFailsExactly() throws Exception {
-        Path malformed = Files.createTempFile("jindex-malformed-", ".zip");
-        Path unsupported = Files.createTempFile("jindex-unsupported-", ".zip");
+    public void testLegacySnapshotCompressionIsRejected() throws Exception {
+        Path legacySnapshot = Files.createTempFile("jindex-legacy-", ".zip");
         try {
-            writeIndexPayload(malformed, new byte[]{1, 2, 3});
-            ClassIndexBuildingException missingHeader = assertThrows(
-                    ClassIndexBuildingException.class,
-                    () -> ClassIndex.fromFile(malformed.toString())
+            writeIndexPayload(
+                    legacySnapshot,
+                    new byte[]{'J', 'I', 'N', 'D', 'E', 'X', 0, 0, 2, 0}
             );
-            assertTrue(missingHeader.getMessage().contains("missing format header"));
-
-            writeIndexPayload(unsupported, new byte[]{'J', 'I', 'N', 'D', 'E', 'X', 0, 0, 3, 0});
-            ClassIndexBuildingException unknownVersion = assertThrows(
+            ClassIndexBuildingException unsupportedCompression = assertThrows(
                     ClassIndexBuildingException.class,
-                    () -> ClassIndex.fromFile(unsupported.toString())
+                    () -> ClassIndex.fromFile(legacySnapshot.toString())
             );
-            assertTrue(unknownVersion.getMessage().contains("snapshot version 3; expected 2"));
+            assertTrue(unsupportedCompression.getMessage().contains(
+                    "Unsupported JIndex snapshot compression Deflated; expected Zstandard"
+            ));
         } finally {
-            Files.deleteIfExists(malformed);
-            Files.deleteIfExists(unsupported);
+            Files.deleteIfExists(legacySnapshot);
         }
     }
 

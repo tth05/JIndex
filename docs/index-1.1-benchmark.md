@@ -127,6 +127,34 @@ values and 1,951,942 occurrences. Lone surrogates and embedded nulls remain repr
 | Warm load p50 | 405.6 ms | 812.6 ms |
 | Warm load p95 | 516.5 ms | 869.8 ms |
 
+### Snapshot persistence audit
+
+The semantic snapshot initially used the `zip` crate's default level-6 DEFLATE compression. A
+fresh reproduction on the same manifest confirmed that snapshot persistence, rather than semantic
+construction, had become half of the cold rebuild: the native build call took 12.81 seconds and the
+save took another 12.47 seconds.
+
+The persistence audit compared compression choices without changing the serialized payload. The
+accepted writer uses ZIP method 93 (Zstandard) at level 3. Snapshot version 3 deliberately rejects
+DEFLATE snapshots, so callers must rebuild older indexes. DEFLATE decoding remains enabled only
+because JIndex still needs it to read source JARs.
+
+| Compression | Save | Persisted bytes | First load | Warm load p50 | Warm load p95 |
+|---|---:|---:|---:|---:|---:|
+| DEFLATE default | 12,472.4 ms | 76,304,860 | 958.7 ms | 875.9 ms | 998.0 ms |
+| DEFLATE level 1 | 1,609.4 ms | 92,203,023 | 1,111.6 ms | 1,142.5 ms | 1,270.3 ms |
+| Zstandard level 3 | 1,855.3 ms | 79,342,393 | 813.2 ms | 748.4 ms | 835.9 ms |
+
+Zstandard reduces save time by 85.1% against the reproduced default-DEFLATE run while increasing
+the file by 4.0%. It also improves first and warm load time. All declaration, reference, literal,
+occurrence, and query result counts remained identical.
+
+The writer also stopped copying the complete serialized payload merely to prepend the ten-byte
+JIndex header. On this corpus the raw payload is 285,534,727 bytes, so the save phase no longer
+holds a second allocation of that size. A 100 ms working-set sample of the final benchmark JVM
+observed a 3,173,163,008-byte peak (2.96 GiB). This remains a whole-process ceiling, including the
+benchmark's Java inputs and query objects; it is not retained native index memory.
+
 Reference queries are bounded before JNI object construction. The table reports the total stored
 site count and the latency to return the first 200 deterministic sites, including Java result
 construction:

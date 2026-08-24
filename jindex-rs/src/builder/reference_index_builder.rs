@@ -49,7 +49,12 @@ pub(super) fn build_reference_index<'a>(
         return Err(anyhow!("Raw reference data does not match the class count"));
     }
     for (class_info, references) in class_infos.iter().zip(raw_references) {
-        let class_index = class_index(classes, &full_class_name(class_info))
+        let class_index = classes
+            .get(&(
+                class_info.package_name.as_str(),
+                class_info.class_name.as_str(),
+            ))
+            .map(|(index, _)| *index)
             .ok_or_else(|| anyhow!("Selected class is missing from the class lookup"))?;
         class_infos_by_index[class_index as usize] = Some(class_info);
         references_by_index[class_index as usize] = Some(references);
@@ -579,14 +584,6 @@ fn class_index(classes: &ClassToIndexMap<'_>, internal_name: &str) -> Option<u32
     classes
         .get(&(package_name, class_name))
         .map(|(index, _)| *index)
-}
-
-fn full_class_name(class_info: &ClassInfo) -> String {
-    if class_info.package_name.is_empty() {
-        class_info.class_name.to_string()
-    } else {
-        format!("{}/{}", class_info.package_name, class_info.class_name)
-    }
 }
 
 #[cfg(test)]
