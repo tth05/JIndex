@@ -11,6 +11,7 @@ import java.util.Objects;
  * @param name member or record-component name, or an empty string for a class site
  * @param descriptor JVM descriptor, or an empty string for a class site
  * @param sourceId opaque ID of the source that supplied the containing class
+ * @param kinds semantic relationships represented by the references in this declaration
  * @param occurrenceCount number of references from this declaration site to the target
  */
 public record ReferenceResult(
@@ -20,8 +21,26 @@ public record ReferenceResult(
         String name,
         String descriptor,
         int sourceId,
+        java.util.Set<ReferenceKind> kinds,
         long occurrenceCount
 ) {
+    public ReferenceResult {
+        Objects.requireNonNull(kind, "kind");
+        Objects.requireNonNull(ownerInternalName, "ownerInternalName");
+        Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(descriptor, "descriptor");
+        kinds = java.util.Set.copyOf(Objects.requireNonNull(kinds, "kinds"));
+        if (kinds.isEmpty()) {
+            throw new IllegalArgumentException("A reference must have at least one kind");
+        }
+        if (sourceId < 0) {
+            throw new IllegalArgumentException("sourceId must be non-negative");
+        }
+        if (occurrenceCount <= 0) {
+            throw new IllegalArgumentException("occurrenceCount must be positive");
+        }
+    }
+
     ReferenceResult(
             long siteId,
             int kind,
@@ -29,6 +48,7 @@ public record ReferenceResult(
             String name,
             String descriptor,
             int sourceId,
+            int kindMask,
             long occurrenceCount
     ) {
         this(
@@ -38,6 +58,7 @@ public record ReferenceResult(
                 Objects.requireNonNull(name, "name"),
                 Objects.requireNonNull(descriptor, "descriptor"),
                 sourceId,
+                ReferenceKind.fromMask(kindMask),
                 occurrenceCount
         );
     }

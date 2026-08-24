@@ -1,4 +1,7 @@
 use super::bytecode::visit_constant_pool_operands;
+use crate::reference_relations::{
+    ClassReferenceKind, FieldReferenceKind, MemberReferenceKind, MethodReferenceKind,
+};
 use anyhow::{anyhow, bail, ensure, Context};
 use compact_str::{CompactString, ToCompactString};
 use jvmti_bindings::classfile::{
@@ -11,6 +14,8 @@ use std::collections::hash_map::Entry;
 const SITE_KIND_SHIFT: u32 = 30;
 const SITE_ORDINAL_MASK: u32 = (1 << SITE_KIND_SHIFT) - 1;
 const MAX_CONSTANT_DEPTH: usize = 64;
+const RELATION_SHIFT: u32 = 24;
+const OCCURRENCE_MASK: u32 = (1 << RELATION_SHIFT) - 1;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RawReferenceSite(u32);
@@ -82,10 +87,67 @@ pub(crate) enum RawReferenceTarget {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum ConstantContext {
+    Metadata,
+    Annotation,
+    Bootstrap,
+    Instruction(u8),
+    Handle,
+}
+
+impl ConstantContext {
+    fn class_kind(self) -> ClassReferenceKind {
+        match self {
+            Self::Annotation => ClassReferenceKind::AnnotationOrMetadata,
+            Self::Bootstrap | Self::Instruction(_) | Self::Handle => {
+                ClassReferenceKind::RuntimeType
+            }
+            Self::Metadata => ClassReferenceKind::AnnotationOrMetadata,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct RawReferenceEdge {
     pub site: RawReferenceSite,
     pub target: u32,
-    pub occurrence_count: u32,
+    pub metadata: RawReferenceMetadata,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RawReferenceMetadata(u32);
+
+impl RawReferenceMetadata {
+    fn first(relation_mask: u8) -> anyhow::Result<Self> {
+        ensure!(
+            relation_mask > 0,
+            "Reference relation mask must not be empty"
+        );
+        Ok(Self((u32::from(relation_mask) << RELATION_SHIFT) | 1))
+    }
+
+    fn add(&mut self, relation_mask: u8) -> anyhow::Result<()> {
+        ensure!(
+            relation_mask > 0,
+            "Reference relation mask must not be empty"
+        );
+        let occurrence_count = self
+            .occurrence_count()
+            .checked_add(1)
+            .filter(|count| *count <= OCCURRENCE_MASK)
+            .ok_or_else(|| anyhow!("Reference occurrence count exceeds {OCCURRENCE_MASK}"))?;
+        self.0 =
+            (u32::from(self.relation_mask() | relation_mask) << RELATION_SHIFT) | occurrence_count;
+        Ok(())
+    }
+
+    pub(crate) fn relation_mask(self) -> u8 {
+        (self.0 >> RELATION_SHIFT) as u8
+    }
+
+    pub(crate) fn occurrence_count(self) -> u32 {
+        self.0 & OCCURRENCE_MASK
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -118,7 +180,7 @@ impl RawReferenceData {
 pub(crate) struct RawReferenceBuilder {
     string_pool: RawStringPoolBuilder,
     targets: FxHashMap<RawReferenceTarget, u32>,
-    edges: FxHashMap<(RawReferenceSite, u32), u32>,
+    edges: FxHashMap<(RawReferenceSite, u32), RawReferenceMetadata>,
     extra_sites: Vec<RawExtraSite>,
     literals: FxHashMap<Vec<u16>, u32>,
     literal_edges: FxHashMap<(RawReferenceSite, u32), u32>,
@@ -161,10 +223,20 @@ impl RawReferenceBuilder {
         let class_site = RawReferenceSite::class();
 
         if class_file.super_class != 0 {
-            self.add_class_index(class_site, pool, class_file.super_class)?;
+            self.add_class_index(
+                class_site,
+                pool,
+                class_file.super_class,
+                ClassReferenceKind::Hierarchy,
+            )?;
         }
         for class_index in &class_file.interfaces {
-            self.add_class_index(class_site, pool, *class_index)?;
+            self.add_class_index(
+                class_site,
+                pool,
+                *class_index,
+                ClassReferenceKind::Hierarchy,
+            )?;
         }
         self.collect_attributes(
             class_site,
@@ -175,11 +247,19 @@ impl RawReferenceBuilder {
         )?;
 
         for (field, site) in class_file.fields.iter().zip(field_sites) {
-            self.add_descriptor(*site, pool.get_utf8(field.descriptor_index)?)?;
+            self.add_descriptor(
+                *site,
+                pool.get_utf8(field.descriptor_index)?,
+                ClassReferenceKind::Declaration,
+            )?;
             self.collect_attributes(*site, &field.attributes, pool, bootstrap_methods, false)?;
         }
         for (method, site) in class_file.methods.iter().zip(method_sites) {
-            self.add_descriptor(*site, pool.get_utf8(method.descriptor_index)?)?;
+            self.add_descriptor(
+                *site,
+                pool.get_utf8(method.descriptor_index)?,
+                ClassReferenceKind::Declaration,
+            )?;
             self.collect_attributes(*site, &method.attributes, pool, bootstrap_methods, true)?;
         }
         Ok(())
@@ -220,10 +300,10 @@ impl RawReferenceBuilder {
             edges: self
                 .edges
                 .into_iter()
-                .map(|((site, target), occurrence_count)| RawReferenceEdge {
+                .map(|((site, target), metadata)| RawReferenceEdge {
                     site,
                     target,
-                    occurrence_count,
+                    metadata,
                 })
                 .collect(),
             extra_sites: self.extra_sites,
@@ -243,18 +323,34 @@ impl RawReferenceBuilder {
         for attribute in attributes {
             match attribute {
                 AttributeInfo::Signature { signature_index } => {
-                    self.add_signature(site, pool.get_utf8(*signature_index)?)?;
+                    self.add_signature(
+                        site,
+                        pool.get_utf8(*signature_index)?,
+                        ClassReferenceKind::Declaration,
+                    )?;
                 }
                 AttributeInfo::ConstantValue {
                     constantvalue_index,
                 } => {
-                    self.collect_constant(site, pool, bootstrap_methods, *constantvalue_index, 0)?;
+                    self.collect_constant(
+                        site,
+                        pool,
+                        bootstrap_methods,
+                        *constantvalue_index,
+                        ConstantContext::Metadata,
+                        0,
+                    )?;
                 }
                 AttributeInfo::Exceptions {
                     exception_index_table,
                 } => {
                     for class_index in exception_index_table {
-                        self.add_class_index(site, pool, *class_index)?;
+                        self.add_class_index(
+                            site,
+                            pool,
+                            *class_index,
+                            ClassReferenceKind::Declaration,
+                        )?;
                     }
                 }
                 AttributeInfo::RuntimeVisibleAnnotations { annotations }
@@ -286,7 +382,12 @@ impl RawReferenceBuilder {
                 }
                 AttributeInfo::PermittedSubclasses { classes } => {
                     for class_index in classes {
-                        self.add_class_index(site, pool, *class_index)?;
+                        self.add_class_index(
+                            site,
+                            pool,
+                            *class_index,
+                            ClassReferenceKind::Hierarchy,
+                        )?;
                     }
                 }
                 AttributeInfo::Record { components } => {
@@ -297,11 +398,23 @@ impl RawReferenceBuilder {
                 AttributeInfo::Code(code) if scan_code => {
                     for entry in &code.exception_table {
                         if entry.catch_type != 0 {
-                            self.add_class_index(site, pool, entry.catch_type)?;
+                            self.add_class_index(
+                                site,
+                                pool,
+                                entry.catch_type,
+                                ClassReferenceKind::RuntimeType,
+                            )?;
                         }
                     }
-                    visit_constant_pool_operands(&code.code, |index| {
-                        self.collect_constant(site, pool, bootstrap_methods, index, 0)
+                    visit_constant_pool_operands(&code.code, |opcode, index| {
+                        self.collect_constant(
+                            site,
+                            pool,
+                            bootstrap_methods,
+                            index,
+                            ConstantContext::Instruction(opcode),
+                            0,
+                        )
                     })?;
                     self.collect_attributes(
                         site,
@@ -313,12 +426,20 @@ impl RawReferenceBuilder {
                 }
                 AttributeInfo::LocalVariableTable { entries } => {
                     for entry in entries {
-                        self.add_descriptor(site, pool.get_utf8(entry.descriptor_index)?)?;
+                        self.add_descriptor(
+                            site,
+                            pool.get_utf8(entry.descriptor_index)?,
+                            ClassReferenceKind::Declaration,
+                        )?;
                     }
                 }
                 AttributeInfo::LocalVariableTypeTable { entries } => {
                     for entry in entries {
-                        self.add_signature(site, pool.get_utf8(entry.signature_index)?)?;
+                        self.add_signature(
+                            site,
+                            pool.get_utf8(entry.signature_index)?,
+                            ClassReferenceKind::Declaration,
+                        )?;
                     }
                 }
                 _ => {}
@@ -336,7 +457,7 @@ impl RawReferenceBuilder {
         let name = pool.get_utf8(component.name_index)?;
         let descriptor = pool.get_utf8(component.descriptor_index)?;
         let site = self.add_extra_site(RawExtraSiteKind::RecordComponent, name, descriptor)?;
-        self.add_descriptor(site, descriptor)?;
+        self.add_descriptor(site, descriptor, ClassReferenceKind::Declaration)?;
         self.collect_attributes(site, &component.attributes, pool, bootstrap_methods, false)
     }
 
@@ -347,7 +468,11 @@ impl RawReferenceBuilder {
         pool: &ConstantPool,
         bootstrap_methods: &[BootstrapMethod],
     ) -> anyhow::Result<()> {
-        self.add_descriptor(site, pool.get_utf8(annotation.type_index)?)?;
+        self.add_descriptor(
+            site,
+            pool.get_utf8(annotation.type_index)?,
+            ClassReferenceKind::AnnotationOrMetadata,
+        )?;
         for pair in &annotation.element_value_pairs {
             self.collect_element_value(site, &pair.value, pool, bootstrap_methods)?;
         }
@@ -361,7 +486,11 @@ impl RawReferenceBuilder {
         pool: &ConstantPool,
         bootstrap_methods: &[BootstrapMethod],
     ) -> anyhow::Result<()> {
-        self.add_descriptor(site, pool.get_utf8(annotation.type_index)?)?;
+        self.add_descriptor(
+            site,
+            pool.get_utf8(annotation.type_index)?,
+            ClassReferenceKind::AnnotationOrMetadata,
+        )?;
         for pair in &annotation.element_value_pairs {
             self.collect_element_value(site, &pair.value, pool, bootstrap_methods)?;
         }
@@ -382,13 +511,26 @@ impl RawReferenceBuilder {
             } => self.add_literal(site, pool, *const_value_index),
             ElementValue::Const {
                 const_value_index, ..
-            } => self.collect_constant(site, pool, bootstrap_methods, *const_value_index, 0),
+            } => self.collect_constant(
+                site,
+                pool,
+                bootstrap_methods,
+                *const_value_index,
+                ConstantContext::Annotation,
+                0,
+            ),
             ElementValue::EnumConst {
                 type_name_index, ..
-            } => self.add_descriptor(site, pool.get_utf8(*type_name_index)?),
-            ElementValue::ClassInfo { class_info_index } => {
-                self.add_descriptor(site, pool.get_utf8(*class_info_index)?)
-            }
+            } => self.add_descriptor(
+                site,
+                pool.get_utf8(*type_name_index)?,
+                ClassReferenceKind::AnnotationOrMetadata,
+            ),
+            ElementValue::ClassInfo { class_info_index } => self.add_descriptor(
+                site,
+                pool.get_utf8(*class_info_index)?,
+                ClassReferenceKind::AnnotationOrMetadata,
+            ),
             ElementValue::AnnotationValue(annotation) => {
                 self.collect_annotation(site, annotation, pool, bootstrap_methods)
             }
@@ -408,6 +550,7 @@ impl RawReferenceBuilder {
         pool: &ConstantPool,
         bootstrap_methods: &[BootstrapMethod],
         index: u16,
+        context: ConstantContext,
         depth: usize,
     ) -> anyhow::Result<()> {
         ensure!(
@@ -416,11 +559,28 @@ impl RawReferenceBuilder {
         );
         match pool.get(index)? {
             CpInfo::String { string_index } => self.add_literal(site, pool, *string_index),
-            CpInfo::Class { .. } => self.add_class_index(site, pool, index),
+            CpInfo::Class { .. } => self.add_class_index(site, pool, index, context.class_kind()),
             CpInfo::Fieldref {
                 class_index,
                 name_and_type_index,
-            } => self.add_member_reference(site, pool, *class_index, *name_and_type_index, false),
+            } => self.add_member_reference(
+                site,
+                pool,
+                *class_index,
+                *name_and_type_index,
+                match context {
+                    ConstantContext::Instruction(0xb2 | 0xb4) => {
+                        MemberReferenceKind::Field(FieldReferenceKind::Read)
+                    }
+                    ConstantContext::Instruction(0xb3 | 0xb5) => {
+                        MemberReferenceKind::Field(FieldReferenceKind::Write)
+                    }
+                    ConstantContext::Handle | ConstantContext::Bootstrap => {
+                        MemberReferenceKind::Field(FieldReferenceKind::Handle)
+                    }
+                    other => bail!("Field reference has incompatible context {other:?}"),
+                },
+            ),
             CpInfo::Methodref {
                 class_index,
                 name_and_type_index,
@@ -428,13 +588,36 @@ impl RawReferenceBuilder {
             | CpInfo::InterfaceMethodref {
                 class_index,
                 name_and_type_index,
-            } => self.add_member_reference(site, pool, *class_index, *name_and_type_index, true),
+            } => self.add_member_reference(
+                site,
+                pool,
+                *class_index,
+                *name_and_type_index,
+                match context {
+                    ConstantContext::Instruction(0xb6..=0xb9) => {
+                        MemberReferenceKind::Method(MethodReferenceKind::Invoke)
+                    }
+                    ConstantContext::Handle | ConstantContext::Bootstrap => {
+                        MemberReferenceKind::Method(MethodReferenceKind::Handle)
+                    }
+                    other => bail!("Method reference has incompatible context {other:?}"),
+                },
+            ),
             CpInfo::MethodHandle {
                 reference_index, ..
-            } => self.collect_constant(site, pool, bootstrap_methods, *reference_index, depth + 1),
-            CpInfo::MethodType { descriptor_index } => {
-                self.add_descriptor(site, pool.get_utf8(*descriptor_index)?)
-            }
+            } => self.collect_constant(
+                site,
+                pool,
+                bootstrap_methods,
+                *reference_index,
+                ConstantContext::Handle,
+                depth + 1,
+            ),
+            CpInfo::MethodType { descriptor_index } => self.add_descriptor(
+                site,
+                pool.get_utf8(*descriptor_index)?,
+                ClassReferenceKind::RuntimeType,
+            ),
             CpInfo::Dynamic {
                 bootstrap_method_attr_index,
                 name_and_type_index,
@@ -444,7 +627,7 @@ impl RawReferenceBuilder {
                 name_and_type_index,
             } => {
                 let (_, descriptor) = name_and_type(pool, *name_and_type_index)?;
-                self.add_descriptor(site, descriptor)?;
+                self.add_descriptor(site, descriptor, ClassReferenceKind::MemberUsage)?;
                 let bootstrap = bootstrap_methods
                     .get(*bootstrap_method_attr_index as usize)
                     .with_context(|| {
@@ -458,6 +641,7 @@ impl RawReferenceBuilder {
                     pool,
                     bootstrap_methods,
                     bootstrap.bootstrap_method_ref,
+                    ConstantContext::Bootstrap,
                     depth + 1,
                 )?;
                 let skip_concat_recipe = is_string_concat_with_constants(pool, bootstrap)?;
@@ -465,7 +649,14 @@ impl RawReferenceBuilder {
                     if skip_concat_recipe && argument_index == 0 {
                         continue;
                     }
-                    self.collect_constant(site, pool, bootstrap_methods, *argument, depth + 1)?;
+                    self.collect_constant(
+                        site,
+                        pool,
+                        bootstrap_methods,
+                        *argument,
+                        ConstantContext::Bootstrap,
+                        depth + 1,
+                    )?;
                 }
                 Ok(())
             }
@@ -479,32 +670,31 @@ impl RawReferenceBuilder {
         pool: &ConstantPool,
         class_index: u16,
         name_and_type_index: u16,
-        method: bool,
+        kind: MemberReferenceKind,
     ) -> anyhow::Result<()> {
         let owner = class_name(pool, class_index)?;
         let (name, descriptor) = name_and_type(pool, name_and_type_index)?;
-        self.add_class_name(site, owner)?;
-        self.add_descriptor(site, descriptor)?;
+        self.add_class_name(site, owner, ClassReferenceKind::MemberUsage)?;
+        self.add_descriptor(site, descriptor, ClassReferenceKind::MemberUsage)?;
         if !owner.is_ascii() || !name.is_ascii() || !descriptor.is_ascii() {
             return Ok(());
         }
         let owner = self.string_pool.add(owner)?;
         let name = self.string_pool.add(name)?;
         let descriptor = self.string_pool.add(descriptor)?;
-        let target = if method {
-            RawReferenceTarget::Method {
+        let target = match kind {
+            MemberReferenceKind::Method(_) => RawReferenceTarget::Method {
                 owner,
                 name,
                 descriptor,
-            }
-        } else {
-            RawReferenceTarget::Field {
+            },
+            MemberReferenceKind::Field(_) => RawReferenceTarget::Field {
                 owner,
                 name,
                 descriptor,
-            }
+            },
         };
-        self.add_target(site, target)
+        self.add_target(site, target, kind.mask())
     }
 
     fn add_class_index(
@@ -512,22 +702,33 @@ impl RawReferenceBuilder {
         site: RawReferenceSite,
         pool: &ConstantPool,
         class_index: u16,
+        kind: ClassReferenceKind,
     ) -> anyhow::Result<()> {
-        self.add_class_name(site, class_name(pool, class_index)?)
+        self.add_class_name(site, class_name(pool, class_index)?, kind)
     }
 
-    fn add_class_name(&mut self, site: RawReferenceSite, name: &str) -> anyhow::Result<()> {
+    fn add_class_name(
+        &mut self,
+        site: RawReferenceSite,
+        name: &str,
+        kind: ClassReferenceKind,
+    ) -> anyhow::Result<()> {
         if name.starts_with('[') {
-            return self.add_descriptor(site, name);
+            return self.add_descriptor(site, name, kind);
         }
         if !name.is_ascii() {
             return Ok(());
         }
         let name = self.string_pool.add(name)?;
-        self.add_target(site, RawReferenceTarget::Class { name })
+        self.add_target(site, RawReferenceTarget::Class { name }, kind.mask())
     }
 
-    fn add_descriptor(&mut self, site: RawReferenceSite, descriptor: &str) -> anyhow::Result<()> {
+    fn add_descriptor(
+        &mut self,
+        site: RawReferenceSite,
+        descriptor: &str,
+        kind: ClassReferenceKind,
+    ) -> anyhow::Result<()> {
         let bytes = descriptor.as_bytes();
         let mut index = 0;
         while index < bytes.len() {
@@ -541,16 +742,21 @@ impl RawReferenceBuilder {
                 .position(|byte| *byte == b';')
                 .ok_or_else(|| anyhow!("Unterminated object type in descriptor {descriptor}"))?;
             let end = start + relative_end;
-            self.add_class_name(site, &descriptor[start..end])?;
+            self.add_class_name(site, &descriptor[start..end], kind)?;
             index = end + 1;
         }
         Ok(())
     }
 
-    fn add_signature(&mut self, site: RawReferenceSite, signature: &str) -> anyhow::Result<()> {
+    fn add_signature(
+        &mut self,
+        site: RawReferenceSite,
+        signature: &str,
+        kind: ClassReferenceKind,
+    ) -> anyhow::Result<()> {
         let mut index = 0;
         collect_signature_types(signature, &mut index, None, &mut |name| {
-            self.add_class_name(site, name)
+            self.add_class_name(site, name, kind)
         })
     }
 
@@ -558,6 +764,7 @@ impl RawReferenceBuilder {
         &mut self,
         site: RawReferenceSite,
         target: RawReferenceTarget,
+        relation_mask: u8,
     ) -> anyhow::Result<()> {
         let next_id = u32::try_from(self.targets.len())?;
         let target_id = match self.targets.entry(target) {
@@ -567,10 +774,12 @@ impl RawReferenceBuilder {
                 next_id
             }
         };
-        let count = self.edges.entry((site, target_id)).or_default();
-        *count = count
-            .checked_add(1)
-            .ok_or_else(|| anyhow!("Reference occurrence count exceeds 4294967295"))?;
+        match self.edges.entry((site, target_id)) {
+            Entry::Occupied(mut entry) => entry.get_mut().add(relation_mask)?,
+            Entry::Vacant(entry) => {
+                entry.insert(RawReferenceMetadata::first(relation_mask)?);
+            }
+        }
         Ok(())
     }
 

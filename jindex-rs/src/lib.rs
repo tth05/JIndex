@@ -9,6 +9,7 @@ pub mod class_index_members;
 pub mod constant_pool;
 pub mod io;
 pub mod package_index;
+pub(crate) mod reference_relations;
 pub mod semantic_index;
 pub mod signature;
 
@@ -27,5 +28,4 @@ pub(crate) fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &
 }
 
 #[cfg(test)]
-mod test {
-}
+mod test {}

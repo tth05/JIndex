@@ -14,7 +14,7 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
 const SNAPSHOT_MAGIC: &[u8; 8] = b"JINDEX\0\0";
-const SNAPSHOT_VERSION: u16 = 3;
+const SNAPSHOT_VERSION: u16 = 4;
 const SNAPSHOT_HEADER_LENGTH: usize = SNAPSHOT_MAGIC.len() + size_of::<u16>();
 const SNAPSHOT_COMPRESSION_LEVEL: i32 = 3;
 

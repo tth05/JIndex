@@ -171,6 +171,38 @@ Source filters are applied against the containing class's opaque source ID in th
 before the page limit and before JNI allocation. Truncation therefore describes the selected source
 set, not the unfiltered posting list.
 
+### Relation-aware postings
+
+The reference graph now classifies how each declaration site relates to its target. Class postings
+distinguish hierarchy, declared types, annotations/metadata, runtime type operations, and member
+usage; field postings distinguish reads, writes, and handles; method postings distinguish invokes
+and handles. Multiple relationships in one site are unioned into a mask while the total exact
+occurrence count is retained. Hierarchy queries remain separate rather than being duplicated into
+ordinary usage postings.
+
+The posting stays eight bytes by replacing eight of the previous 32 occurrence-count bits with the
+relation mask. A separate literal posting preserves the full 32-bit literal count. On the same
+production manifest there are 14,306,784 sites and 38,150,673 occurrences; 7,844,125 sites occur
+once, 3,216 exceed 255 occurrences, none exceed 65,535, and the maximum is 10,002. The accepted
+24-bit count limit is 16,777,215.
+
+| Measurement | Unclassified snapshot | Relation-aware snapshot |
+|---|---:|---:|
+| Distinct reference sites | 14,306,784 | 14,306,784 |
+| Raw bytes per posting | 8 | 8 |
+| Java-observed native build call | 10.01 s | 12.12 s |
+| Save compressed index | 1.56 s | 1.66 s |
+| Persisted index size | 79,378,161 bytes | 82,081,358 bytes |
+| First load | 813 ms | 754 ms |
+| Warm load p50 | 748 ms | 687 ms |
+| Warm load p95 | 836 ms | 778 ms |
+
+Build and load times are individual fresh-process observations and remain subject to normal host
+variance. The meaningful structural results are unchanged posting cardinality and raw width. The
+2.70 MB persisted increase comes from relation bits reducing compression regularity, not from
+duplicated sites. Inner-class and nest bookkeeping was tested and deliberately excluded because it
+added 585,396 redundant postings already represented by JIndex's class model.
+
 The literal pool is sorted by UTF-16 code units, giving binary exact lookup and deterministic prefix
 order. Contains search scans the deduplicated pool. A trigram index is rejected for this corpus:
 the measured scan is already interactive, while n-grams would add another large postings structure,

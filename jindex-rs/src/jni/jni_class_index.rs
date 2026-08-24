@@ -20,7 +20,10 @@ use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{get_class_index, init_field_ids};
 use crate::jni::{get_enum_ordinal, propagate_error, with_jni_env};
 use crate::package_index::IndexedPackage;
-use crate::semantic_index::{PackedReferenceSite, ReferenceSiteKind, SymbolId, SymbolKind};
+use crate::reference_relations::{public_mask, STRING_LITERAL_PUBLIC_MASK};
+use crate::semantic_index::{
+    PackedLiteralSite, PackedReferenceSite, ReferenceSiteKind, SymbolId, SymbolKind,
+};
 
 macro_rules! java_to_ascii_string {
     ($env:expr, $jstring:ident) => {
@@ -414,6 +417,39 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getStatist
 #[no_mangle]
 /// # Safety
 /// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getReferenceStorageStatisticsNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+) -> jobject {
+    with_jni_env!(env, {
+        let (_, class_index) = get_class_index(env, &this);
+        let (sites, occurrences, singles, over_255, over_65535, maximum) =
+            class_index.semantic_index().reference_storage_statistics();
+        let result_class = env
+            .find_class(jni_str!(
+                "com/github/tth05/jindex/ReferenceStorageStatistics"
+            ))
+            .expect("Unable to find reference storage statistics class");
+        env.new_object(
+            &result_class,
+            jni_sig!("(JJJJJJ)V"),
+            &[
+                JValue::Long(sites as jlong),
+                JValue::Long(occurrences as jlong),
+                JValue::Long(singles as jlong),
+                JValue::Long(over_255 as jlong),
+                JValue::Long(over_65535 as jlong),
+                JValue::Long(u64::from(maximum) as jlong),
+            ],
+        )
+        .expect("Unable to create reference storage statistics")
+        .into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findReferencesNative(
     mut env: EnvUnowned<'_>,
     this: JObject,
@@ -453,9 +489,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findRefere
             return Ok(create_reference_search_page(
                 env,
                 class_index,
-                &[],
+                &[] as &[PackedReferenceSite],
                 source_ids.as_deref(),
                 limit,
+                |_| 1,
             )?
             .into_raw());
         };
@@ -516,8 +553,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findRefere
             class_index.semantic_index().references_to(target),
             JObject::null().into_raw()
         );
-        create_reference_search_page(env, class_index, references, source_ids.as_deref(), limit)?
-            .into_raw()
+        create_reference_search_page(
+            env,
+            class_index,
+            references,
+            source_ids.as_deref(),
+            limit,
+            |reference| public_mask(target.kind(), reference.relation_mask()),
+        )?
+        .into_raw()
     })
 }
 
@@ -553,8 +597,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findLitera
             .find_literal(&literal)
             .map(|literal| class_index.semantic_index().literal_references(literal))
             .unwrap_or_default();
-        create_reference_search_page(env, class_index, references, source_ids.as_deref(), limit)?
-            .into_raw()
+        create_reference_search_page(
+            env,
+            class_index,
+            references,
+            source_ids.as_deref(),
+            limit,
+            |_| STRING_LITERAL_PUBLIC_MASK,
+        )?
+        .into_raw()
     })
 }
 
@@ -614,11 +665,59 @@ fn new_java_string_from_utf16<'local>(
     JString::from_jni_str(env, &encoded)
 }
 
-fn create_reference_results<'local>(
+trait StoredReferenceSite: Copy {
+    fn storage_kind(self) -> u8;
+    fn ordinal(self) -> u32;
+    fn occurrence_count(self) -> u32;
+    fn identity(self) -> u32;
+}
+
+impl StoredReferenceSite for PackedReferenceSite {
+    fn storage_kind(self) -> u8 {
+        self.storage_kind()
+    }
+
+    fn ordinal(self) -> u32 {
+        self.ordinal()
+    }
+
+    fn occurrence_count(self) -> u32 {
+        self.occurrence_count()
+    }
+
+    fn identity(self) -> u32 {
+        self.identity()
+    }
+}
+
+impl StoredReferenceSite for PackedLiteralSite {
+    fn storage_kind(self) -> u8 {
+        self.storage_kind()
+    }
+
+    fn ordinal(self) -> u32 {
+        self.ordinal()
+    }
+
+    fn occurrence_count(self) -> u32 {
+        self.occurrence_count()
+    }
+
+    fn identity(self) -> u32 {
+        self.identity()
+    }
+}
+
+fn create_reference_results<'local, R, F>(
     env: &mut Env<'local>,
     class_index: &ClassIndex,
-    references: &[crate::semantic_index::PackedReferenceSite],
-) -> jni::errors::Result<JObjectArray<'local>> {
+    references: &[R],
+    relation_mask: F,
+) -> jni::errors::Result<JObjectArray<'local>>
+where
+    R: StoredReferenceSite,
+    F: Fn(R) -> u16,
+{
     let result_class = env
         .find_class(jni_str!("com/github/tth05/jindex/ReferenceResult"))
         .expect("Reference result class not found");
@@ -691,7 +790,7 @@ fn create_reference_results<'local>(
             ))?;
             let object = env.new_object(
                 &result_class,
-                jni_sig!("(JILjava/lang/String;Ljava/lang/String;Ljava/lang/String;IJ)V"),
+                jni_sig!("(JILjava/lang/String;Ljava/lang/String;Ljava/lang/String;IIJ)V"),
                 &[
                     JValue::Long(i64::from(reference.identity())),
                     JValue::Int(kind as i32),
@@ -699,6 +798,7 @@ fn create_reference_results<'local>(
                     JValue::Object(&name),
                     JValue::Object(&descriptor),
                     JValue::Int(class_index.semantic_index().class_source_id(owner_index) as i32),
+                    JValue::Int(i32::from(relation_mask(*reference))),
                     JValue::Long(i64::from(reference.occurrence_count())),
                 ],
             )?;
@@ -710,13 +810,18 @@ fn create_reference_results<'local>(
     Ok(result_array)
 }
 
-fn create_reference_search_page<'local>(
+fn create_reference_search_page<'local, R, F>(
     env: &mut Env<'local>,
     class_index: &ClassIndex,
-    references: &[PackedReferenceSite],
+    references: &[R],
     source_ids: Option<&[u32]>,
     limit: usize,
-) -> jni::errors::Result<JObject<'local>> {
+    relation_mask: F,
+) -> jni::errors::Result<JObject<'local>>
+where
+    R: StoredReferenceSite,
+    F: Fn(R) -> u16 + Copy,
+{
     let mut selected = Vec::with_capacity(references.len().min(limit));
     let mut truncated = false;
     for reference in references {
@@ -735,7 +840,7 @@ fn create_reference_search_page<'local>(
         selected.push(*reference);
     }
 
-    let results = create_reference_results(env, class_index, &selected)?;
+    let results = create_reference_results(env, class_index, &selected, relation_mask)?;
     let page_class = env.find_class(jni_str!("com/github/tth05/jindex/ReferenceSearchPage"))?;
     env.new_object(
         &page_class,
@@ -744,7 +849,10 @@ fn create_reference_search_page<'local>(
     )
 }
 
-fn reference_owner_class_index(class_index: &ClassIndex, reference: PackedReferenceSite) -> u32 {
+fn reference_owner_class_index<R: StoredReferenceSite>(
+    class_index: &ClassIndex,
+    reference: R,
+) -> u32 {
     match reference.storage_kind() {
         0 => reference.ordinal(),
         1 | 2 => class_index

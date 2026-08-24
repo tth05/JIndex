@@ -133,6 +133,10 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         return executeWhileOpen(this::getStatisticsNative);
     }
 
+    ReferenceStorageStatistics getReferenceStorageStatistics() {
+        return executeWhileOpen(this::getReferenceStorageStatisticsNative);
+    }
+
     /**
      * Returns a bounded page of indexed declaration sites that reference the target.
      *
@@ -305,6 +309,8 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     private native SymbolSearchResult[] findSymbolsNative(String query, SearchOptions options, int kindMask);
 
     private native IndexStatistics getStatisticsNative();
+
+    private native ReferenceStorageStatistics getReferenceStorageStatisticsNative();
 
     private native ReferenceSearchPage findReferencesNative(
             int targetKind,

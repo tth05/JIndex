@@ -1,10 +1,10 @@
 use super::raw_references::{
-    RawExtraSiteKind, RawReferenceData, RawReferenceSite, RawReferenceTarget,
+    RawExtraSiteKind, RawReferenceData, RawReferenceMetadata, RawReferenceSite, RawReferenceTarget,
 };
 use super::{ClassInfo, ClassToIndexMap};
 use crate::semantic_index::{
-    DescriptorPool, ExtraReferenceSite, PackedReferenceSite, ReferenceIndexData, ReferenceSiteKind,
-    Utf8Pool,
+    DescriptorPool, ExtraReferenceSite, PackedLiteralSite, PackedReferenceSite, ReferenceIndexData,
+    ReferenceSiteKind, Utf8Pool,
 };
 use anyhow::anyhow;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -25,6 +25,13 @@ struct HierarchyInfo {
 
 #[derive(Clone, Copy)]
 struct ResolvedReference {
+    target: u32,
+    site_identity: u32,
+    metadata: RawReferenceMetadata,
+}
+
+#[derive(Clone, Copy)]
+struct ResolvedLiteralReference {
     target: u32,
     site_identity: u32,
     occurrence_count: u32,
@@ -170,18 +177,17 @@ pub(super) fn build_reference_index<'a>(
             local_literal_ids.push(literal_id);
         }
         for edge in &references.literal_edges {
-            let site = resolve_source_site(
+            let site_identity = resolve_source_site_identity(
                 edge.site,
                 owner as u32,
-                edge.occurrence_count,
                 field_offsets,
                 method_offsets,
                 &extra_site_offsets,
             )?;
-            resolved_literals.push(ResolvedReference {
+            resolved_literals.push(ResolvedLiteralReference {
                 target: local_literal_ids[edge.literal as usize],
-                site_identity: site.identity(),
-                occurrence_count: site.occurrence_count(),
+                site_identity,
+                occurrence_count: edge.occurrence_count,
             });
         }
         visit_resolved_references(
@@ -198,20 +204,20 @@ pub(super) fn build_reference_index<'a>(
             &extra_site_offsets,
             class_count,
             field_count,
-            |target, site| {
+            |target, site_identity, metadata| {
                 offsets[target as usize + 1] = offsets[target as usize + 1]
                     .checked_add(1)
                     .ok_or_else(|| anyhow!("A symbol has more than 4294967295 reference sites"))?;
                 resolved.push(ResolvedReference {
                     target,
-                    site_identity: site.identity(),
-                    occurrence_count: site.occurrence_count(),
+                    site_identity,
+                    metadata,
                 });
                 Ok(())
             },
         )?;
     }
-    let (reference_offsets, reference_sites) = build_postings(offsets, resolved)?;
+    let (reference_offsets, reference_sites) = build_reference_postings(offsets, resolved)?;
 
     let literal_count = literal_ids.len();
     let mut literal_values_by_id = literal_ids.into_iter().collect::<Vec<_>>();
@@ -242,7 +248,7 @@ pub(super) fn build_reference_index<'a>(
             .ok_or_else(|| anyhow!("A literal has more than 4294967295 reference sites"))?;
     }
     let (literal_posting_offsets, literal_sites) =
-        build_postings(literal_posting_counts, resolved_literals)?;
+        build_literal_postings(literal_posting_counts, resolved_literals)?;
 
     Ok(ReferenceIndexData {
         extra_site_names,
@@ -256,7 +262,7 @@ pub(super) fn build_reference_index<'a>(
     })
 }
 
-fn build_postings(
+fn build_reference_postings(
     mut counts: Vec<u32>,
     resolved: Vec<ResolvedReference>,
 ) -> anyhow::Result<(Vec<u32>, Vec<PackedReferenceSite>)> {
@@ -266,12 +272,77 @@ fn build_postings(
             .ok_or_else(|| anyhow!("The index has more than 4294967295 reference sites"))?;
     }
 
-    let placeholder = PackedReferenceSite::new(0, 0, 1)?;
+    let placeholder = PackedReferenceSite::new(0, 0, 1, 1)?;
     let mut sites = vec![placeholder; resolved.len()];
     let mut write_positions = counts[..counts.len() - 1].to_vec();
     for reference in resolved {
         let position = &mut write_positions[reference.target as usize];
         sites[*position as usize] = PackedReferenceSite::new(
+            (reference.site_identity >> 30) as u8,
+            reference.site_identity & ((1 << 30) - 1),
+            reference.metadata.relation_mask(),
+            reference.metadata.occurrence_count(),
+        )?;
+        *position += 1;
+    }
+    debug_assert_eq!(write_positions.as_slice(), &counts[1..]);
+
+    let mut offsets = Vec::with_capacity(counts.len());
+    offsets.push(0_u32);
+    let mut write = 0_usize;
+    for target in 0..counts.len() - 1 {
+        let start = counts[target] as usize;
+        let end = counts[target + 1] as usize;
+        sites[start..end].sort_unstable_by_key(|site| site.identity());
+
+        let mut read = start;
+        while read < end {
+            let first = sites[read];
+            let identity = first.identity();
+            let mut relation_mask = first.relation_mask();
+            let mut occurrence_count = first.occurrence_count();
+            read += 1;
+            while read < end && sites[read].identity() == identity {
+                occurrence_count = occurrence_count
+                    .checked_add(sites[read].occurrence_count())
+                    .filter(|count| *count < (1 << 24))
+                    .ok_or_else(|| anyhow!("Merged reference count exceeds 16777215"))?;
+                relation_mask |= sites[read].relation_mask();
+                read += 1;
+            }
+            sites[write] = PackedReferenceSite::new(
+                first.storage_kind(),
+                first.ordinal(),
+                relation_mask,
+                occurrence_count,
+            )?;
+            write += 1;
+        }
+        offsets.push(
+            u32::try_from(write)
+                .map_err(|_| anyhow!("The index has more than 4294967295 reference sites"))?,
+        );
+    }
+    sites.truncate(write);
+    Ok((offsets, sites))
+}
+
+fn build_literal_postings(
+    mut counts: Vec<u32>,
+    resolved: Vec<ResolvedLiteralReference>,
+) -> anyhow::Result<(Vec<u32>, Vec<PackedLiteralSite>)> {
+    for index in 1..counts.len() {
+        counts[index] = counts[index]
+            .checked_add(counts[index - 1])
+            .ok_or_else(|| anyhow!("The index has more than 4294967295 literal sites"))?;
+    }
+
+    let placeholder = PackedLiteralSite::new(0, 0, 1)?;
+    let mut sites = vec![placeholder; resolved.len()];
+    let mut write_positions = counts[..counts.len() - 1].to_vec();
+    for reference in resolved {
+        let position = &mut write_positions[reference.target as usize];
+        sites[*position as usize] = PackedLiteralSite::new(
             (reference.site_identity >> 30) as u8,
             reference.site_identity & ((1 << 30) - 1),
             reference.occurrence_count,
@@ -297,16 +368,16 @@ fn build_postings(
             while read < end && sites[read].identity() == identity {
                 occurrence_count = occurrence_count
                     .checked_add(sites[read].occurrence_count())
-                    .ok_or_else(|| anyhow!("Merged reference count exceeds 4294967295"))?;
+                    .ok_or_else(|| anyhow!("Merged literal count exceeds 4294967295"))?;
                 read += 1;
             }
             sites[write] =
-                PackedReferenceSite::new(first.storage_kind(), first.ordinal(), occurrence_count)?;
+                PackedLiteralSite::new(first.storage_kind(), first.ordinal(), occurrence_count)?;
             write += 1;
         }
         offsets.push(
             u32::try_from(write)
-                .map_err(|_| anyhow!("The index has more than 4294967295 reference sites"))?,
+                .map_err(|_| anyhow!("The index has more than 4294967295 literal sites"))?,
         );
     }
     sites.truncate(write);
@@ -328,13 +399,12 @@ fn visit_resolved_references(
     extra_site_offsets: &[u32],
     class_count: u32,
     field_count: u32,
-    mut visitor: impl FnMut(u32, PackedReferenceSite) -> anyhow::Result<()>,
+    mut visitor: impl FnMut(u32, u32, RawReferenceMetadata) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     for edge in &references.edges {
-        let site = resolve_source_site(
+        let site_identity = resolve_source_site_identity(
             edge.site,
             owner,
-            edge.occurrence_count,
             field_offsets,
             method_offsets,
             extra_site_offsets,
@@ -342,7 +412,7 @@ fn visit_resolved_references(
         match references.targets[edge.target as usize] {
             RawReferenceTarget::Class { name } => {
                 if let Some(target) = class_index(classes, references.string(name)) {
-                    visitor(target, site)?;
+                    visitor(target, site_identity, edge.metadata)?;
                 }
             }
             RawReferenceTarget::Field {
@@ -360,7 +430,7 @@ fn visit_resolved_references(
                     fields,
                     hierarchy,
                 ) {
-                    visitor(class_count + target, site)?;
+                    visitor(class_count + target, site_identity, edge.metadata)?;
                 }
             }
             RawReferenceTarget::Method {
@@ -378,7 +448,11 @@ fn visit_resolved_references(
                     methods,
                     hierarchy,
                 ) {
-                    visitor(class_count + field_count + target, site)?;
+                    visitor(
+                        class_count + field_count + target,
+                        site_identity,
+                        edge.metadata,
+                    )?;
                 }
             }
         }
@@ -406,14 +480,13 @@ fn build_hierarchy(
         .collect()
 }
 
-fn resolve_source_site(
+fn resolve_source_site_identity(
     site: RawReferenceSite,
     owner: u32,
-    occurrence_count: u32,
     field_offsets: &[u32],
     method_offsets: &[u32],
     extra_offsets: &[u32],
-) -> anyhow::Result<PackedReferenceSite> {
+) -> anyhow::Result<u32> {
     let ordinal = match site.kind() {
         0 => owner,
         1 => field_offsets[owner as usize]
@@ -427,7 +500,7 @@ fn resolve_source_site(
             .ok_or_else(|| anyhow!("Extra reference-site ordinal overflow"))?,
         kind => return Err(anyhow!("Unknown raw reference-site kind {kind}")),
     };
-    PackedReferenceSite::new(site.kind() as u8, ordinal, occurrence_count)
+    Ok((site.kind() << 30) | ordinal)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -593,6 +666,8 @@ mod tests {
     #[test]
     fn packed_reference_site_stays_eight_bytes() {
         assert_eq!(std::mem::size_of::<PackedReferenceSite>(), 8);
+        assert_eq!(std::mem::size_of::<PackedLiteralSite>(), 8);
         assert_eq!(std::mem::size_of::<ResolvedReference>(), 12);
+        assert_eq!(std::mem::size_of::<ResolvedLiteralReference>(), 12);
     }
 }

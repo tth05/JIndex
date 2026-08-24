@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -356,6 +357,58 @@ public class BasicTest {
     }
 
     @Test
+    public void testClassReferenceKindsDescribeHierarchyMetadataAndRuntimeUse() throws Exception {
+        Path workspace = Files.createTempDirectory("jindex-reference-kinds-");
+        try {
+            List<byte[]> classes = compileFixtureClasses(
+                    workspace,
+                    "package mixed;"
+                            + " @Marker(Target.class)"
+                            + " public class Fixture extends Target {"
+                            + "   Target make(Object value) {"
+                            + "     Target created = new Target();"
+                            + "     return value instanceof Target ? (Target) value : created;"
+                            + "   }"
+                            + " }"
+                            + " class Target {}"
+                            + " @interface Marker { Class<?> value(); }",
+                    "mixed/Fixture.class",
+                    "mixed/Target.class",
+                    "mixed/Marker.class"
+            );
+            try (ClassIndex fixtureIndex = ClassIndex.fromBytes(classes)) {
+                ReferenceResult[] references = fixtureIndex.findReferences(
+                        ReferenceTarget.classTarget("mixed/Target"),
+                        100
+                ).results();
+                ReferenceResult classSite = Arrays.stream(references)
+                        .filter(reference -> reference.ownerInternalName().equals("mixed/Fixture"))
+                        .filter(reference -> reference.kind() == ReferenceSiteKind.CLASS)
+                        .findFirst()
+                        .orElseThrow();
+                assertEquals(
+                        Set.of(
+                                ReferenceKind.CLASS_HIERARCHY,
+                                ReferenceKind.CLASS_ANNOTATION_OR_METADATA
+                        ),
+                        classSite.kinds()
+                );
+                ReferenceResult methodSite = Arrays.stream(references)
+                        .filter(reference -> reference.name().equals("make"))
+                        .findFirst()
+                        .orElseThrow();
+                assertTrue(methodSite.kinds().containsAll(Set.of(
+                        ReferenceKind.CLASS_DECLARATION,
+                        ReferenceKind.CLASS_RUNTIME_TYPE,
+                        ReferenceKind.CLASS_MEMBER_USAGE
+                )));
+            }
+        } finally {
+            deleteTree(workspace);
+        }
+    }
+
+    @Test
     public void testSemanticStringLiteralsAreExactAndPersisted() throws Exception {
         Path workspace = Files.createTempDirectory("jindex-literals-");
         Path snapshot = workspace.resolve("index.zip");
@@ -583,11 +636,16 @@ public class BasicTest {
                         && reference.ownerInternalName().equals("mixed/Fixture")
                         && reference.name().equals("field")
                         && reference.descriptor().equals("Lmixed/Target;")
+                        && reference.kinds().equals(Set.of(ReferenceKind.CLASS_DECLARATION))
         ));
         assertTrue(Arrays.stream(classReferences).anyMatch(reference ->
                 reference.kind() == ReferenceSiteKind.METHOD
                         && reference.ownerInternalName().equals("mixed/Fixture")
                         && reference.name().equals("caller")
+                        && reference.kinds().containsAll(Set.of(
+                                ReferenceKind.CLASS_DECLARATION,
+                                ReferenceKind.CLASS_MEMBER_USAGE
+                        ))
         ));
 
         ReferenceResult fieldReference = Arrays.stream(fixtureIndex.findReferences(
@@ -599,6 +657,10 @@ public class BasicTest {
                 .orElseThrow();
         assertEquals(ReferenceSiteKind.METHOD, fieldReference.kind());
         assertEquals(2, fieldReference.occurrenceCount());
+        assertEquals(
+                Set.of(ReferenceKind.FIELD_READ, ReferenceKind.FIELD_WRITE),
+                fieldReference.kinds()
+        );
 
         ReferenceTarget methodTarget = ReferenceTarget.methodTarget("mixed/Target", "run", "()V");
         ReferenceResult[] methodReferences = fixtureIndex.findReferences(methodTarget, 100).results();
@@ -607,9 +669,13 @@ public class BasicTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals(2, directCalls.occurrenceCount());
-        assertTrue(Arrays.stream(methodReferences).anyMatch(reference ->
-                reference.name().equals("methodReference") && reference.occurrenceCount() == 1
-        ));
+        assertEquals(Set.of(ReferenceKind.METHOD_INVOKE), directCalls.kinds());
+        ReferenceResult methodReference = Arrays.stream(methodReferences)
+                .filter(reference -> reference.name().equals("methodReference"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1, methodReference.occurrenceCount());
+        assertEquals(Set.of(ReferenceKind.METHOD_HANDLE), methodReference.kinds());
 
         ReferenceSearchPage limited = fixtureIndex.findReferences(methodTarget, 1);
         assertEquals(1, limited.results().length);
@@ -663,6 +729,7 @@ public class BasicTest {
         assertEquals("mixed/Fixture", references[0].ownerInternalName());
         assertEquals(name, references[0].name());
         assertEquals(1, references[0].occurrenceCount());
+        assertEquals(Set.of(ReferenceKind.STRING_LITERAL), references[0].kinds());
         assertEquals(1, fixtureIndex.findLiteralReferences(literal, 10, 0).results().length);
         assertEquals(0, fixtureIndex.findLiteralReferences(literal, 10, 1).results().length);
     }

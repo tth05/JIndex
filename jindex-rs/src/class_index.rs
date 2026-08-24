@@ -8,8 +8,8 @@ use crate::all_direct_super_types;
 use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
 use crate::package_index::{IndexedPackage, PackageIndex};
-use crate::semantic_index::SemanticIndex;
 use crate::rsplit_once;
+use crate::semantic_index::SemanticIndex;
 
 pub struct ClassIndex {
     constant_pool: ClassIndexConstantPool,

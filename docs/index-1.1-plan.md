@@ -90,7 +90,18 @@ target_offsets[target_id] .. target_offsets[target_id + 1]
     -> packed_reference_sites[]
 ```
 
-Candidate compression techniques include:
+The accepted relation-aware posting remains one aligned 64-bit value:
+
+```text
+2-bit site kind | 30-bit site ordinal | 8-bit target-specific relation mask | 24-bit count
+```
+
+The target adjacency determines whether the relation mask describes a class, field, or method.
+String literals use a separate nominal 64-bit posting with the original 32-bit count, so reference
+semantics do not leak into literal storage. The 24-bit reference count is exact and overflow is
+rejected; the production corpus maximum is 10,002 against a limit of 16,777,215.
+
+Other compression techniques considered include:
 
 - source, class, member, and literal integer IDs;
 - kind tags packed into unused high bits when count limits are proven;
@@ -99,7 +110,11 @@ Candidate compression techniques include:
 - flattened class-to-field and class-to-method ranges;
 - source-ID bitsets for filtered result sets.
 
-No bit width, compression scheme, mmap strategy, or text-search accelerator is accepted until it is measured against the production corpus. The code must assert every chosen count limit and reject overflow exactly.
+The six-byte structure-of-arrays prototype was rejected. It saved roughly 27 MiB of raw posting
+memory on the production corpus, but required parallel arrays, sparse overflow bookkeeping, and
+custom persistence while improving a representative compressed stream by only 1.4%. The aligned
+64-bit posting keeps sorting, merging, iteration, and serialization direct. Every chosen count
+limit is asserted and overflow is rejected exactly.
 
 ## Persisted format
 

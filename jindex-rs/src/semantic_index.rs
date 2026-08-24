@@ -11,6 +11,9 @@ const SYMBOL_ORDINAL_MASK: u64 = (1 << SYMBOL_KIND_SHIFT) - 1;
 const REFERENCE_SITE_KIND_SHIFT: u64 = 62;
 const REFERENCE_SITE_ORDINAL_SHIFT: u64 = 32;
 const REFERENCE_SITE_ORDINAL_MASK: u64 = (1 << 30) - 1;
+const REFERENCE_RELATION_SHIFT: u64 = 24;
+const REFERENCE_RELATION_MASK: u64 = (1 << 8) - 1;
+const REFERENCE_OCCURRENCE_MASK: u64 = (1 << REFERENCE_RELATION_SHIFT) - 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -73,15 +76,68 @@ pub enum ReferenceSiteKind {
 pub struct PackedReferenceSite(u64);
 
 impl PackedReferenceSite {
-    pub(crate) fn new(kind: u8, ordinal: u32, occurrence_count: u32) -> anyhow::Result<Self> {
+    pub(crate) fn new(
+        kind: u8,
+        ordinal: u32,
+        relation_mask: u8,
+        occurrence_count: u32,
+    ) -> anyhow::Result<Self> {
         ensure!(kind <= 3, "Reference-site storage kind exceeds 2 bits");
         ensure!(
             u64::from(ordinal) <= REFERENCE_SITE_ORDINAL_MASK,
             "Reference-site ordinal exceeds 30 bits"
         );
         ensure!(
+            relation_mask > 0,
+            "Reference relation mask must not be empty"
+        );
+        ensure!(
+            occurrence_count > 0 && u64::from(occurrence_count) <= REFERENCE_OCCURRENCE_MASK,
+            "Reference occurrence count must be between 1 and {}",
+            REFERENCE_OCCURRENCE_MASK
+        );
+        Ok(Self(
+            (u64::from(kind) << REFERENCE_SITE_KIND_SHIFT)
+                | (u64::from(ordinal) << REFERENCE_SITE_ORDINAL_SHIFT)
+                | (u64::from(relation_mask) << REFERENCE_RELATION_SHIFT)
+                | u64::from(occurrence_count),
+        ))
+    }
+
+    pub fn storage_kind(self) -> u8 {
+        (self.0 >> REFERENCE_SITE_KIND_SHIFT) as u8
+    }
+
+    pub fn ordinal(self) -> u32 {
+        ((self.0 >> REFERENCE_SITE_ORDINAL_SHIFT) & REFERENCE_SITE_ORDINAL_MASK) as u32
+    }
+
+    pub fn occurrence_count(self) -> u32 {
+        (self.0 & REFERENCE_OCCURRENCE_MASK) as u32
+    }
+
+    pub fn relation_mask(self) -> u8 {
+        ((self.0 >> REFERENCE_RELATION_SHIFT) & REFERENCE_RELATION_MASK) as u8
+    }
+
+    pub(crate) fn identity(self) -> u32 {
+        (self.0 >> REFERENCE_SITE_ORDINAL_SHIFT) as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug, Readable, Writable)]
+pub struct PackedLiteralSite(u64);
+
+impl PackedLiteralSite {
+    pub(crate) fn new(kind: u8, ordinal: u32, occurrence_count: u32) -> anyhow::Result<Self> {
+        ensure!(kind <= 3, "Literal-site storage kind exceeds 2 bits");
+        ensure!(
+            u64::from(ordinal) <= REFERENCE_SITE_ORDINAL_MASK,
+            "Literal-site ordinal exceeds 30 bits"
+        );
+        ensure!(
             occurrence_count > 0,
-            "Reference occurrence count must be positive"
+            "Literal occurrence count must be positive"
         );
         Ok(Self(
             (u64::from(kind) << REFERENCE_SITE_KIND_SHIFT)
@@ -148,7 +204,7 @@ pub(crate) struct ReferenceIndexData {
     pub literal_offsets: Vec<u32>,
     pub literal_values: Vec<u16>,
     pub literal_posting_offsets: Vec<u32>,
-    pub literal_sites: Vec<PackedReferenceSite>,
+    pub literal_sites: Vec<PackedLiteralSite>,
 }
 
 #[derive(Clone, Copy, Debug, Readable, Writable)]
@@ -221,7 +277,7 @@ pub struct SemanticIndex {
     literal_offsets: Vec<u32>,
     literal_values: Vec<u16>,
     literal_posting_offsets: Vec<u32>,
-    literal_sites: Vec<PackedReferenceSite>,
+    literal_sites: Vec<PackedLiteralSite>,
 }
 
 impl SemanticIndex {
@@ -273,6 +329,30 @@ impl SemanticIndex {
         self.reference_sites.len()
     }
 
+    pub fn reference_storage_statistics(&self) -> (u64, u64, u64, u64, u64, u32) {
+        let mut occurrence_count = 0_u64;
+        let mut single_occurrence_site_count = 0_u64;
+        let mut count_over_255_site_count = 0_u64;
+        let mut count_over_65535_site_count = 0_u64;
+        let mut maximum_occurrence_count = 0_u32;
+        for site in &self.reference_sites {
+            let count = site.occurrence_count();
+            occurrence_count += u64::from(count);
+            single_occurrence_site_count += u64::from(count == 1);
+            count_over_255_site_count += u64::from(count > u8::MAX.into());
+            count_over_65535_site_count += u64::from(count > u16::MAX.into());
+            maximum_occurrence_count = maximum_occurrence_count.max(count);
+        }
+        (
+            self.reference_sites.len() as u64,
+            occurrence_count,
+            single_occurrence_site_count,
+            count_over_255_site_count,
+            count_over_65535_site_count,
+            maximum_occurrence_count,
+        )
+    }
+
     pub fn literal_count(&self) -> usize {
         self.literal_offsets.len().saturating_sub(1)
     }
@@ -304,7 +384,7 @@ impl SemanticIndex {
         &self.literal_values[start..end]
     }
 
-    pub fn literal_references(&self, literal: u32) -> &[PackedReferenceSite] {
+    pub fn literal_references(&self, literal: u32) -> &[PackedLiteralSite] {
         let start = self.literal_posting_offsets[literal as usize] as usize;
         let end = self.literal_posting_offsets[literal as usize + 1] as usize;
         &self.literal_sites[start..end]
@@ -679,5 +759,30 @@ mod tests {
     fn symbol_ids_are_tagged_without_losing_the_ordinal() {
         let id = SymbolId::new(SymbolKind::Method, 123_456).unwrap();
         assert_eq!(id.as_u64(), (2_u64 << SYMBOL_KIND_SHIFT) | 123_456);
+    }
+
+    #[test]
+    fn reference_postings_use_the_full_packed_ranges() {
+        let site = PackedReferenceSite::new(3, (1 << 30) - 1, u8::MAX, (1 << 24) - 1)
+            .expect("the documented maxima must fit");
+        assert_eq!(site.storage_kind(), 3);
+        assert_eq!(site.ordinal(), (1 << 30) - 1);
+        assert_eq!(site.relation_mask(), u8::MAX);
+        assert_eq!(site.occurrence_count(), (1 << 24) - 1);
+        assert_eq!(std::mem::size_of::<PackedReferenceSite>(), 8);
+
+        assert!(PackedReferenceSite::new(0, 0, 1, 0).is_err());
+        assert!(PackedReferenceSite::new(0, 0, 0, 1).is_err());
+        assert!(PackedReferenceSite::new(0, 0, 1, 1 << 24).is_err());
+    }
+
+    #[test]
+    fn literal_postings_keep_their_full_occurrence_count() {
+        let site = PackedLiteralSite::new(3, (1 << 30) - 1, u32::MAX)
+            .expect("literal counts remain independent from reference metadata");
+        assert_eq!(site.storage_kind(), 3);
+        assert_eq!(site.ordinal(), (1 << 30) - 1);
+        assert_eq!(site.occurrence_count(), u32::MAX);
+        assert_eq!(std::mem::size_of::<PackedLiteralSite>(), 8);
     }
 }

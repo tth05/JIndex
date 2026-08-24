@@ -66,6 +66,7 @@ public final class RuntimeCorpusBenchmark {
 
                 queryMeasurements = measureQueries(index);
                 IndexStatistics statistics = index.getStatistics();
+                ReferenceStorageStatistics referenceStorage = index.getReferenceStorageStatistics();
 
                 long saveStarted = System.nanoTime();
                 index.saveToFile(persistedIndex.toString());
@@ -82,6 +83,7 @@ public final class RuntimeCorpusBenchmark {
                         buildNanos,
                         nativeBuildTimes,
                         statistics,
+                        referenceStorage,
                         saveNanos,
                         Files.size(persistedIndex),
                         loadMeasurements,
@@ -334,6 +336,7 @@ public final class RuntimeCorpusBenchmark {
             long buildNanos,
             BuildTimeInfo nativeBuildTimes,
             IndexStatistics statistics,
+            ReferenceStorageStatistics referenceStorage,
             long saveNanos,
             long persistedBytes,
             LoadMeasurements loads,
@@ -365,6 +368,11 @@ public final class RuntimeCorpusBenchmark {
                   "fieldCount": %d,
                   "methodCount": %d,
                   "referenceSiteCount": %d,
+                  "referenceOccurrenceCount": %d,
+                  "singleOccurrenceReferenceSiteCount": %d,
+                  "referenceCountOver255SiteCount": %d,
+                  "referenceCountOver65535SiteCount": %d,
+                  "maximumReferenceOccurrenceCount": %d,
                   "literalCount": %d,
                   "literalOccurrenceCount": %d,
                   "saveNanos": %d,
@@ -412,6 +420,11 @@ public final class RuntimeCorpusBenchmark {
                 statistics.fieldCount(),
                 statistics.methodCount(),
                 statistics.referenceSiteCount(),
+                referenceStorage.occurrenceCount(),
+                referenceStorage.singleOccurrenceSiteCount(),
+                referenceStorage.countOver255SiteCount(),
+                referenceStorage.countOver65535SiteCount(),
+                referenceStorage.maximumOccurrenceCount(),
                 statistics.literalCount(),
                 statistics.literalOccurrenceCount(),
                 saveNanos,

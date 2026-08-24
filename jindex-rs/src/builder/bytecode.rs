@@ -2,26 +2,26 @@ use anyhow::{anyhow, bail, ensure, Context};
 
 pub(super) fn visit_constant_pool_operands(
     code: &[u8],
-    mut visitor: impl FnMut(u16) -> anyhow::Result<()>,
+    mut visitor: impl FnMut(u8, u16) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let mut offset = 0;
     while offset < code.len() {
         let opcode = code[offset];
         let instruction_length = match opcode {
             0x12 => {
-                visitor(u16::from(read_u8(code, offset + 1)?))?;
+                visitor(opcode, u16::from(read_u8(code, offset + 1)?))?;
                 2
             }
             0x13 | 0x14 | 0xb2..=0xb8 | 0xbb | 0xbd | 0xc0 | 0xc1 => {
-                visitor(read_u16(code, offset + 1)?)?;
+                visitor(opcode, read_u16(code, offset + 1)?)?;
                 3
             }
             0xb9 | 0xba => {
-                visitor(read_u16(code, offset + 1)?)?;
+                visitor(opcode, read_u16(code, offset + 1)?)?;
                 5
             }
             0xc5 => {
-                visitor(read_u16(code, offset + 1)?)?;
+                visitor(opcode, read_u16(code, offset + 1)?)?;
                 4
             }
             0x10 | 0x15..=0x19 | 0x36..=0x3a | 0xa9 | 0xbc => 2,
@@ -152,12 +152,12 @@ mod tests {
             0xb1, // return
         ];
         let mut indices = Vec::new();
-        visit_constant_pool_operands(&code, |index| {
-            indices.push(index);
+        visit_constant_pool_operands(&code, |opcode, index| {
+            indices.push((opcode, index));
             Ok(())
         })
         .unwrap();
-        assert_eq!(indices, [7, 258, 772, 1286]);
+        assert_eq!(indices, [(0x12, 7), (0xb6, 258), (0xba, 772), (0xc5, 1286)]);
     }
 
     #[test]
@@ -173,13 +173,13 @@ mod tests {
             0xc4, 0x84, 0x00, 0x01, 0x00, 0x02, // wide iinc
             0xb1,
         ];
-        assert!(visit_constant_pool_operands(&code, |_| Ok(())).is_ok());
+        assert!(visit_constant_pool_operands(&code, |_, _| Ok(())).is_ok());
     }
 
     #[test]
     fn rejects_truncated_and_invalid_instructions() {
-        assert!(visit_constant_pool_operands(&[0xb6, 0x00], |_| Ok(())).is_err());
-        assert!(visit_constant_pool_operands(&[0xc4, 0xb1], |_| Ok(())).is_err());
-        assert!(visit_constant_pool_operands(&[0xca], |_| Ok(())).is_err());
+        assert!(visit_constant_pool_operands(&[0xb6, 0x00], |_, _| Ok(())).is_err());
+        assert!(visit_constant_pool_operands(&[0xc4, 0xb1], |_, _| Ok(())).is_err());
+        assert!(visit_constant_pool_operands(&[0xca], |_, _| Ok(())).is_err());
     }
 }
