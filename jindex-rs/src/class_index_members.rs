@@ -10,6 +10,9 @@ use once_cell::unsync::OnceCell;
 use speedy::{Readable, Writable};
 
 const ACC_PRIVATE: u16 = 0x0002;
+const ACC_STATIC: u16 = 0x0008;
+const ACC_FINAL: u16 = 0x0010;
+const ACC_BRIDGE: u16 = 0x0040;
 
 pub struct IndexedClass {
     index: OnceCell<u32>,
@@ -253,9 +256,21 @@ impl IndexedMethod {
             .into_ascii_str(constant_pool)
     }
 
-    pub fn overrides(&self, base_method: &IndexedMethod) -> bool {
-        // If the target method is private, we can't override it
-        if ACC_PRIVATE & base_method.access_flags != 0 {
+    pub fn overrides(
+        &self,
+        base_method: &IndexedMethod,
+        constant_pool: &ClassIndexConstantPool,
+    ) -> bool {
+        let invalid_candidate = ACC_PRIVATE | ACC_STATIC | ACC_BRIDGE;
+        let invalid_base = ACC_PRIVATE | ACC_STATIC | ACC_FINAL;
+        if self.access_flags & invalid_candidate != 0
+            || base_method.access_flags & invalid_base != 0
+        {
+            return false;
+        }
+
+        let name = self.method_name(constant_pool);
+        if name == "<init>" || name == "<clinit>" {
             return false;
         }
 

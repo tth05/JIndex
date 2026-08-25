@@ -4,7 +4,7 @@ use crate::builder::workers::{
 };
 use crate::builder::BuildTimeInfo;
 use anyhow::{anyhow, ensure};
-use ascii::{AsAsciiStr, IntoAsciiString};
+use ascii::{AsAsciiStr, AsciiStr, IntoAsciiString};
 use jni::objects::{JByteArray, JIntArray, JList, JObject, JObjectArray, JString, JValue};
 use jni::strings::JNIString;
 use jni::sys::{jint, jlong, jobject, jobjectArray};
@@ -321,6 +321,75 @@ fn require_positive_limit(limit: jint) -> anyhow::Result<usize> {
     Ok(limit)
 }
 
+fn resolve_reference_target(
+    class_index: &ClassIndex,
+    target_kind: jint,
+    owner_internal_name: &AsciiStr,
+    name: &AsciiStr,
+    descriptor: &AsciiStr,
+) -> anyhow::Result<Option<SymbolId>> {
+    let owner_name = owner_internal_name.as_str();
+    let (package_name, class_name) = owner_name.rsplit_once('/').unwrap_or(("", owner_name));
+    let Some(owner) = class_index.find_class(
+        package_name
+            .as_ascii_str()
+            .expect("Validated owner package is ASCII"),
+        class_name
+            .as_ascii_str()
+            .expect("Validated owner class is ASCII"),
+    ) else {
+        return Ok(None);
+    };
+
+    let target = match target_kind {
+        0 => SymbolId::new(SymbolKind::Class, u64::from(owner.index())),
+        1 => owner
+            .fields()
+            .iter()
+            .enumerate()
+            .find(|(member_index, field)| {
+                field.field_name(class_index.constant_pool()) == name
+                    && class_index.semantic_index().descriptor(
+                        SymbolKind::Field,
+                        owner.index(),
+                        *member_index as u16,
+                    ) == descriptor
+            })
+            .map(|(member_index, _)| {
+                class_index.semantic_index().symbol_id(
+                    SymbolKind::Field,
+                    owner.index(),
+                    member_index as u16,
+                )
+            })
+            .transpose()?
+            .ok_or_else(|| anyhow!("Reference target field was not found")),
+        2 => owner
+            .methods()
+            .iter()
+            .enumerate()
+            .find(|(member_index, method)| {
+                method.method_name(class_index.constant_pool()) == name
+                    && class_index.semantic_index().descriptor(
+                        SymbolKind::Method,
+                        owner.index(),
+                        *member_index as u16,
+                    ) == descriptor
+            })
+            .map(|(member_index, _)| {
+                class_index.semantic_index().symbol_id(
+                    SymbolKind::Method,
+                    owner.index(),
+                    member_index as u16,
+                )
+            })
+            .transpose()?
+            .ok_or_else(|| anyhow!("Reference target method was not found")),
+        _ => Err(anyhow!("Unknown reference target kind {target_kind}")),
+    }?;
+    Ok(Some(target))
+}
+
 #[no_mangle]
 /// # Safety
 /// The pointer field has to be valid...
@@ -476,16 +545,18 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findRefere
         );
         let (_, class_index) = get_class_index(env, &this);
 
-        let owner_name = owner_internal_name.as_str();
-        let (package_name, class_name) = owner_name.rsplit_once('/').unwrap_or(("", owner_name));
-        let Some(owner) = class_index.find_class(
-            package_name
-                .as_ascii_str()
-                .expect("Validated owner package is ASCII"),
-            class_name
-                .as_ascii_str()
-                .expect("Validated owner class is ASCII"),
-        ) else {
+        let target = propagate_error!(
+            env,
+            resolve_reference_target(
+                class_index,
+                target_kind,
+                &owner_internal_name,
+                &name,
+                &descriptor,
+            ),
+            JObject::null().into_raw()
+        );
+        let Some(target) = target else {
             return Ok(create_reference_search_page(
                 env,
                 class_index,
@@ -496,58 +567,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findRefere
             )?
             .into_raw());
         };
-
-        let target = match target_kind {
-            0 => SymbolId::new(SymbolKind::Class, u64::from(owner.index())),
-            1 => owner
-                .fields()
-                .iter()
-                .enumerate()
-                .find(|(member_index, field)| {
-                    field.field_name(class_index.constant_pool()) == name.as_str()
-                        && class_index.semantic_index().descriptor(
-                            SymbolKind::Field,
-                            owner.index(),
-                            *member_index as u16,
-                        ) == descriptor.as_str()
-                })
-                .map(|(member_index, _)| {
-                    class_index.semantic_index().symbol_id(
-                        SymbolKind::Field,
-                        owner.index(),
-                        member_index as u16,
-                    )
-                })
-                .transpose()
-                .map(|target| target.ok_or_else(|| anyhow!("Reference target field was not found")))
-                .and_then(|target| target),
-            2 => owner
-                .methods()
-                .iter()
-                .enumerate()
-                .find(|(member_index, method)| {
-                    method.method_name(class_index.constant_pool()) == name.as_str()
-                        && class_index.semantic_index().descriptor(
-                            SymbolKind::Method,
-                            owner.index(),
-                            *member_index as u16,
-                        ) == descriptor.as_str()
-                })
-                .map(|(member_index, _)| {
-                    class_index.semantic_index().symbol_id(
-                        SymbolKind::Method,
-                        owner.index(),
-                        member_index as u16,
-                    )
-                })
-                .transpose()
-                .map(|target| {
-                    target.ok_or_else(|| anyhow!("Reference target method was not found"))
-                })
-                .and_then(|target| target),
-            _ => Err(anyhow!("Unknown reference target kind {target_kind}")),
-        };
-        let target = propagate_error!(env, target, JObject::null().into_raw());
         let references = propagate_error!(
             env,
             class_index.semantic_index().references_to(target),
@@ -561,6 +580,67 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findRefere
             limit,
             |reference| public_mask(target.kind(), reference.relation_mask()),
         )?
+        .into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_summarizeReferencesNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    target_kind: jint,
+    owner_internal_name: JString,
+    name: JString,
+    descriptor: JString,
+) -> jobject {
+    with_jni_env!(env, {
+        let owner_internal_name = java_to_ascii_string!(env, owner_internal_name);
+        let name = java_to_ascii_string!(env, name);
+        let descriptor = java_to_ascii_string!(env, descriptor);
+        let (_, class_index) = get_class_index(env, &this);
+        let target = propagate_error!(
+            env,
+            resolve_reference_target(
+                class_index,
+                target_kind,
+                &owner_internal_name,
+                &name,
+                &descriptor,
+            ),
+            JObject::null().into_raw()
+        );
+
+        let (site_count, occurrence_count) = if let Some(target) = target {
+            let references = propagate_error!(
+                env,
+                class_index.semantic_index().references_to(target),
+                JObject::null().into_raw()
+            );
+            (
+                references.len() as u64,
+                references
+                    .iter()
+                    .map(|reference| u64::from(reference.occurrence_count()))
+                    .sum(),
+            )
+        } else {
+            (0, 0)
+        };
+
+        let summary_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/ReferenceSummary"))
+            .expect("ReferenceSummary class not found");
+        env.new_object(
+            &summary_class,
+            jni_sig!("(JJ)V"),
+            &[
+                JValue::Long(site_count as jlong),
+                JValue::Long(occurrence_count as jlong),
+            ],
+        )
+        .expect("Unable to create ReferenceSummary")
         .into_raw()
     })
 }

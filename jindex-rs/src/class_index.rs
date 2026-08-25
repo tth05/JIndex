@@ -296,33 +296,78 @@ impl ClassIndex {
         &'b self,
         defining_class_index: u32,
         target_method: &'b IndexedMethod,
-    ) -> Vec<(&IndexedClass, &IndexedMethod)> {
+    ) -> Vec<(&'b IndexedClass, &'b IndexedMethod)> {
+        let defining_class = self.class_at_index(defining_class_index);
         self.find_implementations_of_class(defining_class_index, false)
             .iter()
             .flat_map(|class| {
                 class
                     .methods()
                     .iter()
-                    .filter(|m| m.overrides(target_method))
+                    .filter(|method| {
+                        self.method_overrides(class, method, defining_class, target_method)
+                    })
                     .map(|m| (*class, m))
             })
             .collect()
     }
 
-    pub fn find_base_methods_of_method(
+    pub fn summarize_hierarchy_of_class(
         &self,
-        class: &IndexedClass,
-        target_method: &IndexedMethod,
-    ) -> Vec<MethodWithClass> {
+        class_index: u32,
+    ) -> (usize, Vec<usize>, Vec<usize>) {
+        let target_class = self.class_at_index(class_index);
+        let implementations = self.find_implementations_of_class(class_index, false);
+        let mut method_implementation_counts = vec![0; target_class.methods().len()];
+
+        for implementation in &implementations {
+            for candidate in implementation.methods() {
+                for (target_index, target) in target_class.methods().iter().enumerate() {
+                    if self.method_overrides(implementation, candidate, target_class, target) {
+                        method_implementation_counts[target_index] += 1;
+                    }
+                }
+            }
+        }
+
+        let method_base_counts = target_class
+            .methods()
+            .iter()
+            .map(|method| self.find_base_methods_of_method(target_class, method).len())
+            .collect();
+
+        (
+            implementations.len(),
+            method_implementation_counts,
+            method_base_counts,
+        )
+    }
+
+    pub fn find_base_methods_of_method<'a>(
+        &'a self,
+        class: &'a IndexedClass,
+        target_method: &'a IndexedMethod,
+    ) -> Vec<MethodWithClass<'a>> {
+        self.find_base_methods_starting_at(class, class, target_method)
+    }
+
+    fn find_base_methods_starting_at<'a>(
+        &'a self,
+        current_class: &'a IndexedClass,
+        declaring_class: &'a IndexedClass,
+        target_method: &'a IndexedMethod,
+    ) -> Vec<MethodWithClass<'a>> {
         // Check all super types of the given class
-        all_direct_super_types!(class)
+        all_direct_super_types!(current_class)
             .filter_map(|c| c.extract_base_object_type())
             .map(|i| self.class_at_index(i))
             .flat_map(|c| {
                 c.methods()
                     .iter()
                     // Collect all methods from the current class
-                    .filter(|m| target_method.overrides(m))
+                    .filter(|method| {
+                        self.method_overrides(declaring_class, target_method, c, method)
+                    })
                     // We don't use `c` here directly to satisfy the borrow checker
                     .map(|m| MethodWithClass {
                         class: self.class_at_index(c.index()),
@@ -330,13 +375,29 @@ impl ClassIndex {
                     })
                     .chain(
                         // Recursively search super types of current class
-                        self.find_base_methods_of_method(c, target_method)
+                        self.find_base_methods_starting_at(c, declaring_class, target_method)
                             .into_iter(),
                     )
             })
             .collect::<FxHashSet<MethodWithClass>>() // Remove duplicates
             .into_iter()
             .collect()
+    }
+
+    fn method_overrides(
+        &self,
+        candidate_class: &IndexedClass,
+        candidate_method: &IndexedMethod,
+        base_class: &IndexedClass,
+        base_method: &IndexedMethod,
+    ) -> bool {
+        const ACC_PUBLIC: u16 = 0x0001;
+        const ACC_PRIVATE: u16 = 0x0002;
+        const ACC_PROTECTED: u16 = 0x0004;
+        let base_is_package_private =
+            base_method.access_flags() & (ACC_PUBLIC | ACC_PRIVATE | ACC_PROTECTED) == 0;
+        (!base_is_package_private || candidate_class.package_index() == base_class.package_index())
+            && candidate_method.overrides(base_method, &self.constant_pool)
     }
 
     pub fn classes(&self) -> &Vec<IndexedClass> {

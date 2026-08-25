@@ -158,6 +158,22 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     }
 
     /**
+     * Returns aggregate incoming-reference counts without allocating one result object per declaration site.
+     *
+     * @param target exact declaration whose incoming references should be counted
+     * @return distinct declaration-site and total occurrence counts
+     */
+    public ReferenceSummary summarizeReferences(ReferenceTarget target) {
+        Objects.requireNonNull(target, "target");
+        return executeWhileOpen(() -> summarizeReferencesNative(
+                target.kind().ordinal(),
+                target.ownerInternalName(),
+                target.name(),
+                target.descriptor()
+        ));
+    }
+
+    /**
      * Returns a bounded page of indexed declaration sites from the selected sources that reference the target.
      * Passing no source IDs selects no sources; use {@link #findReferences(ReferenceTarget, int)} for all sources.
      *
@@ -319,6 +335,13 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
             String descriptor,
             int[] sourceIds,
             int limit
+    );
+
+    private native ReferenceSummary summarizeReferencesNative(
+            int targetKind,
+            String ownerInternalName,
+            String name,
+            String descriptor
     );
 
     private native ReferenceSearchPage findLiteralReferencesNative(String literal, int[] sourceIds, int limit);

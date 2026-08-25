@@ -618,3 +618,61 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_findImpl
         result_array.into_raw()
     })
 }
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live indexed class.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_summarizeHierarchyNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+) -> jobject {
+    with_jni_env!(env, {
+        let indexed_class = get_field_with_id::<IndexedClass>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let (_, class_index) = get_class_index(env, &this);
+        let (implementation_count, method_implementations, method_bases) =
+            class_index.summarize_hierarchy_of_class(indexed_class.index());
+
+        let method_implementations = method_implementations
+            .into_iter()
+            .map(|count| jint::try_from(count).expect("Method implementation count exceeds jint"))
+            .collect::<Vec<_>>();
+        let method_bases = method_bases
+            .into_iter()
+            .map(|count| jint::try_from(count).expect("Method base count exceeds jint"))
+            .collect::<Vec<_>>();
+        let implementation_count =
+            jint::try_from(implementation_count).expect("Class implementation count exceeds jint");
+
+        let implementation_array = env
+            .new_int_array(method_implementations.len())
+            .expect("Unable to create method implementation count array");
+        implementation_array
+            .set_region(env, 0, &method_implementations)
+            .expect("Unable to populate method implementation count array");
+        let base_array = env
+            .new_int_array(method_bases.len())
+            .expect("Unable to create method base count array");
+        base_array
+            .set_region(env, 0, &method_bases)
+            .expect("Unable to populate method base count array");
+
+        let summary_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/HierarchySummary"))
+            .expect("HierarchySummary class not found");
+        env.new_object(
+            &summary_class,
+            jni_sig!("(I[I[I)V"),
+            &[
+                JValue::Int(implementation_count),
+                JValue::Object(&implementation_array),
+                JValue::Object(&base_array),
+            ],
+        )
+        .expect("Unable to create HierarchySummary")
+        .into_raw()
+    })
+}

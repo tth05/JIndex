@@ -112,6 +112,15 @@ public class IndexedClass extends ClassIndexChildObject {
     }
 
     /**
+     * Counts implementations of this class and of each method declared by it in one native query.
+     *
+     * @return hierarchy counts aligned with {@link #getMethods()}
+     */
+    public HierarchySummary summarizeHierarchy() {
+        return executeWhileOwnerOpen(this::summarizeHierarchyNative);
+    }
+
+    /**
      * @return The super class of this class, or {@code null} if this class is {@code java/lang/Object} or if the super class is unresolved
      */
     public IndexedClass getSuperClass() {
@@ -173,6 +182,8 @@ public class IndexedClass extends ClassIndexChildObject {
     private native IndexedClass[] getMemberClassesNative();
 
     private native IndexedClass[] findImplementationsNative(boolean directSubTypesOnly);
+
+    private native HierarchySummary summarizeHierarchyNative();
 
     private native IndexedClass getSuperClassNative();
 
