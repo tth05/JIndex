@@ -66,7 +66,25 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The classes which match the query and options, or an empty array if no classes were found
      */
     public IndexedClass[] findClasses(String query, SearchOptions options) {
-        return executeWhileOpen(() -> findClassesNative(query, options));
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(options, "options");
+        return executeWhileOpen(() -> findClassesNative(query, options, null));
+    }
+
+    /**
+     * Returns matching classes declared by the selected sources. Passing no source IDs selects no sources; use
+     * {@link #findClasses(String, SearchOptions)} for all sources.
+     *
+     * @param query the class-name query
+     * @param options matching and limit options
+     * @param sourceIds opaque source IDs to include
+     * @return matching classes from the selected sources
+     */
+    public IndexedClass[] findClasses(String query, SearchOptions options, int... sourceIds) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(options, "options");
+        int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
+        return executeWhileOpen(() -> findClassesNative(query, options, normalizedSourceIds));
     }
 
     /**
@@ -117,6 +135,34 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     ) {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(options, "options");
+        int kindMask = symbolKindMask(kinds);
+        return executeWhileOpen(() -> findSymbolsNative(query, options, kindMask, null));
+    }
+
+    /**
+     * Searches field and method declarations from the selected sources. Passing no source IDs selects no sources;
+     * use {@link #findSymbols(String, SearchOptions, EnumSet)} for all sources.
+     *
+     * @param query the member-name query
+     * @param options matching and limit options
+     * @param kinds field and method kinds to include
+     * @param sourceIds opaque source IDs to include
+     * @return deterministically ordered matching declarations from the selected sources
+     */
+    public SymbolSearchResult[] findSymbols(
+            String query,
+            SearchOptions options,
+            EnumSet<SymbolKind> kinds,
+            int... sourceIds
+    ) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(options, "options");
+        int kindMask = symbolKindMask(kinds);
+        int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
+        return executeWhileOpen(() -> findSymbolsNative(query, options, kindMask, normalizedSourceIds));
+    }
+
+    private static int symbolKindMask(EnumSet<SymbolKind> kinds) {
         Objects.requireNonNull(kinds, "kinds");
         int kindMask = 0;
         if (kinds.contains(SymbolKind.FIELD)) {
@@ -125,8 +171,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         if (kinds.contains(SymbolKind.METHOD)) {
             kindMask |= 2;
         }
-        int finalKindMask = kindMask;
-        return executeWhileOpen(() -> findSymbolsNative(query, options, finalKindMask));
+        return kindMask;
     }
 
     public IndexStatistics getStatistics() {
@@ -236,7 +281,23 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     public LiteralSearchPage findLiteralsContaining(String query, int limit) {
         Objects.requireNonNull(query, "query");
         requirePositiveLimit(limit);
-        return executeWhileOpen(() -> findLiteralsContainingNative(query, limit));
+        return executeWhileOpen(() -> findLiteralsContainingNative(query, null, limit));
+    }
+
+    /**
+     * Finds distinct Java string values containing the exact UTF-16 query in the selected sources. Passing no source
+     * IDs selects no sources; use {@link #findLiteralsContaining(String, int)} for all sources.
+     *
+     * @param query exact UTF-16 substring to match
+     * @param limit maximum number of values to return
+     * @param sourceIds opaque source IDs to include
+     * @return matching values, their selected source IDs, and truncation state
+     */
+    public LiteralSearchPage findLiteralsContaining(String query, int limit, int... sourceIds) {
+        Objects.requireNonNull(query, "query");
+        requirePositiveLimit(limit);
+        int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
+        return executeWhileOpen(() -> findLiteralsContainingNative(query, normalizedSourceIds, limit));
     }
 
     private static void requirePositiveLimit(int limit) {
@@ -320,9 +381,14 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private native IndexedClass findClassNative(String packageName, String className);
 
-    private native IndexedClass[] findClassesNative(String query, SearchOptions options);
+    private native IndexedClass[] findClassesNative(String query, SearchOptions options, int[] sourceIds);
 
-    private native SymbolSearchResult[] findSymbolsNative(String query, SearchOptions options, int kindMask);
+    private native SymbolSearchResult[] findSymbolsNative(
+            String query,
+            SearchOptions options,
+            int kindMask,
+            int[] sourceIds
+    );
 
     private native IndexStatistics getStatisticsNative();
 
@@ -346,7 +412,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private native ReferenceSearchPage findLiteralReferencesNative(String literal, int[] sourceIds, int limit);
 
-    private native LiteralSearchPage findLiteralsContainingNative(String query, int limit);
+    private native LiteralSearchPage findLiteralsContainingNative(String query, int[] sourceIds, int limit);
 
     private native IndexedPackage findPackageNative(String packageName);
 

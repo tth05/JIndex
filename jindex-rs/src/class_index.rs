@@ -65,7 +65,12 @@ impl ClassIndex {
         }
     }
 
-    pub fn find_classes(&self, name: &AsciiStr, options: SearchOptions) -> Vec<&IndexedClass> {
+    pub fn find_classes(
+        &self,
+        name: &AsciiStr,
+        options: SearchOptions,
+        source_ids: Option<&[u32]>,
+    ) -> Vec<&IndexedClass> {
         if name.is_empty() {
             return Vec::default();
         }
@@ -96,6 +101,13 @@ impl ClassIndex {
         for x in iters {
             let mut index = 0;
             x.iter()
+                .filter(|class| {
+                    source_ids.is_none_or(|source_ids| {
+                        source_ids
+                            .binary_search(&self.semantic_index().class_source_id(class.index()))
+                            .is_ok()
+                    })
+                })
                 .filter_map(|class| {
                     let result = self
                         .constant_pool()

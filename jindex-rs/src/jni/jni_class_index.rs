@@ -696,6 +696,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findLitera
     mut env: EnvUnowned<'_>,
     this: JObject,
     query: JString,
+    source_ids_array: JObject,
     limit: jint,
 ) -> jobject {
     with_jni_env!(env, {
@@ -709,22 +710,48 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findLitera
             usize::try_from(limit).map_err(anyhow::Error::from),
             JObject::null().into_raw()
         );
+        let source_ids = propagate_error!(
+            env,
+            read_optional_source_ids(env, source_ids_array),
+            JObject::null().into_raw()
+        );
         let (_, class_index) = get_class_index(env, &this);
         let (matches, truncated) = class_index
             .semantic_index()
-            .find_literals_containing(&query, limit);
-        let string_class = env.find_class(jni_str!("java/lang/String"))?;
-        let values = env.new_object_array(matches.len() as i32, &string_class, JObject::null())?;
+            .find_literals_containing_in_sources(&query, limit, source_ids.as_deref());
+        let result_class =
+            env.find_class(jni_str!("com/github/tth05/jindex/LiteralSearchResult"))?;
+        let results = env.new_object_array(matches.len() as i32, &result_class, JObject::null())?;
         for (index, literal) in matches.into_iter().enumerate() {
-            let value =
-                new_java_string_from_utf16(env, class_index.semantic_index().literal(literal))?;
-            values.set_element(env, index, &value)?;
+            env.with_local_frame(6, |env| -> jni::errors::Result<()> {
+                let value =
+                    new_java_string_from_utf16(env, class_index.semantic_index().literal(literal))?;
+                let source_ids = class_index
+                    .semantic_index()
+                    .literal_source_ids(literal)
+                    .into_iter()
+                    .filter(|source_id| {
+                        source_ids
+                            .as_ref()
+                            .is_none_or(|selected| selected.binary_search(source_id).is_ok())
+                    })
+                    .map(|value| value as jint)
+                    .collect::<Vec<_>>();
+                let source_ids_array = env.new_int_array(source_ids.len())?;
+                source_ids_array.set_region(env, 0, &source_ids)?;
+                let result = env.new_object(
+                    &result_class,
+                    jni_sig!("(Ljava/lang/String;[I)V"),
+                    &[JValue::Object(&value), JValue::Object(&source_ids_array)],
+                )?;
+                results.set_element(env, index, &result)
+            })?;
         }
         let page_class = env.find_class(jni_str!("com/github/tth05/jindex/LiteralSearchPage"))?;
         env.new_object(
             &page_class,
-            jni_sig!("([Ljava/lang/String;Z)V"),
-            &[JValue::Object(&values), JValue::Bool(truncated)],
+            jni_sig!("([Lcom/github/tth05/jindex/LiteralSearchResult;Z)V"),
+            &[JValue::Object(&results), JValue::Bool(truncated)],
         )?
         .into_raw()
     })
@@ -965,6 +992,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     this: JObject,
     input: JString,
     options: JObject,
+    source_ids_array: JObject,
 ) -> jobjectArray {
     with_jni_env!(env, {
         let input = java_to_ascii_string!(env, input);
@@ -974,6 +1002,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
             .expect("Result class not found");
 
         let (class_index_pointer, class_index) = get_class_index(env, &this);
+        let source_ids = propagate_error!(
+            env,
+            read_optional_source_ids(env, source_ids_array),
+            JObject::null().into_raw()
+        );
 
         let classes: Vec<_> = class_index.find_classes(
             &input,
@@ -982,6 +1015,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
                 convert_search_options(env, options),
                 JObject::null().into_raw()
             ),
+            source_ids.as_deref(),
         );
 
         let result_array = env
@@ -1016,6 +1050,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
     input: JString,
     options: JObject,
     kind_mask: jni::sys::jint,
+    source_ids_array: JObject,
 ) -> jobjectArray {
     with_jni_env!(env, {
         let input = java_to_ascii_string!(env, input);
@@ -1023,6 +1058,11 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
             .find_class(jni_str!("com/github/tth05/jindex/SymbolSearchResult"))
             .expect("Result class not found");
         let (_, class_index) = get_class_index(env, &this);
+        let source_ids = propagate_error!(
+            env,
+            read_optional_source_ids(env, source_ids_array),
+            JObject::null().into_raw()
+        );
         let results = class_index.semantic_index().find_members(
             class_index,
             &input,
@@ -1033,6 +1073,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
             ),
             kind_mask & 1 != 0,
             kind_mask & 2 != 0,
+            source_ids.as_deref(),
         );
         let result_array = env
             .new_object_array(results.len() as i32, &result_class, JObject::null())

@@ -391,6 +391,15 @@ impl SemanticIndex {
     }
 
     pub fn find_literals_containing(&self, query: &[u16], limit: usize) -> (Vec<u32>, bool) {
+        self.find_literals_containing_in_sources(query, limit, None)
+    }
+
+    pub fn find_literals_containing_in_sources(
+        &self,
+        query: &[u16],
+        limit: usize,
+        source_ids: Option<&[u32]>,
+    ) -> (Vec<u32>, bool) {
         if query.is_empty() || limit == 0 {
             return (Vec::new(), false);
         }
@@ -403,12 +412,51 @@ impl SemanticIndex {
             {
                 continue;
             }
+            if source_ids.is_some_and(|source_ids| {
+                !self
+                    .literal_sources(literal as u32)
+                    .any(|source_id| source_ids.binary_search(&source_id).is_ok())
+            }) {
+                continue;
+            }
             if matches.len() == limit {
                 return (matches, true);
             }
             matches.push(literal as u32);
         }
         (matches, false)
+    }
+
+    pub fn literal_source_ids(&self, literal: u32) -> Vec<u32> {
+        let mut source_ids = self.literal_sources(literal).collect::<Vec<_>>();
+        source_ids.sort_unstable();
+        source_ids.dedup();
+        source_ids
+    }
+
+    fn literal_sources(&self, literal: u32) -> impl Iterator<Item = u32> + '_ {
+        self.literal_references(literal)
+            .iter()
+            .map(|site| self.class_source_id(self.site_owner_class_index(*site)))
+    }
+
+    fn site_owner_class_index(&self, site: PackedLiteralSite) -> u32 {
+        match site.storage_kind() {
+            0 => site.ordinal(),
+            1 | 2 => self
+                .member_from_ordinal(
+                    if site.storage_kind() == 1 {
+                        SymbolKind::Field
+                    } else {
+                        SymbolKind::Method
+                    },
+                    site.ordinal(),
+                )
+                .expect("Stored literal site has an invalid member ordinal")
+                .class_index(),
+            3 => self.extra_site(site.ordinal()).owner_class_index,
+            value => panic!("Unknown literal-site storage kind {value}"),
+        }
     }
 
     pub fn references_to(&self, target: SymbolId) -> anyhow::Result<&[PackedReferenceSite]> {
@@ -512,6 +560,7 @@ impl SemanticIndex {
         options: SearchOptions,
         include_fields: bool,
         include_methods: bool,
+        source_ids: Option<&[u32]>,
     ) -> Vec<MemberSearchResult> {
         if query.is_empty() || options.limit == 0 {
             return Vec::new();
@@ -527,6 +576,7 @@ impl SemanticIndex {
                 options,
                 SymbolKind::Field,
                 &self.field_search,
+                source_ids,
                 &mut results,
             );
         }
@@ -537,6 +587,7 @@ impl SemanticIndex {
                 options,
                 SymbolKind::Method,
                 &self.method_search,
+                source_ids,
                 &mut results,
             );
         }
@@ -560,10 +611,11 @@ impl SemanticIndex {
         options: SearchOptions,
         kind: SymbolKind,
         members: &[PackedMemberId],
+        source_ids: Option<&[u32]>,
         output: &mut Vec<MemberSearchResult>,
     ) {
         if matches!(options.search_mode, SearchMode::Contains) {
-            self.collect_contains_matches(class_index, query, options, kind, output);
+            self.collect_contains_matches(class_index, query, options, kind, source_ids, output);
             return;
         }
 
@@ -575,6 +627,13 @@ impl SemanticIndex {
             let name = member_name(class_index, kind, *member);
             if !starts_with_ascii_ignore_case(name, query) {
                 break;
+            }
+            if source_ids.is_some_and(|source_ids| {
+                source_ids
+                    .binary_search(&self.class_source_id(member.class_index()))
+                    .is_err()
+            }) {
+                continue;
             }
             if let Some(match_offset) = search_ascii(name, query, options) {
                 output.push(MemberSearchResult {
@@ -596,10 +655,18 @@ impl SemanticIndex {
         query: &AsciiStr,
         options: SearchOptions,
         kind: SymbolKind,
+        source_ids: Option<&[u32]>,
         output: &mut Vec<MemberSearchResult>,
     ) {
         let constant_pool = class_index.constant_pool();
         for (class_ordinal, class) in class_index.classes().iter().enumerate() {
+            if source_ids.is_some_and(|source_ids| {
+                source_ids
+                    .binary_search(&self.class_source_id(class_ordinal as u32))
+                    .is_err()
+            }) {
+                continue;
+            }
             match kind {
                 SymbolKind::Field => {
                     for (member_ordinal, field) in class.fields().iter().enumerate() {

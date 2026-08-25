@@ -140,6 +140,31 @@ public class BasicTest {
                 assertTrue(Arrays.stream(symbols).allMatch(symbol -> symbol.sourceId() == 1));
                 assertTrue(Arrays.stream(symbols).allMatch(symbol -> symbol.ownerInternalName().equals("mixed/Fixture")));
                 assertEquals(2, Arrays.stream(symbols).mapToLong(SymbolSearchResult::symbolId).distinct().count());
+                assertArrayEquals(
+                        new String[]{"Fixture"},
+                        Arrays.stream(mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 1))
+                                .map(IndexedClass::getName)
+                                .toArray(String[]::new)
+                );
+                assertEquals(0, mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 0).length);
+                assertEquals(2, mixedIndex.findSymbols(
+                        "direct",
+                        SearchOptions.defaultOptions(),
+                        EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD),
+                        1
+                ).length);
+                assertEquals(0, mixedIndex.findSymbols(
+                        "direct",
+                        SearchOptions.defaultOptions(),
+                        EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD),
+                        0
+                ).length);
+                assertEquals(0, mixedIndex.findSymbols(
+                        "direct",
+                        SearchOptions.defaultOptions(),
+                        EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD),
+                        new int[0]
+                ).length);
             }
 
             try (ClassIndex explicitIndex = ClassIndex.fromSources(List.of(
@@ -704,15 +729,27 @@ public class BasicTest {
         );
         assertEquals(0, fixtureIndex.findLiteralReferences("recipe-prefix=", 10).results().length);
         LiteralSearchPage values = fixtureIndex.findLiteralsContaining("value", 10);
-        assertArrayEquals(new String[]{"annotation-value", "constant-value"}, values.values());
+        assertArrayEquals(
+                new String[]{"annotation-value", "constant-value"},
+                Arrays.stream(values.results()).map(LiteralSearchResult::value).toArray(String[]::new)
+        );
+        assertTrue(Arrays.stream(values.results()).allMatch(result -> Arrays.equals(new int[]{0}, result.sourceIds())));
         assertFalse(values.truncated());
         LiteralSearchPage limited = fixtureIndex.findLiteralsContaining("value", 1);
-        assertArrayEquals(new String[]{"annotation-value"}, limited.values());
+        assertArrayEquals(
+                new String[]{"annotation-value"},
+                Arrays.stream(limited.results()).map(LiteralSearchResult::value).toArray(String[]::new)
+        );
         assertTrue(limited.truncated());
         assertArrayEquals(
                 new String[]{new String(new char[]{'\uD800'})},
-                fixtureIndex.findLiteralsContaining(new String(new char[]{'\uD800'}), 10).values()
+                Arrays.stream(fixtureIndex.findLiteralsContaining(new String(new char[]{'\uD800'}), 10).results())
+                        .map(LiteralSearchResult::value)
+                        .toArray(String[]::new)
         );
+        assertEquals(2, fixtureIndex.findLiteralsContaining("value", 10, 0).results().length);
+        assertEquals(0, fixtureIndex.findLiteralsContaining("value", 10, 1).results().length);
+        assertEquals(0, fixtureIndex.findLiteralsContaining("value", 10, new int[0]).results().length);
         assertEquals(5, fixtureIndex.getStatistics().literalCount());
         assertEquals(5, fixtureIndex.getStatistics().literalOccurrenceCount());
     }
