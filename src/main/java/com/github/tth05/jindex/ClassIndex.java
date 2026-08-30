@@ -59,6 +59,22 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     }
 
     /**
+     * Returns the class with the exact binary name. Both {@code '.'} and {@code '/'} may be used as package
+     * separators; nested classes retain their {@code '$'} binary-name separator.
+     *
+     * @param binaryName the exact binary name, for example {@code java.lang.String} or
+     *                   {@code java.util.Map$Entry}
+     * @return the class, or {@code null} when the binary name is not indexed
+     */
+    public IndexedClass findClass(String binaryName) {
+        Objects.requireNonNull(binaryName, "binaryName");
+        int separator = Math.max(binaryName.lastIndexOf('.'), binaryName.lastIndexOf('/'));
+        String packageName = separator < 0 ? "" : binaryName.substring(0, separator);
+        String className = binaryName.substring(separator + 1);
+        return findClass(packageName, className);
+    }
+
+    /**
      * <p>Returns an array of classes which match the given query and the given search options.</p>
      *
      * @param query   The query to search for
@@ -68,7 +84,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     public IndexedClass[] findClasses(String query, SearchOptions options) {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(options, "options");
-        return executeWhileOpen(() -> findClassesNative(query, options, null));
+        return executeWhileOpen(() -> findClasses0(query, options, null));
     }
 
     /**
@@ -84,7 +100,86 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(options, "options");
         int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
-        return executeWhileOpen(() -> findClassesNative(query, options, normalizedSourceIds));
+        return executeWhileOpen(() -> findClasses0(query, options, normalizedSourceIds));
+    }
+
+    private IndexedClass[] findClasses0(String query, SearchOptions options, int[] sourceIds) {
+        if (options.limit() <= 0) {
+            return new IndexedClass[0];
+        }
+        int separator = Math.max(query.lastIndexOf('.'), query.lastIndexOf('/'));
+        if (separator < 0) {
+            return findClassesNative(query, options, sourceIds);
+        }
+
+        String packageName = query.substring(0, separator);
+        String classQuery = query.substring(separator + 1);
+        if (classQuery.isEmpty()) {
+            return new IndexedClass[0];
+        }
+        IndexedPackage indexedPackage = findPackage(packageName);
+        if (indexedPackage == null) {
+            return new IndexedClass[0];
+        }
+
+        List<ClassMatch> matches = new ArrayList<>();
+        for (IndexedClass indexedClass : indexedPackage.getClasses()) {
+            if (sourceIds != null && Arrays.binarySearch(sourceIds, indexedClass.getSourceId()) < 0) {
+                continue;
+            }
+            int matchPosition = matchPosition(indexedClass.getName(), classQuery, options);
+            if (matchPosition < 0) {
+                continue;
+            }
+            matches.add(new ClassMatch(matchPosition, indexedClass));
+            if (matches.size() == options.limit()) {
+                break;
+            }
+        }
+        matches.sort((left, right) -> Integer.compare(left.position(), right.position()));
+        return matches.stream().map(ClassMatch::indexedClass).toArray(IndexedClass[]::new);
+    }
+
+    private static int matchPosition(String value, String query, SearchOptions options) {
+        int lastStart = switch (options.searchMode()) {
+            case PREFIX -> 0;
+            case CONTAINS -> value.length() - query.length();
+        };
+        if (lastStart < 0) {
+            return -1;
+        }
+        for (int start = 0; start <= lastStart; start++) {
+            boolean matches = true;
+            for (int offset = 0; offset < query.length(); offset++) {
+                char actual = value.charAt(start + offset);
+                char expected = query.charAt(offset);
+                boolean equal = switch (options.matchMode()) {
+                    case MATCH_CASE -> actual == expected;
+                    case IGNORE_CASE -> equalsIgnoreAsciiCase(actual, expected);
+                    case MATCH_CASE_FIRST_CHAR_ONLY -> offset == 0
+                            ? actual == expected
+                            : equalsIgnoreAsciiCase(actual, expected);
+                };
+                if (!equal) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return start;
+            }
+            if (options.searchMode() == SearchOptions.SearchMode.PREFIX) {
+                break;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean equalsIgnoreAsciiCase(char left, char right) {
+        return left == right || (left < 128 && right < 128 && Character.toLowerCase(left) == Character.toLowerCase(right));
+    }
+
+    private record ClassMatch(int position, IndexedClass indexedClass) {
     }
 
     /**

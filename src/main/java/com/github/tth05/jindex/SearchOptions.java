@@ -39,6 +39,18 @@ public class SearchOptions {
         return options;
     }
 
+    public int limit() {
+        return this.limit;
+    }
+
+    public SearchMode searchMode() {
+        return this.searchMode;
+    }
+
+    public MatchMode matchMode() {
+        return this.matchMode;
+    }
+
     public enum SearchMode {
         /**
          * The match has to occur at the start of the string.

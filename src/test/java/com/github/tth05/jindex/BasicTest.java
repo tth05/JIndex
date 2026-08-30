@@ -58,6 +58,38 @@ public class BasicTest {
         IndexedClass singleClass = index.findClass("java/lang", "String");
         assertNotNull(singleClass);
         assertEquals("java/lang/String", singleClass.getNameWithPackage());
+
+        assertEquals("java/lang/String", index.findClass("java.lang.String").getNameWithPackage());
+        assertEquals("java/util/Map$Entry", index.findClass("java/util/Map$Entry").getNameWithPackage());
+        assertNull(index.findClass("java.lang.DoesNotExist"));
+    }
+
+    @Test
+    public void testFindClassesWithPackageQualifiedQuery() {
+        IndexedClass[] exactPackage = index.findClasses(
+                "java.lang.Str",
+                SearchOptions.with(
+                        SearchOptions.SearchMode.PREFIX,
+                        SearchOptions.MatchMode.IGNORE_CASE,
+                        10
+                )
+        );
+        assertTrue(Arrays.stream(exactPackage)
+                .anyMatch(indexedClass -> indexedClass.getNameWithPackage().equals("java/lang/String")));
+        assertTrue(Arrays.stream(exactPackage)
+                .allMatch(indexedClass -> indexedClass.getNameWithPackage().startsWith("java/lang/")));
+
+        IndexedClass[] otherPackage = index.findClasses(
+                "java.util.String",
+                SearchOptions.with(
+                        SearchOptions.SearchMode.CONTAINS,
+                        SearchOptions.MatchMode.IGNORE_CASE,
+                        10
+                )
+        );
+        assertTrue(otherPackage.length > 0);
+        assertTrue(Arrays.stream(otherPackage)
+                .allMatch(indexedClass -> indexedClass.getNameWithPackage().startsWith("java/util/")));
     }
 
     @Test
