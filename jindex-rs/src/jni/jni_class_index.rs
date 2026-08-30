@@ -1044,6 +1044,62 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
 #[no_mangle]
 /// # Safety
 /// The pointer field has to identify a live class index.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClassesByBinaryNameNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+    input: JString,
+    options: JObject,
+    source_ids_array: JObject,
+) -> jobjectArray {
+    with_jni_env!(env, {
+        let input = java_to_ascii_string!(env, input);
+
+        let result_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))
+            .expect("Result class not found");
+
+        let (class_index_pointer, class_index) = get_class_index(env, &this);
+        let source_ids = propagate_error!(
+            env,
+            read_optional_source_ids(env, source_ids_array),
+            JObject::null().into_raw()
+        );
+        let classes = class_index.find_classes_by_binary_name(
+            &input,
+            propagate_error!(
+                env,
+                convert_search_options(env, options),
+                JObject::null().into_raw()
+            ),
+            source_ids.as_deref(),
+        );
+
+        let result_array = env
+            .new_object_array(classes.len() as i32, &result_class, JObject::null())
+            .expect("Failed to create result array");
+        for (index, class) in classes.into_iter().enumerate() {
+            let object = env
+                .new_object(
+                    &result_class,
+                    jni_sig!("(JJ)V"),
+                    &[
+                        JValue::from(class_index_pointer as jlong),
+                        JValue::from((class as *const IndexedClass) as jlong),
+                    ],
+                )
+                .expect("Failed to create result object");
+            result_array
+                .set_element(env, index, &object)
+                .expect("Failed to set element into result array");
+        }
+
+        result_array.into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to identify a live class index.
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbolsNative(
     mut env: EnvUnowned<'_>,
     this: JObject,

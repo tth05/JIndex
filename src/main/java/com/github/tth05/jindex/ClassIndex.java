@@ -103,6 +103,51 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         return executeWhileOpen(() -> findClasses0(query, options, normalizedSourceIds));
     }
 
+    /**
+     * Searches complete binary names instead of only simple class names. Both {@code '.'} and {@code '/'} may be
+     * used as package separators; nested classes retain their {@code '$'} separator.
+     *
+     * @param query the complete-binary-name query
+     * @param options matching and limit options
+     * @return matching classes from all indexed sources
+     */
+    public IndexedClass[] findClassesByBinaryName(String query, SearchOptions options) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(options, "options");
+        return executeWhileOpen(() -> findClassesByBinaryName0(query, options, null));
+    }
+
+    /**
+     * Searches complete binary names from the selected sources. Passing no source IDs selects no sources; use
+     * {@link #findClassesByBinaryName(String, SearchOptions)} for all sources.
+     *
+     * @param query the complete-binary-name query
+     * @param options matching and limit options
+     * @param sourceIds opaque source IDs to include
+     * @return matching classes from the selected sources
+     */
+    public IndexedClass[] findClassesByBinaryName(
+            String query,
+            SearchOptions options,
+            int... sourceIds
+    ) {
+        Objects.requireNonNull(query, "query");
+        Objects.requireNonNull(options, "options");
+        int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
+        return executeWhileOpen(() -> findClassesByBinaryName0(query, options, normalizedSourceIds));
+    }
+
+    private IndexedClass[] findClassesByBinaryName0(
+            String query,
+            SearchOptions options,
+            int[] sourceIds
+    ) {
+        if (options.limit() <= 0 || query.isEmpty()) {
+            return new IndexedClass[0];
+        }
+        return findClassesByBinaryNameNative(query.replace('.', '/'), options, sourceIds);
+    }
+
     private IndexedClass[] findClasses0(String query, SearchOptions options, int[] sourceIds) {
         if (options.limit() <= 0) {
             return new IndexedClass[0];
@@ -477,6 +522,12 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     private native IndexedClass findClassNative(String packageName, String className);
 
     private native IndexedClass[] findClassesNative(String query, SearchOptions options, int[] sourceIds);
+
+    private native IndexedClass[] findClassesByBinaryNameNative(
+            String query,
+            SearchOptions options,
+            int[] sourceIds
+    );
 
     private native SymbolSearchResult[] findSymbolsNative(
             String query,

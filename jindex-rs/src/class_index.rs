@@ -1,7 +1,7 @@
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::all_direct_super_types;
@@ -124,6 +124,53 @@ impl ClassIndex {
 
         result.sort_by_key(|el| el.0);
         result.into_iter().map(|el| el.1).collect()
+    }
+
+    pub fn find_classes_by_binary_name(
+        &self,
+        name: &AsciiStr,
+        options: SearchOptions,
+        source_ids: Option<&[u32]>,
+    ) -> Vec<&IndexedClass> {
+        if name.is_empty() {
+            return Vec::new();
+        }
+
+        let mut matches = Vec::new();
+        for class in &self.classes {
+            if source_ids.is_some_and(|source_ids| {
+                source_ids
+                    .binary_search(&self.semantic_index().class_source_id(class.index()))
+                    .is_err()
+            }) {
+                continue;
+            }
+
+            let package = self
+                .package_index
+                .package_at(class.package_index())
+                .package_name_with_parents(&self.package_index, &self.constant_pool);
+            let class_name = class.class_name(&self.constant_pool);
+            let mut binary_name = AsciiString::with_capacity(
+                package.len() + usize::from(!package.is_empty()) + class_name.len(),
+            );
+            binary_name.push_str(&package);
+            if !package.is_empty() {
+                binary_name.push(AsciiChar::Slash);
+            }
+            binary_name.push_str(class_name);
+
+            if let Some(position) = match_position(&binary_name, name, options) {
+                matches.push((position, class));
+            }
+        }
+
+        matches.sort_by_key(|(position, class)| (*position, class.index()));
+        matches
+            .into_iter()
+            .take(options.limit)
+            .map(|(_, class)| class)
+            .collect()
     }
 
     ///TODO:
@@ -442,6 +489,36 @@ impl ClassIndex {
             |r| &self.classes[r.start as usize..r.end as usize],
         )
     }
+}
+
+fn match_position(value: &AsciiStr, query: &AsciiStr, options: SearchOptions) -> Option<usize> {
+    let last_start = match options.search_mode {
+        SearchMode::Prefix => 0,
+        SearchMode::Contains => value.len().checked_sub(query.len())?,
+    };
+    for start in 0..=last_start {
+        let matches = query.chars().enumerate().all(|(offset, expected)| {
+            let actual = value[start + offset];
+            match options.match_mode {
+                MatchMode::MatchCase => actual == expected,
+                MatchMode::IgnoreCase => actual.eq_ignore_ascii_case(&expected),
+                MatchMode::MatchCaseFirstCharOnly => {
+                    if offset == 0 {
+                        actual == expected
+                    } else {
+                        actual.eq_ignore_ascii_case(&expected)
+                    }
+                }
+            }
+        });
+        if matches {
+            return Some(start);
+        }
+        if matches!(options.search_mode, SearchMode::Prefix) {
+            break;
+        }
+    }
+    None
 }
 
 pub struct MethodWithClass<'a> {

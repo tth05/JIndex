@@ -93,6 +93,30 @@ public class BasicTest {
     }
 
     @Test
+    public void testFindClassesByCompleteBinaryName() {
+        SearchOptions contains = SearchOptions.with(
+                SearchOptions.SearchMode.CONTAINS,
+                SearchOptions.MatchMode.IGNORE_CASE,
+                10
+        );
+
+        IndexedClass[] partialPackage = index.findClassesByBinaryName("lang.str", contains);
+        assertTrue(Arrays.stream(partialPackage)
+                .anyMatch(indexedClass -> indexedClass.getNameWithPackage().equals("java/lang/String")));
+
+        IndexedClass[] slashSeparated = index.findClassesByBinaryName("java/util/map$entry", contains);
+        assertTrue(Arrays.stream(slashSeparated)
+                .anyMatch(indexedClass -> indexedClass.getNameWithPackage().equals("java/util/Map$Entry")));
+
+        IndexedClass[] limited = index.findClassesByBinaryName("java/lang/", SearchOptions.with(
+                SearchOptions.SearchMode.CONTAINS,
+                SearchOptions.MatchMode.IGNORE_CASE,
+                1
+        ));
+        assertEquals(1, limited.length);
+    }
+
+    @Test
     public void testBuildFromBytes() {
         try (ClassIndex byteIndex = ClassIndex.fromBytes(SampleClassesHelper.loadSampleClasses())) {
             assertNotNull(byteIndex.findClass("java/lang", "String"));
@@ -179,6 +203,31 @@ public class BasicTest {
                                 .toArray(String[]::new)
                 );
                 assertEquals(0, mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 0).length);
+                assertArrayEquals(
+                        new String[]{"mixed/Fixture"},
+                        Arrays.stream(mixedIndex.findClassesByBinaryName(
+                                        "mixed.fixture",
+                                        SearchOptions.defaultOptions(),
+                                        1
+                                ))
+                                .map(IndexedClass::getNameWithPackage)
+                                .toArray(String[]::new)
+                );
+                assertEquals(0, mixedIndex.findClassesByBinaryName(
+                        "mixed.fixture",
+                        SearchOptions.defaultOptions(),
+                        0
+                ).length);
+                assertEquals(0, mixedIndex.findClassesByBinaryName(
+                        "mixed.fixture",
+                        SearchOptions.defaultOptions(),
+                        new int[0]
+                ).length);
+                assertThrows(IllegalArgumentException.class, () -> mixedIndex.findClassesByBinaryName(
+                        "mixed.fixture",
+                        SearchOptions.defaultOptions(),
+                        -1
+                ));
                 assertEquals(2, mixedIndex.findSymbols(
                         "direct",
                         SearchOptions.defaultOptions(),
