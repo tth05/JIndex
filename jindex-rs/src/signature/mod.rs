@@ -2,12 +2,11 @@ mod generic_data_parser;
 pub mod indexed_signature;
 pub mod raw_signature;
 
-use ascii::{AsAsciiStrError, AsciiStr, AsciiString};
+use ascii::{AsAsciiStrError, AsciiStr};
 use compact_str::CompactString;
 use speedy::{Readable, Writable};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-use std::ops::Deref;
 
 pub type SignaturePrimitive = jni::signature::Primitive;
 

@@ -73,7 +73,7 @@ public class BasicTest {
                         SearchOptions.MatchMode.IGNORE_CASE,
                         10
                 )
-        );
+        ).results();
         assertTrue(Arrays.stream(exactPackage)
                 .anyMatch(indexedClass -> indexedClass.getNameWithPackage().equals("java/lang/String")));
         assertTrue(Arrays.stream(exactPackage)
@@ -86,7 +86,7 @@ public class BasicTest {
                         SearchOptions.MatchMode.IGNORE_CASE,
                         10
                 )
-        );
+        ).results();
         assertTrue(otherPackage.length > 0);
         assertTrue(Arrays.stream(otherPackage)
                 .allMatch(indexedClass -> indexedClass.getNameWithPackage().startsWith("java/util/")));
@@ -100,20 +100,69 @@ public class BasicTest {
                 10
         );
 
-        IndexedClass[] partialPackage = index.findClassesByBinaryName("lang.str", contains);
+        IndexedClass[] partialPackage = index.findClassesByBinaryName("lang.str", contains).results();
         assertTrue(Arrays.stream(partialPackage)
                 .anyMatch(indexedClass -> indexedClass.getNameWithPackage().equals("java/lang/String")));
 
-        IndexedClass[] slashSeparated = index.findClassesByBinaryName("java/util/map$entry", contains);
+        IndexedClass[] slashSeparated = index.findClassesByBinaryName("java/util/map$entry", contains).results();
         assertTrue(Arrays.stream(slashSeparated)
                 .anyMatch(indexedClass -> indexedClass.getNameWithPackage().equals("java/util/Map$Entry")));
 
-        IndexedClass[] limited = index.findClassesByBinaryName("java/lang/", SearchOptions.with(
+        ClassSearchPage limited = index.findClassesByBinaryName("java/lang/", SearchOptions.with(
                 SearchOptions.SearchMode.CONTAINS,
                 SearchOptions.MatchMode.IGNORE_CASE,
                 1
         ));
-        assertEquals(1, limited.length);
+        assertEquals(1, limited.results().length);
+        assertTrue(limited.truncated());
+
+        ClassSearchPage zeroLimit = index.findClassesByBinaryName("java/lang/", SearchOptions.with(
+                SearchOptions.SearchMode.CONTAINS,
+                SearchOptions.MatchMode.IGNORE_CASE,
+                0
+        ));
+        assertEquals(0, zeroLimit.results().length);
+        assertTrue(zeroLimit.truncated());
+
+        ClassSearchPage empty = index.findClassesByBinaryName("", contains);
+        assertEquals(0, empty.results().length);
+        assertFalse(empty.truncated());
+    }
+
+    @Test
+    public void testClassSearchPageIsDefensiveAndPrefixSearchDoesNotDuplicateNonLetters() throws Exception {
+        try (ClassIndex fixtureIndex = ClassIndex.fromBytes(List.of(readClassBytes(_PrefixFixture.class)))) {
+            ClassSearchPage page = fixtureIndex.findClasses("_", SearchOptions.with(
+                    SearchOptions.SearchMode.PREFIX,
+                    SearchOptions.MatchMode.IGNORE_CASE,
+                    10
+            ));
+            assertEquals(1, page.results().length);
+            assertFalse(page.truncated());
+
+            IndexedClass[] copy = page.results();
+            copy[0] = null;
+            assertNotNull(page.results()[0]);
+        }
+    }
+
+    @Test
+    public void testSearchOptionsRejectInvalidState() {
+        assertThrows(NullPointerException.class, () -> SearchOptions.with(
+                null,
+                SearchOptions.MatchMode.IGNORE_CASE,
+                1
+        ));
+        assertThrows(NullPointerException.class, () -> SearchOptions.with(
+                SearchOptions.SearchMode.PREFIX,
+                null,
+                1
+        ));
+        assertThrows(IllegalArgumentException.class, () -> SearchOptions.with(
+                SearchOptions.SearchMode.PREFIX,
+                SearchOptions.MatchMode.IGNORE_CASE,
+                -1
+        ));
     }
 
     @Test
@@ -198,18 +247,18 @@ public class BasicTest {
                 assertEquals(2, Arrays.stream(symbols).mapToLong(SymbolSearchResult::symbolId).distinct().count());
                 assertArrayEquals(
                         new String[]{"Fixture"},
-                        Arrays.stream(mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 1))
+                        Arrays.stream(mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 1).results())
                                 .map(IndexedClass::getName)
                                 .toArray(String[]::new)
                 );
-                assertEquals(0, mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 0).length);
+                assertEquals(0, mixedIndex.findClasses("Fixture", SearchOptions.defaultOptions(), 0).results().length);
                 assertArrayEquals(
                         new String[]{"mixed/Fixture"},
                         Arrays.stream(mixedIndex.findClassesByBinaryName(
                                         "mixed.fixture",
                                         SearchOptions.defaultOptions(),
                                         1
-                                ))
+                                ).results())
                                 .map(IndexedClass::getNameWithPackage)
                                 .toArray(String[]::new)
                 );
@@ -217,12 +266,12 @@ public class BasicTest {
                         "mixed.fixture",
                         SearchOptions.defaultOptions(),
                         0
-                ).length);
+                ).results().length);
                 assertEquals(0, mixedIndex.findClassesByBinaryName(
                         "mixed.fixture",
                         SearchOptions.defaultOptions(),
                         new int[0]
-                ).length);
+                ).results().length);
                 assertThrows(IllegalArgumentException.class, () -> mixedIndex.findClassesByBinaryName(
                         "mixed.fixture",
                         SearchOptions.defaultOptions(),
@@ -612,7 +661,7 @@ public class BasicTest {
 
     @Test
     public void testFindClasses() {
-        IndexedClass[] results = index.findClasses("String", SearchOptions.defaultOptions());
+        IndexedClass[] results = index.findClasses("String", SearchOptions.defaultOptions()).results();
         for (IndexedClass result : results)
             assertTrue(result.getName().startsWith("String"));
 
@@ -693,7 +742,8 @@ public class BasicTest {
     }
 
     private static byte[] readClassBytes(Class<?> type) throws Exception {
-        try (InputStream input = type.getResourceAsStream(type.getSimpleName() + ".class")) {
+        String resourceName = "/" + type.getName().replace('.', '/') + ".class";
+        try (InputStream input = type.getResourceAsStream(resourceName)) {
             assertNotNull(input);
             return input.readAllBytes();
         }

@@ -1,7 +1,7 @@
 use crate::constant_pool::ClassIndexConstantPool;
+use anyhow::{anyhow, Result};
 use ascii::{AsAsciiStr, AsciiStr, AsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell};
-use compact_str::CompactString;
 use speedy::{Readable, Writable};
 use std::cmp::Ordering;
 
@@ -21,62 +21,33 @@ impl PackageIndex {
         &mut self,
         constant_pool: &mut ClassIndexConstantPool,
         name: &str,
-    ) -> u32 {
-        self.get_or_add_package_index0(0, constant_pool, name)
-    }
-
-    /// This may be the most disgusting method I've ever written, but I suck at Rust too much to fix
-    /// it
-    fn get_or_add_package_index0(
-        &mut self,
-        indexed_package_index: u32,
-        constant_pool: &mut ClassIndexConstantPool,
-        name: &str,
-    ) -> u32 {
-        let slash_index_or_none = name.chars().position(|char| char == '/');
-        let sub_name = match slash_index_or_none {
-            Some(dot_index) => &name[..dot_index],
-            None => name,
-        };
-
-        let possible_index = self
-            .indexed_packages
-            .get(indexed_package_index as usize)
-            .unwrap()
-            .sub_packages_indices()
-            .iter()
-            .enumerate()
-            .find(|p| {
-                self.indexed_packages
-                    .get(*p.1 as usize)
-                    .unwrap()
-                    .package_name(constant_pool)
-                    .eq(sub_name)
-            })
-            .map(|p| *p.1);
-
-        if let Some(index) = possible_index {
-            if let Some(dot_index) = slash_index_or_none {
-                self.get_or_add_package_index0(index, constant_pool, &name[dot_index + 1..])
-            } else {
-                index
+    ) -> Result<u32> {
+        let mut parent_index = 0;
+        for component in name.split('/') {
+            let existing_index = self.indexed_packages[parent_index as usize]
+                .sub_packages_indices()
+                .iter()
+                .copied()
+                .find(|index| {
+                    self.indexed_packages[*index as usize]
+                        .package_name(constant_pool)
+                        .eq(component)
+                });
+            if let Some(index) = existing_index {
+                parent_index = index;
+                continue;
             }
-        } else {
-            let name_index = constant_pool.add_string(sub_name.as_bytes()).unwrap();
-            let new_index = self.indexed_packages.len();
-            self.indexed_packages
-                .push(IndexedPackage::new(name_index, indexed_package_index));
-            self.indexed_packages
-                .get_mut(indexed_package_index as usize)
-                .unwrap()
-                .add_sub_package(new_index as u32);
 
-            if let Some(index) = slash_index_or_none {
-                self.get_or_add_package_index0(new_index as u32, constant_pool, &name[index + 1..])
-            } else {
-                new_index as u32
-            }
+            let component_index = constant_pool.add_string(component.as_bytes())?;
+            let new_index = u32::try_from(self.indexed_packages.len())
+                .map_err(|_| anyhow!("Package index exceeds the supported u32 range"))?;
+            self.indexed_packages
+                .push(IndexedPackage::new(component_index, parent_index));
+            self.indexed_packages[parent_index as usize].add_sub_package(new_index);
+            parent_index = new_index;
         }
+
+        Ok(parent_index)
     }
 
     pub fn package_at(&self, index: u32) -> &IndexedPackage {
@@ -210,7 +181,7 @@ impl IndexedPackage {
         &self.sub_packages_indices[..]
     }
 
-    pub fn sub_classes_indices(&self) -> AtomicRef<Vec<u32>> {
+    pub fn sub_classes_indices(&self) -> AtomicRef<'_, Vec<u32>> {
         self.sub_classes_indices.borrow()
     }
 

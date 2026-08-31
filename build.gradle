@@ -60,6 +60,21 @@ tasks.register('buildNativeLibrary', Exec) {
     commandLine 'cargo', 'build', '--release', '--locked'
 }
 
+tasks.register('checkNativeFormatting', Exec) {
+    workingDir rustProjectDirectory
+    commandLine 'cargo', 'fmt', '--all', '--', '--check'
+}
+
+tasks.register('testNativeLibrary', Exec) {
+    dependsOn tasks.named('buildNativeLibrary')
+    workingDir rustProjectDirectory
+    commandLine 'cargo', 'test', '--all-targets', '--locked'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('checkNativeFormatting'), tasks.named('testNativeLibrary')
+}
+
 tasks.register('stageNativeLibrary', Sync) {
     dependsOn tasks.named('buildNativeLibrary')
     from nativeLibrary
@@ -79,6 +94,7 @@ java {
 
 tasks.withType(JavaCompile).configureEach {
     options.release = 21
+    options.compilerArgs += ['-Xlint:all', '-Werror']
 }
 
 publishing {

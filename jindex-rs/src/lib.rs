@@ -1,6 +1,7 @@
 #![recursion_limit = "40"]
+#![deny(warnings)]
 
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
+use ascii::{AsciiChar, AsciiStr};
 use mimalloc::MiMalloc;
 
 pub mod builder;
@@ -24,8 +25,5 @@ pub(crate) fn rsplit_once(str: &AsciiStr, separator: AsciiChar) -> (&AsciiStr, &
         .rev()
         .find(|(_, c)| *c == separator)
         .map(|(i, _)| (&str[0..i], &str[(i + 1)..]))
-        .unwrap_or_else(|| (unsafe { "".as_ascii_str_unchecked() }, str))
+        .unwrap_or((&str[..0], str))
 }
-
-#[cfg(test)]
-mod test {}

@@ -242,7 +242,7 @@ impl FromStr for RawClassSignature {
         let mut other_classes = {
             let mut parameters = Vec::new();
             while start_index < input.len() {
-                let parse_result = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
+                let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
                 start_index += parse_result.0 as usize;
                 parameters.push(parse_result.1);
             }
@@ -305,7 +305,7 @@ impl RawMethodSignature {
 
             let mut parameters = Vec::new();
             while input.get_ascii(start_index).ok_or(ParseError::Eof)? != ')' {
-                let parse_result = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
+                let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
                 start_index += parse_result.0 as usize;
                 parameters.push(parse_result.1);
             }
@@ -319,14 +319,14 @@ impl RawMethodSignature {
             ));
         };
 
-        let return_type = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
+        let return_type = SignatureType::parse_ascii(&input[start_index..])?;
         start_index += return_type.0 as usize;
 
         let mut exceptions = Vec::new();
         while input.get_ascii(start_index).map_or(false, |ch| ch == '^') {
             start_index += 1; //Skip '^'
 
-            let parse_result = unsafe { SignatureType::parse_ascii(&input[start_index..])? };
+            let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
             start_index += parse_result.0 as usize;
             exceptions.push(parse_result.1);
         }

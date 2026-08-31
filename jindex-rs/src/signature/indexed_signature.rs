@@ -1,13 +1,12 @@
 use crate::builder::{get_index_from_pool, ClassToIndexMap};
 use crate::class_index::ClassIndex;
 use crate::constant_pool::ClassIndexConstantPool;
-use crate::rsplit_once;
 use crate::signature::{
     IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
     IndexedTypeParameterData, RawClassSignature, RawEnclosingTypeInfo, RawMethodSignature,
     RawSignatureType, RawTypeParameterData, SignatureType,
 };
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use ascii::AsciiString;
 use compact_str::CompactString;
 use rustc_hash::FxHashMap;
 

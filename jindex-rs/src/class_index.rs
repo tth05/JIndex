@@ -6,7 +6,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::all_direct_super_types;
 use crate::class_index_members::{IndexedClass, IndexedMethod};
-use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
+use crate::constant_pool::{
+    search_ascii, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions,
+};
 use crate::package_index::{IndexedPackage, PackageIndex};
 use crate::rsplit_once;
 use crate::semantic_index::SemanticIndex;
@@ -70,60 +72,97 @@ impl ClassIndex {
         name: &AsciiStr,
         options: SearchOptions,
         source_ids: Option<&[u32]>,
-    ) -> Vec<&IndexedClass> {
+    ) -> (Vec<&IndexedClass>, bool) {
         if name.is_empty() {
-            return Vec::default();
+            return (Vec::new(), false);
         }
 
-        let mut iters = Vec::with_capacity(2);
+        if name.chars().any(|character| character == AsciiChar::Slash) {
+            let (package_name, class_name) = rsplit_once(name, AsciiChar::Slash);
+            if class_name.is_empty() {
+                return (Vec::new(), false);
+            }
+            let Some(package) = self.find_package(package_name) else {
+                return (Vec::new(), false);
+            };
+            let class_indices = package.sub_classes_indices();
+            return self.collect_class_matches(
+                class_indices
+                    .iter()
+                    .map(|index| self.class_at_index(*index)),
+                class_name,
+                options,
+                source_ids,
+            );
+        }
+
         match options.search_mode {
             SearchMode::Prefix => match options.match_mode {
                 MatchMode::IgnoreCase => {
-                    iters.push(self.class_iter_for_char(
-                        name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte(),
-                    ));
-                    iters.push(self.class_iter_for_char(
-                        name.get_ascii(0).unwrap().to_ascii_uppercase().as_byte(),
-                    ));
+                    let lower = name.get_ascii(0).unwrap().to_ascii_lowercase().as_byte();
+                    let upper = name.get_ascii(0).unwrap().to_ascii_uppercase().as_byte();
+                    let first = self.class_iter_for_char(lower);
+                    let second = if lower == upper {
+                        &self.classes[0..0]
+                    } else {
+                        self.class_iter_for_char(upper)
+                    };
+                    self.collect_class_matches(
+                        first.iter().chain(second.iter()),
+                        name,
+                        options,
+                        source_ids,
+                    )
                 }
-                MatchMode::MatchCase | MatchMode::MatchCaseFirstCharOnly => {
-                    iters.push(self.class_iter_for_char(name.get_ascii(0).unwrap().as_byte()));
-                }
+                MatchMode::MatchCase | MatchMode::MatchCaseFirstCharOnly => self
+                    .collect_class_matches(
+                        self.class_iter_for_char(name.get_ascii(0).unwrap().as_byte())
+                            .iter(),
+                        name,
+                        options,
+                        source_ids,
+                    ),
             },
             SearchMode::Contains => {
-                //We have to search all classes in contains mode
-                iters.push(&self.classes[..]);
+                // A contains query cannot use the first-character ranges, so every class is a candidate.
+                self.collect_class_matches(self.classes.iter(), name, options, source_ids)
+            }
+        }
+    }
+
+    fn collect_class_matches<'a>(
+        &'a self,
+        classes: impl Iterator<Item = &'a IndexedClass>,
+        name: &AsciiStr,
+        options: SearchOptions,
+        source_ids: Option<&[u32]>,
+    ) -> (Vec<&'a IndexedClass>, bool) {
+        let probe_limit = options.limit.saturating_add(1);
+        let mut matches = Vec::with_capacity(probe_limit.min(1_024));
+        for class in classes {
+            if !self.includes_source(class, source_ids) {
+                continue;
+            }
+            let Some(position) = self
+                .constant_pool
+                .string_view_at(class.class_name_index())
+                .search(&self.constant_pool, name, options)
+            else {
+                continue;
+            };
+            matches.push((position, class));
+            if matches.len() == probe_limit {
+                break;
             }
         }
 
-        let mut result: Vec<(usize, &IndexedClass)> = Vec::new();
-
-        for x in iters {
-            let mut index = 0;
-            x.iter()
-                .filter(|class| {
-                    source_ids.is_none_or(|source_ids| {
-                        source_ids
-                            .binary_search(&self.semantic_index().class_source_id(class.index()))
-                            .is_ok()
-                    })
-                })
-                .filter_map(|class| {
-                    let result = self
-                        .constant_pool()
-                        .string_view_at(class.class_name_index())
-                        .search(self.constant_pool(), name, options)
-                        .map(|r| (r, class));
-
-                    index += 1;
-                    result
-                })
-                .take(options.limit.saturating_sub(result.len()))
-                .for_each(|el| result.push(el))
-        }
-
-        result.sort_by_key(|el| el.0);
-        result.into_iter().map(|el| el.1).collect()
+        matches.sort_by_key(|(position, class)| (*position, class.index()));
+        let truncated = matches.len() > options.limit;
+        matches.truncate(options.limit);
+        (
+            matches.into_iter().map(|(_, class)| class).collect(),
+            truncated,
+        )
     }
 
     pub fn find_classes_by_binary_name(
@@ -131,18 +170,14 @@ impl ClassIndex {
         name: &AsciiStr,
         options: SearchOptions,
         source_ids: Option<&[u32]>,
-    ) -> Vec<&IndexedClass> {
+    ) -> (Vec<&IndexedClass>, bool) {
         if name.is_empty() {
-            return Vec::new();
+            return (Vec::new(), false);
         }
 
         let mut matches = Vec::new();
         for class in &self.classes {
-            if source_ids.is_some_and(|source_ids| {
-                source_ids
-                    .binary_search(&self.semantic_index().class_source_id(class.index()))
-                    .is_err()
-            }) {
+            if !self.includes_source(class, source_ids) {
                 continue;
             }
 
@@ -160,27 +195,33 @@ impl ClassIndex {
             }
             binary_name.push_str(class_name);
 
-            if let Some(position) = match_position(&binary_name, name, options) {
-                matches.push((position, class));
-            }
+            let Some(position) = search_ascii(&binary_name, name, options) else {
+                continue;
+            };
+            matches.push((position, class));
         }
 
+        let truncated = matches.len() > options.limit;
         matches.sort_by_key(|(position, class)| (*position, class.index()));
-        matches
-            .into_iter()
-            .take(options.limit)
-            .map(|(_, class)| class)
-            .collect()
+        matches.truncate(options.limit);
+        (
+            matches.into_iter().map(|(_, class)| class).collect(),
+            truncated,
+        )
     }
 
-    ///TODO:
-    /// 0. Benchmark if this could actually be faster
-    /// 1. Abstract the prefix_range_map into its own type
-    /// 2. Use that type to fast access all root packages
-    /// 3. Utilize find_package (which uses that new type) and then a binary search on the found
-    /// package class_indices to make this whole find_class even faster For example, when
-    /// searching for 'java/lang/S', we perform a binary search on a slice with 12k elements.
-    /// Instead we could find java/lang extremely fast and then binary search ~200 classes.
+    fn includes_source(&self, class: &IndexedClass, source_ids: Option<&[u32]>) -> bool {
+        source_ids.is_none_or(|selected| {
+            selected
+                .binary_search(&self.semantic_index.class_source_id(class.index()))
+                .is_ok()
+        })
+    }
+
+    /// Finds a class with an exact package and class name.
+    ///
+    /// This currently narrows candidates by the class name's first character. A package-first
+    /// lookup could reduce the range further, but should only replace this after a corpus benchmark.
     pub fn find_class(
         &self,
         package_name: &AsciiStr,
@@ -489,36 +530,6 @@ impl ClassIndex {
             |r| &self.classes[r.start as usize..r.end as usize],
         )
     }
-}
-
-fn match_position(value: &AsciiStr, query: &AsciiStr, options: SearchOptions) -> Option<usize> {
-    let last_start = match options.search_mode {
-        SearchMode::Prefix => 0,
-        SearchMode::Contains => value.len().checked_sub(query.len())?,
-    };
-    for start in 0..=last_start {
-        let matches = query.chars().enumerate().all(|(offset, expected)| {
-            let actual = value[start + offset];
-            match options.match_mode {
-                MatchMode::MatchCase => actual == expected,
-                MatchMode::IgnoreCase => actual.eq_ignore_ascii_case(&expected),
-                MatchMode::MatchCaseFirstCharOnly => {
-                    if offset == 0 {
-                        actual == expected
-                    } else {
-                        actual.eq_ignore_ascii_case(&expected)
-                    }
-                }
-            }
-        });
-        if matches {
-            return Some(start);
-        }
-        if matches!(options.search_mode, SearchMode::Prefix) {
-            break;
-        }
-    }
-    None
 }
 
 pub struct MethodWithClass<'a> {

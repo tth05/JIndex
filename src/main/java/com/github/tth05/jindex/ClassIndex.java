@@ -75,13 +75,14 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     }
 
     /**
-     * <p>Returns an array of classes which match the given query and the given search options.</p>
+     * Returns a bounded page of classes whose simple name matches the query. A package-qualified query restricts the
+     * search to that exact package. Both {@code '.'} and {@code '/'} may be used as package separators.
      *
      * @param query   The query to search for
      * @param options The search options
-     * @return The classes which match the query and options, or an empty array if no classes were found
+     * @return matching classes and whether the configured limit omitted additional matches
      */
-    public IndexedClass[] findClasses(String query, SearchOptions options) {
+    public ClassSearchPage findClasses(String query, SearchOptions options) {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(options, "options");
         return executeWhileOpen(() -> findClasses0(query, options, null));
@@ -94,9 +95,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @param query the class-name query
      * @param options matching and limit options
      * @param sourceIds opaque source IDs to include
-     * @return matching classes from the selected sources
+     * @return matching classes and whether the configured limit omitted additional matches
      */
-    public IndexedClass[] findClasses(String query, SearchOptions options, int... sourceIds) {
+    public ClassSearchPage findClasses(String query, SearchOptions options, int... sourceIds) {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(options, "options");
         int[] normalizedSourceIds = normalizeSourceIds(sourceIds);
@@ -109,9 +110,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      *
      * @param query the complete-binary-name query
      * @param options matching and limit options
-     * @return matching classes from all indexed sources
+     * @return matching classes and whether the configured limit omitted additional matches
      */
-    public IndexedClass[] findClassesByBinaryName(String query, SearchOptions options) {
+    public ClassSearchPage findClassesByBinaryName(String query, SearchOptions options) {
         Objects.requireNonNull(query, "query");
         Objects.requireNonNull(options, "options");
         return executeWhileOpen(() -> findClassesByBinaryName0(query, options, null));
@@ -124,9 +125,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @param query the complete-binary-name query
      * @param options matching and limit options
      * @param sourceIds opaque source IDs to include
-     * @return matching classes from the selected sources
+     * @return matching classes and whether the configured limit omitted additional matches
      */
-    public IndexedClass[] findClassesByBinaryName(
+    public ClassSearchPage findClassesByBinaryName(
             String query,
             SearchOptions options,
             int... sourceIds
@@ -137,94 +138,22 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         return executeWhileOpen(() -> findClassesByBinaryName0(query, options, normalizedSourceIds));
     }
 
-    private IndexedClass[] findClassesByBinaryName0(
+    private ClassSearchPage findClassesByBinaryName0(
             String query,
             SearchOptions options,
             int[] sourceIds
     ) {
-        if (options.limit() <= 0 || query.isEmpty()) {
-            return new IndexedClass[0];
+        if (query.isEmpty()) {
+            return new ClassSearchPage(new IndexedClass[0], false);
         }
         return findClassesByBinaryNameNative(query.replace('.', '/'), options, sourceIds);
     }
 
-    private IndexedClass[] findClasses0(String query, SearchOptions options, int[] sourceIds) {
-        if (options.limit() <= 0) {
-            return new IndexedClass[0];
+    private ClassSearchPage findClasses0(String query, SearchOptions options, int[] sourceIds) {
+        if (query.isEmpty()) {
+            return new ClassSearchPage(new IndexedClass[0], false);
         }
-        int separator = Math.max(query.lastIndexOf('.'), query.lastIndexOf('/'));
-        if (separator < 0) {
-            return findClassesNative(query, options, sourceIds);
-        }
-
-        String packageName = query.substring(0, separator);
-        String classQuery = query.substring(separator + 1);
-        if (classQuery.isEmpty()) {
-            return new IndexedClass[0];
-        }
-        IndexedPackage indexedPackage = findPackage(packageName);
-        if (indexedPackage == null) {
-            return new IndexedClass[0];
-        }
-
-        List<ClassMatch> matches = new ArrayList<>();
-        for (IndexedClass indexedClass : indexedPackage.getClasses()) {
-            if (sourceIds != null && Arrays.binarySearch(sourceIds, indexedClass.getSourceId()) < 0) {
-                continue;
-            }
-            int matchPosition = matchPosition(indexedClass.getName(), classQuery, options);
-            if (matchPosition < 0) {
-                continue;
-            }
-            matches.add(new ClassMatch(matchPosition, indexedClass));
-            if (matches.size() == options.limit()) {
-                break;
-            }
-        }
-        matches.sort((left, right) -> Integer.compare(left.position(), right.position()));
-        return matches.stream().map(ClassMatch::indexedClass).toArray(IndexedClass[]::new);
-    }
-
-    private static int matchPosition(String value, String query, SearchOptions options) {
-        int lastStart = switch (options.searchMode()) {
-            case PREFIX -> 0;
-            case CONTAINS -> value.length() - query.length();
-        };
-        if (lastStart < 0) {
-            return -1;
-        }
-        for (int start = 0; start <= lastStart; start++) {
-            boolean matches = true;
-            for (int offset = 0; offset < query.length(); offset++) {
-                char actual = value.charAt(start + offset);
-                char expected = query.charAt(offset);
-                boolean equal = switch (options.matchMode()) {
-                    case MATCH_CASE -> actual == expected;
-                    case IGNORE_CASE -> equalsIgnoreAsciiCase(actual, expected);
-                    case MATCH_CASE_FIRST_CHAR_ONLY -> offset == 0
-                            ? actual == expected
-                            : equalsIgnoreAsciiCase(actual, expected);
-                };
-                if (!equal) {
-                    matches = false;
-                    break;
-                }
-            }
-            if (matches) {
-                return start;
-            }
-            if (options.searchMode() == SearchOptions.SearchMode.PREFIX) {
-                break;
-            }
-        }
-        return -1;
-    }
-
-    private static boolean equalsIgnoreAsciiCase(char left, char right) {
-        return left == right || (left < 128 && right < 128 && Character.toLowerCase(left) == Character.toLowerCase(right));
-    }
-
-    private record ClassMatch(int position, IndexedClass indexedClass) {
+        return findClassesNative(query.replace('.', '/'), options, sourceIds);
     }
 
     /**
@@ -253,10 +182,6 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      */
     public IndexedPackage[] findPackages(String query) {
         return executeWhileOpen(() -> findPackagesNative(query));
-    }
-
-    public List<String> findMethods(String query, int limit) {
-        throw new UnsupportedOperationException();
     }
 
     /**
@@ -521,9 +446,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     private native IndexedClass findClassNative(String packageName, String className);
 
-    private native IndexedClass[] findClassesNative(String query, SearchOptions options, int[] sourceIds);
+    private native ClassSearchPage findClassesNative(String query, SearchOptions options, int[] sourceIds);
 
-    private native IndexedClass[] findClassesByBinaryNameNative(
+    private native ClassSearchPage findClassesByBinaryNameNative(
             String query,
             SearchOptions options,
             int[] sourceIds

@@ -186,7 +186,7 @@ impl IndexedClass {
         self.methods.set(methods)
     }
 
-    pub fn member_classes(&self) -> AtomicRef<Vec<u32>> {
+    pub fn member_classes(&self) -> AtomicRef<'_, Vec<u32>> {
         self.member_classes.borrow()
     }
 

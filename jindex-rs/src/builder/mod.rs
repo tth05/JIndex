@@ -81,7 +81,7 @@ impl ClassIndexBuilder {
 
         for class_info in vec.iter() {
             let package_index = package_index
-                .get_or_add_package_index(&mut constant_pool, class_info.package_name.as_str());
+                .get_or_add_package_index(&mut constant_pool, class_info.package_name.as_str())?;
             let class_name_index = get_index_from_pool(
                 class_info.class_name.as_str(),
                 &mut constant_pool_map,

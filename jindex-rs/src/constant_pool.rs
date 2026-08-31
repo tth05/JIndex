@@ -53,7 +53,11 @@ impl PartialEq for ConstantPoolStringView {
 }
 
 impl ConstantPoolStringView {
-    pub fn into_ascii_str(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
+    pub fn into_ascii_str<'a>(self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+        self.as_ascii_str(constant_pool)
+    }
+
+    pub fn as_ascii_str<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
         unsafe {
             AsciiStr::from_ascii_unchecked(
                 &constant_pool.string_data[(self.index + 1) as usize..][..(self.end - 1) as usize],
@@ -128,37 +132,15 @@ impl ConstantPoolStringView {
         true
     }
 
-    /// Searches for the given `query` using the given `options` and returns the
-    /// matched position of there is one.
+    /// Searches for the given `query` using the given `options` and returns its first matching
+    /// position.
     pub fn search(
         &self,
         constant_pool: &ClassIndexConstantPool,
         query: &AsciiStr,
         options: SearchOptions,
     ) -> Option<usize> {
-        match options.search_mode {
-            SearchMode::Prefix => {
-                if self.starts_with(constant_pool, query, options.match_mode) {
-                    Some(0)
-                } else {
-                    None
-                }
-            }
-            SearchMode::Contains => {
-                //We need to do this check because we cast the query length to a u8
-                if query.len() > self.len() as usize {
-                    return None;
-                }
-
-                for i in 0..=(self.len() - query.len() as u8) {
-                    if self.starts_with_at(constant_pool, query, i, options.match_mode) {
-                        return Some(i as usize);
-                    }
-                }
-
-                None
-            }
-        }
+        search_ascii(self.as_ascii_str(constant_pool), query, options)
     }
 
     pub fn len(&self) -> u8 {
@@ -201,5 +183,123 @@ fn switch_ascii_char_case(char: AsciiChar) -> AsciiChar {
         char.to_ascii_lowercase()
     } else {
         char.to_ascii_uppercase()
+    }
+}
+
+pub(crate) fn search_ascii(
+    value: &AsciiStr,
+    query: &AsciiStr,
+    options: SearchOptions,
+) -> Option<usize> {
+    let last_start = match options.search_mode {
+        SearchMode::Prefix => 0,
+        SearchMode::Contains => value.len().checked_sub(query.len())?,
+    };
+
+    (0..=last_start).find(|&start| {
+        query.chars().enumerate().all(|(offset, expected)| {
+            let actual = value[start + offset];
+            match options.match_mode {
+                MatchMode::MatchCase => actual == expected,
+                MatchMode::IgnoreCase => {
+                    actual == expected || actual == switch_ascii_char_case(expected)
+                }
+                MatchMode::MatchCaseFirstCharOnly if offset == 0 => actual == expected,
+                MatchMode::MatchCaseFirstCharOnly => {
+                    actual == expected || actual == switch_ascii_char_case(expected)
+                }
+            }
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{search_ascii, MatchMode, SearchMode, SearchOptions};
+    use ascii::AsAsciiStr;
+
+    #[test]
+    fn searches_ascii_with_every_match_mode() {
+        let value = "java/lang/String".as_ascii_str().unwrap();
+
+        assert_eq!(
+            Some(10),
+            search_ascii(
+                value,
+                "string".as_ascii_str().unwrap(),
+                SearchOptions {
+                    limit: 1,
+                    search_mode: SearchMode::Contains,
+                    match_mode: MatchMode::IgnoreCase,
+                },
+            )
+        );
+        assert_eq!(
+            None,
+            search_ascii(
+                value,
+                "string".as_ascii_str().unwrap(),
+                SearchOptions {
+                    limit: 1,
+                    search_mode: SearchMode::Contains,
+                    match_mode: MatchMode::MatchCase,
+                },
+            )
+        );
+        assert_eq!(
+            Some(10),
+            search_ascii(
+                value,
+                "String".as_ascii_str().unwrap(),
+                SearchOptions {
+                    limit: 1,
+                    search_mode: SearchMode::Contains,
+                    match_mode: MatchMode::MatchCaseFirstCharOnly,
+                },
+            )
+        );
+        assert_eq!(
+            None,
+            search_ascii(
+                value,
+                "string".as_ascii_str().unwrap(),
+                SearchOptions {
+                    limit: 1,
+                    search_mode: SearchMode::Contains,
+                    match_mode: MatchMode::MatchCaseFirstCharOnly,
+                },
+            )
+        );
+    }
+
+    #[test]
+    fn distinguishes_prefix_from_contains() {
+        let value = "java/lang/String".as_ascii_str().unwrap();
+        let query = "lang".as_ascii_str().unwrap();
+
+        assert_eq!(
+            None,
+            search_ascii(
+                value,
+                query,
+                SearchOptions {
+                    limit: 1,
+                    search_mode: SearchMode::Prefix,
+                    match_mode: MatchMode::IgnoreCase,
+                },
+            )
+        );
+        assert_eq!(
+            Some(5),
+            search_ascii(
+                value,
+                query,
+                SearchOptions {
+                    limit: 1,
+                    search_mode: SearchMode::Contains,
+                    match_mode: MatchMode::IgnoreCase,
+                },
+            )
+        );
     }
 }

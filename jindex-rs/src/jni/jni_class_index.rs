@@ -11,7 +11,6 @@ use jni::sys::{jint, jlong, jobject, jobjectArray};
 use jni::{jni_sig, jni_str, Env, EnvUnowned};
 use jvmti_bindings::mutf8;
 use std::ffi::CString;
-use std::ops::Deref;
 
 use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
@@ -993,13 +992,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     input: JString,
     options: JObject,
     source_ids_array: JObject,
-) -> jobjectArray {
+) -> jobject {
     with_jni_env!(env, {
         let input = java_to_ascii_string!(env, input);
-
-        let result_class = env
-            .find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))
-            .expect("Result class not found");
 
         let (class_index_pointer, class_index) = get_class_index(env, &this);
         let source_ids = propagate_error!(
@@ -1008,7 +1003,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
             JObject::null().into_raw()
         );
 
-        let classes: Vec<_> = class_index.find_classes(
+        let (classes, truncated) = class_index.find_classes(
             &input,
             propagate_error!(
                 env,
@@ -1018,26 +1013,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
             source_ids.as_deref(),
         );
 
-        let result_array = env
-            .new_object_array(classes.len() as i32, &result_class, JObject::null())
-            .expect("Failed to create result array");
-        for (index, class) in classes.into_iter().enumerate() {
-            let object = env
-                .new_object(
-                    &result_class,
-                    jni_sig!("(JJ)V"),
-                    &[
-                        JValue::from(class_index_pointer as jlong),
-                        JValue::from((class as *const IndexedClass) as jlong),
-                    ],
-                )
-                .expect("Failed to create result object");
-            result_array
-                .set_element(env, index, &object)
-                .expect("Failed to set element into result array");
-        }
-
-        result_array.into_raw()
+        create_class_search_page(env, class_index_pointer, classes, truncated)?.into_raw()
     })
 }
 
@@ -1050,13 +1026,9 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
     input: JString,
     options: JObject,
     source_ids_array: JObject,
-) -> jobjectArray {
+) -> jobject {
     with_jni_env!(env, {
         let input = java_to_ascii_string!(env, input);
-
-        let result_class = env
-            .find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))
-            .expect("Result class not found");
 
         let (class_index_pointer, class_index) = get_class_index(env, &this);
         let source_ids = propagate_error!(
@@ -1064,7 +1036,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
             read_optional_source_ids(env, source_ids_array),
             JObject::null().into_raw()
         );
-        let classes = class_index.find_classes_by_binary_name(
+        let (classes, truncated) = class_index.find_classes_by_binary_name(
             &input,
             propagate_error!(
                 env,
@@ -1074,27 +1046,39 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findClasse
             source_ids.as_deref(),
         );
 
-        let result_array = env
-            .new_object_array(classes.len() as i32, &result_class, JObject::null())
-            .expect("Failed to create result array");
-        for (index, class) in classes.into_iter().enumerate() {
-            let object = env
-                .new_object(
-                    &result_class,
-                    jni_sig!("(JJ)V"),
-                    &[
-                        JValue::from(class_index_pointer as jlong),
-                        JValue::from((class as *const IndexedClass) as jlong),
-                    ],
-                )
-                .expect("Failed to create result object");
-            result_array
-                .set_element(env, index, &object)
-                .expect("Failed to set element into result array");
-        }
-
-        result_array.into_raw()
+        create_class_search_page(env, class_index_pointer, classes, truncated)?.into_raw()
     })
+}
+
+fn create_class_search_page<'local>(
+    env: &mut Env<'local>,
+    class_index_pointer: jlong,
+    classes: Vec<&IndexedClass>,
+    truncated: bool,
+) -> jni::errors::Result<JObject<'local>> {
+    let result_class = env.find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))?;
+    let result_array =
+        env.new_object_array(classes.len() as i32, &result_class, JObject::null())?;
+    for (index, class) in classes.into_iter().enumerate() {
+        env.with_local_frame(1, |env| -> jni::errors::Result<()> {
+            let object = env.new_object(
+                &result_class,
+                jni_sig!("(JJ)V"),
+                &[
+                    JValue::Long(class_index_pointer),
+                    JValue::Long((class as *const IndexedClass) as jlong),
+                ],
+            )?;
+            result_array.set_element(env, index, &object)
+        })?;
+    }
+
+    let page_class = env.find_class(jni_str!("com/github/tth05/jindex/ClassSearchPage"))?;
+    env.new_object(
+        &page_class,
+        jni_sig!("([Lcom/github/tth05/jindex/IndexedClass;Z)V"),
+        &[JValue::Object(&result_array), JValue::Bool(truncated)],
+    )
 }
 
 #[no_mangle]
@@ -1242,9 +1226,10 @@ unsafe fn convert_search_options(
         .expect("Field not found")
         .i()
         .unwrap();
+    let limit = usize::try_from(limit).map_err(|_| anyhow!("Search limit must not be negative"))?;
 
     Ok(SearchOptions {
-        limit: limit as usize,
+        limit,
         match_mode,
         search_mode,
     })
@@ -1311,7 +1296,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
                 jni_sig!("(JJ)V"),
                 &[
                     JValue::from(class_index_pointer as jlong),
-                    JValue::from((package.deref() as *const IndexedPackage) as jlong),
+                    JValue::from((package as *const IndexedPackage) as jlong),
                 ],
             )
             .expect("Failed to create result object")
@@ -1355,7 +1340,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findPackag
                     jni_sig!("(JJ)V"),
                     &[
                         JValue::from(class_index_pointer as jlong),
-                        JValue::from((package.deref() as *const IndexedPackage) as jlong),
+                        JValue::from((*package as *const IndexedPackage) as jlong),
                     ],
                 )
                 .expect("Failed to create result object");

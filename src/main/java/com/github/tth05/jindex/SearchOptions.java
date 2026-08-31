@@ -1,56 +1,49 @@
 package com.github.tth05.jindex;
 
-public class SearchOptions {
+import java.util.Objects;
 
-    private int limit;
-    private SearchMode searchMode;
-    private MatchMode matchMode;
+/**
+ * Immutable options shared by name-based index searches.
+ *
+ * @param searchMode where a match may begin
+ * @param matchMode how letter case is compared
+ * @param limit maximum number of results to return
+ */
+public record SearchOptions(SearchMode searchMode, MatchMode matchMode, int limit) {
 
-    private SearchOptions(SearchMode searchMode, MatchMode matchMode, int limit) {
-        this.limit = limit;
-        this.searchMode = searchMode;
-        this.matchMode = matchMode;
+    /**
+     * Creates validated search options.
+     */
+    public SearchOptions {
+        Objects.requireNonNull(searchMode, "searchMode");
+        Objects.requireNonNull(matchMode, "matchMode");
+        if (limit < 0) {
+            throw new IllegalArgumentException("limit must not be negative");
+        }
     }
 
+    /**
+     * Returns the default case-insensitive prefix options without a practical result limit.
+     *
+     * @return default search options
+     */
     public static SearchOptions defaultOptions() {
         return new SearchOptions(SearchMode.PREFIX, MatchMode.IGNORE_CASE, Integer.MAX_VALUE);
     }
 
+    /**
+     * Creates search options with an explicit result limit.
+     *
+     * @param searchMode where a match may begin
+     * @param matchMode how letter case is compared
+     * @param limit maximum number of results to return
+     * @return validated search options
+     */
     public static SearchOptions with(SearchMode searchMode, MatchMode matchMode, int limit) {
         return new SearchOptions(searchMode, matchMode, limit);
     }
 
-    public static SearchOptions defaultWith(SearchMode searchMode, MatchMode matchMode) {
-        SearchOptions options = defaultOptions();
-        options.searchMode = searchMode;
-        options.matchMode = matchMode;
-        return options;
-    }
-
-    public static SearchOptions defaultWith(SearchMode searchMode) {
-        SearchOptions options = defaultOptions();
-        options.searchMode = searchMode;
-        return options;
-    }
-
-    public static SearchOptions defaultWith(MatchMode matchMode) {
-        SearchOptions options = defaultOptions();
-        options.matchMode = matchMode;
-        return options;
-    }
-
-    public int limit() {
-        return this.limit;
-    }
-
-    public SearchMode searchMode() {
-        return this.searchMode;
-    }
-
-    public MatchMode matchMode() {
-        return this.matchMode;
-    }
-
+    /** Describes where a query may match a candidate name. */
     public enum SearchMode {
         /**
          * The match has to occur at the start of the string.
@@ -62,6 +55,7 @@ public class SearchOptions {
         CONTAINS
     }
 
+    /** Describes how letter case participates in matching. */
     public enum MatchMode {
         /**
          * The match is case-insensitive.
