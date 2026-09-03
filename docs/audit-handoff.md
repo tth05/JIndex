@@ -1,53 +1,72 @@
-# JIndex audit implementation handoff
+# JIndex audit handoff
 
-Work is in progress on `codex/reference-index-1.1`, directly in `C:/Users/Admin/IdeaProjects/JIndex`. The starting commit is `5833362032d49af75b483da1e247e643031165b7`. The user explicitly requested the existing checkout, not a separate worktree.
+Implementation and regression testing are ready for the original planning agent's review. Work stayed in the existing checkouts. No deployment or public release was performed.
 
-The source plan is `C:/Users/Admin/.claude/plans/audit-this-repository-for-tingly-brooks.md`. The user wants implementation and hard testing here, then review and improvements by the agent that wrote that plan. Do not treat the original plan's claims as verified evidence.
+Source plan: `C:/Users/Admin/.claude/plans/audit-this-repository-for-tingly-brooks.md`.
 
-## Completed correctness work
+## Review these changes
 
-- Shared, bounded ASCII search with the documented first-match-character case rule.
-- Constant-pool views store length, including 255-byte strings. Empty detection now checks length rather than comparing length with a pool offset. Oversized Unicode error formatting no longer panics.
-- Hierarchy queries reset traversal state and detect cycles. Base-method traversal is iterative and deterministic.
-- Signature parsing validates ASCII before creating ASCII references, rejects malformed generic prefixes, and reports a missing class superclass as an error. Unsupported Unicode signatures are rejected explicitly rather than silently losing generic metadata.
-- Exception arrays contain only resolved classes, including resolved generic bounds.
-- Empty package comparison and corrupted signature tags fail safely.
-- Exact class lookup rejects null names at the public Java boundary.
-- Generic erased-type comparison is symmetric and excludes primitive/type-variable matches.
-- JNI pointer borrows are tied to the Java object's borrow rather than fabricated as static. Null pointer guards and safety contracts are documented at the conversion boundary. Native destruction uses the JNI panic boundary and accepts a null pointer as a no-op.
-- Java cleanup atomically claims its weak registry entry and has one native free call site, including failed Cleaner registration.
+JIndex starts at `5833362032d49af75b483da1e247e643031165b7` on `codex/reference-index-1.1`.
 
-## Evidence so far
+| Commit | Review focus |
+|---|---|
+| `c2782e9` | Correctness regressions, JNI lifetime guards, Clippy gate |
+| `012b5df` | Cached package names, matching forward sort/lookup, streaming snapshot version 5 |
+| `3b03e90` | Global reference-target deduplication, parallel resolution, independent per-edge test oracle |
+| `8e72733` | Reverse hierarchy adjacency, cycle tests, dead-code cleanup, checked pool access |
+| `92cc239` | Symbol truncation metadata, native DLL cache, API tests, development version alignment |
+| `ec402ab` | Byte-based search comparisons while keeping typed string getters checked |
 
-`cargo test --all-targets --locked audit_ -- --test-threads=1` failed on all five initial native regressions before their fixes. A small external Java fixture reproduced the prefix panic, an unrelated hierarchy implementation, and a null exception result. New Java regressions also failed on hierarchy, null-name validation and exception arrays before the corresponding fixes.
+Companion commit `de5d042` follows `20a95ee` in `C:/Users/Admin/IdeaProjects/TotalDebugCompanion`. It updates the two symbol-search callers and adds the failing-then-passing MCP truncation regression. Other agents' runtime recovery changes were preserved.
 
-`./gradlew.bat build benchmarkRuntimeCorpus -PbenchmarkManifest=C:/Users/Admin/.codex/worktrees/jindex-audit/evidence/runtime-sources.txt -PbenchmarkOutput=C:/Users/Admin/.codex/worktrees/jindex-audit/evidence/correctness-baseline.json --console=plain` passed after the first correctness pass: 34 Java tests, 36 native tests. Javadoc emits pre-existing missing-comment warnings. The Cleaner registry assertion was subsequently strengthened to inspect actual registry removal. The full `./gradlew.bat check --console=plain` then passed, including that assertion and the new all-target Clippy warnings-as-errors gate.
+## Evidence
 
-The untouched baseline could not finish this corpus benchmark because prefix search panicked. Performance comparisons therefore start after correctness fixes and before performance changes.
+- The first native regression run failed all five new cases before their fixes. Java reproductions exposed the prefix panic, unrelated hierarchy result and null exception entry.
+- The package-order test failed before the sort change and passes both before and after persistence.
+- The MCP test generates 101 matching fields. Previously it returned 100 results without reporting truncation. It now reports truncation.
+- JIndex's full build passed with 41 Java tests and 43 native tests. The corpus-only native test is intentionally ignored by the ordinary gate and was run separately in release mode.
+- The exact corpus comparison used 611 archives plus all 27,837 classes from the benchmark's JDK runtime image. Every resolved target, source-site identity, relation mask and occurrence count matched the original per-edge implementation. The final graph has 178,106 classes and 14,879,170 reference sites.
+- The sample corpus serializes identically with one and four Rayon worker threads.
+- Hierarchy queries match an independent forward walk over 256 generated graphs, including cycles and diamonds. Malformed Java hierarchy fixtures also terminate.
+- Lifetime tests cover close/read races over 100 rounds, concurrent closers, children retaining owners, collected owners triggering Cleaner removal, null JNI pointers and close waiting for an in-flight child call.
+- Persistence tests reject old versions, malformed tags, truncated payloads, trailing payload bytes and wrong ZIP checksums.
+- Native-library tests cover concurrent extraction, tampered-cache rejection, and two JVMs each loading JIndex through three class loaders. Each class loader has isolated native field IDs; cache slots are reused across JVMs.
+- Companion's clean full rerun passed 399 tests after Maven Local publication. An earlier run overlapped publication and logged exception-class loading errors; the non-overlapping rerun had none.
 
-The current runtime inventory supplies 611 archive sources, not the old audit's 322 mods or the old benchmark's 563 runtime archives. Manifest SHA-256: `30d5c571114e3cfa4c78c7ee4f59816d3fab5bfd048e9d9c29dfd573071a069f`. Java is Temurin 21.0.12. Initial corrected measurements: build 10.589 seconds, save 1.538 seconds, first load 699 ms, warm load median 621 ms, persisted bytes 85,620,087. Selected classes 178,106, fields 605,299, methods 1,299,629, reference sites 14,879,170, reference occurrences 39,479,848, literals 609,239, literal occurrences 2,047,438. Raw results and manifest are in the evidence directory above, which contains artifacts only and is not a Git worktree.
+Timing, corpus hashes and measurement limits are in the [audit benchmark section](index-1.1-benchmark.md#audit-pass-2026-09-03). Raw JSON and the exact inputs are in `C:/Users/Admin/.codex/worktrees/jindex-audit/evidence`. That directory contains artifacts, not a Git worktree.
 
-## Remaining work
+## Reproduce
 
-Reference checkpoint: local targets are normalized once, deduplicated globally, and resolved with Rayon using ID-only tables and reusable per-worker scratch state. Per-class edge expansion is parallel and deterministic. Literal values move into the global table instead of being cloned. The original per-edge dispatcher remains test-only. `check` passes with 35 Java tests and 39 native tests, plus one explicitly ignored corpus test. That corpus test also passed separately in release mode on the exact 611 archives and 27,837 runtime-image JDK classes: every pre-posting target/site/mask/count matched, with 178,106 classes and 14,879,170 final reference sites. The sample corpus produces byte-identical serialized indexes with one and four Rayon threads. `reference-cache.json` records build 8.459 seconds, save 1.417 seconds and warm load median 673 ms. All recorded counts match the baseline. Repeat timing is still required.
+Use Java 21 at `C:/Users/Admin/.jdks/temurin-21.0.12`. From JIndex:
 
-The native corpus test consumes `JINDEX_AUDIT_MANIFEST` and `JINDEX_AUDIT_JDK_ARCHIVE`. Set the latter to an output ZIP path when running `RuntimeCorpusBenchmark` to export exactly the JDK class bytes and order used by the benchmark. Do not substitute JMOD inputs: this JDK runtime image has 18 additional classes. The native driver also matches the mixed Java overload's JDK-first input precedence.
+```powershell
+$env:JAVA_HOME='C:\Users\Admin\.jdks\temurin-21.0.12'
+.\gradlew.bat build publishToMavenLocal --console=plain
+.\gradlew.bat benchmarkInitialIndex --args=mixed-jdk --console=plain
 
-Second checkpoint: full package names are cached, class sort and exact lookup use the same forward order, and binary-name queries reuse one scratch buffer. Snapshot version is now 5. Persistence streams through 64 KiB buffers and checks EOF/ZIP CRC. The added package-order test failed before the change and passes after it, including a save/load round trip. Native tests reject truncated payloads, trailing data and an incorrect ZIP checksum. Full `check benchmarkRuntimeCorpus` passed with 35 Java and 38 native tests. `packages-streaming.json` records build 10.666 seconds, save 1.418 seconds, first load 715 ms, warm median 646 ms. All recorded content counts match the corrected baseline. This is not evidence of a build-time improvement; the main reference optimization is still pending.
+$env:JINDEX_BENCHMARK_COMMIT=git rev-parse HEAD
+.\gradlew.bat benchmarkRuntimeCorpus '-PbenchmarkManifest=C:/Users/Admin/.codex/worktrees/jindex-audit/evidence/runtime-sources.txt' '-PbenchmarkOutput=build/audit-runtime.json' --console=plain
 
-1. Correctness and the Clippy gate are ready for the first checkpoint. Keep performance changes in later checkpoints.
-2. Clean up the agreed dead code and improve native DLL extraction. Preserve intentionally boxed vector layout with a measured rationale rather than claiming boxed slices are the same size.
-3. Implement and measure package-name caching, matching sort/lookup changes with a snapshot version bump, reference target deduplication and safe parallel resolution, and streaming persistence. Compare exact resolved references against an uncached test oracle, not just aggregate counts.
-4. Complete the added native lifetime tests and API contract tests. The API review includes missing symbol truncation metadata, bounded results without cursors, empty source selection, the destroy alias, and native/Java development version alignment. These additions were requested for testing; decisions that change public API need a stated rationale and coordinated consumer verification.
-5. Run final quality gates, corpus comparisons, and relevant Companion integration verification. Publish to Maven Local only for coordinated local consumer verification. No deployment was requested.
-6. Replace this progress document with final commits, measurements, exact reproduction commands, and review questions for the original planning agent.
+$env:JINDEX_AUDIT_MANIFEST='C:\Users\Admin\.codex\worktrees\jindex-audit\evidence\runtime-sources.txt'
+$env:JINDEX_AUDIT_JDK_ARCHIVE='C:\Users\Admin\.codex\worktrees\jindex-audit\evidence\runtime-jdk.zip'
+Push-Location jindex-rs
+cargo test --release --all-targets --locked audit_runtime_corpus_reference_equivalence -- --ignored --nocapture
+Pop-Location
+```
 
-## Plan corrections to retain
+To regenerate the JDK ZIP, set `JINDEX_AUDIT_JDK_ARCHIVE` before running the runtime benchmark. JMOD files are not equivalent: this JDK image contains 18 additional classes. The test driver also preserves the Java mixed-source overload's JDK-first duplicate precedence.
 
-- Forward package ordering changes a persisted lookup invariant, even if cached names are derived. Bump the snapshot version and reject old snapshots.
-- Package-name allocations happen only on equal class names in `then_with`, not every sort comparison. Measure them.
-- The old 10–12-second benchmark measures the whole build, not reference resolution alone.
-- On this 64-bit toolchain, `Option<Box<Vec<T>>>` is 8 bytes and `Option<Box<[T]>>` is 16. Measure total memory before changing this layout.
-- The existing reference lookup contains `&IndexedClass`, which is not Sync. Parallel workers need a separate map of names to IDs or another safe immutable representation.
-- Companion already filters null exception entries. The defect was in the API result, not an observed Companion null crash.
-- The current runtime inventory is JSON. The evidence manifest was derived from its ordered archive URIs after verifying that each archive exists; the old benchmark still consumes its versioned line format.
+After publication finishes, run `.\gradlew.bat test --rerun-tasks --console=plain` in Companion. Do not republish its dependency while the test JVM is running.
+
+## Decisions to verify before release
+
+1. Snapshot version 5 is intentional. Forward package ordering changes the persisted binary-search invariant even though cached names themselves are derived. Old snapshots are rejected, not migrated.
+2. Unsupported non-ASCII signatures fail explicitly. The original descriptor-fallback suggestion would silently discard generic metadata; it was not implemented.
+3. `findSymbols` now returns `SymbolSearchPage`. This fixes a real Companion bug: requesting 100 results and then testing array length greater than 100 can never detect truncation.
+4. All pages remain bounded results without cursors. Explicit empty source selection returns nothing; the overload without a source filter searches all sources. `destroy()` remains a tested close alias. Decide whether to remove it before freezing the API.
+5. Java and Cargo both say `1.1.0-SNAPSHOT`. This aligns development metadata only. The final public version number and API freeze remain owner decisions.
+6. JNI safety still depends on the documented Java lifecycle lock and valid native pointers. Borrow lifetimes no longer pretend to be static, but this is not a Rust-owned handle registry or proof against forged pointers. No sanitizer, Miri or live Minecraft deployment was run.
+7. Optional immutable `IndexedClass` construction and bounded top-k contains search were not implemented. The boxed-vector layout is deliberately retained: an optional boxed vector is one pointer, while an optional boxed slice is two.
+8. Hierarchy acceleration preserves the existing signature-derived parent edges. Review the treatment of implicit `java/lang/Object` parents separately; the graph optimization is not a redesign of erased-type or Object-root semantics.
+
+For a focused review, start with the native lifetime boundary, target-key normalization/oracle comparison, snapshot ordering, and the symbol API change. The corpus oracle proves equivalence to the existing resolver, not independent correctness of every JVM-resolution rule.

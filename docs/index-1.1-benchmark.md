@@ -221,3 +221,60 @@ Every format experiment must use the same manifest, Java runtime, and benchmark 
 - correctness against the existing Companion bytecode scanner on a fixed target corpus.
 
 Do not accept a size or speed improvement that drops a reference kind, changes duplicate precedence, loses non-ASCII literal data, or silently omits an input class.
+
+## Audit pass, 2026-09-03
+
+This pass uses the current ATM runtime inventory: 611 archives, 718,740,654 archive bytes,
+180,760 archive class inputs and 27,837 JDK runtime-image classes. The manifest SHA-256 is
+`30d5c571114e3cfa4c78c7ee4f59816d3fab5bfd048e9d9c29dfd573071a069f`. The older corpus above is
+not a like-for-like comparison. All runs here used Temurin 21.0.12 with 12 available processors.
+
+The untouched starting code could not finish the benchmark because prefix search panicked.
+The comparison baseline therefore includes the correctness fixes but precedes performance work.
+
+| State / raw result | Build | Save | First load | Warm load p50 | Snapshot bytes |
+|---|---:|---:|---:|---:|---:|
+| Corrected baseline, `correctness-baseline.json` | 10.589 s | 1.538 s | 699 ms | 621 ms | 85,620,087 |
+| Package cache + streaming, `packages-streaming.json` | 10.666 s | 1.418 s | 715 ms | 646 ms | 85,631,598 |
+| Reference cache, `reference-cache.json` | 8.459 s | 1.417 s | 854 ms | 673 ms | 85,631,598 |
+| Safety/API additions, `final-1.json`, `92cc239` | 9.126 s | 1.374 s | 734 ms | 652 ms | 85,631,598 |
+| Final byte-search pass, `final-2.json`, `ec402ab` | 10.205 s | 1.431 s | 800 ms | 678 ms | 85,631,598 |
+| Same final code, `final-3.json`, `ec402ab` | 9.288 s | 1.411 s | 738 ms | 644 ms | 85,631,598 |
+
+The final code's two fresh-process observations are 4–12% faster to build than the single corrected
+baseline observation. The intermediate 8.459-second result is not the final performance claim.
+Host variance is visible, and there is no repeated-baseline distribution or statistical confidence
+interval. Save time improved modestly; load time did not improve.
+
+The additional checked ASCII conversions initially slowed contains queries. Matching candidate
+bytes directly restored performance without creating unchecked ASCII values. Typed name getters
+still validate their output.
+
+| Query p50 | Corrected baseline | Final run 2 | Final run 3 |
+|---|---:|---:|---:|
+| Exact class | 2.7 us | 2.9 us | 2.7 us |
+| Prefix classes | 99.5 us | 95.0 us | 93.5 us |
+| Contains classes | 350.9 us | 180.8 us | 175.7 us |
+| Prefix symbols | 290.3 us | 337.0 us | 297.4 us |
+| Contains symbols | 77.908 ms | 59.699 ms | 62.356 ms |
+
+All observations have identical content totals: 178,106 classes, 605,299 fields, 1,299,629 methods,
+14,879,170 reference sites, 39,479,848 reference occurrences, 609,239 literals and 2,047,438 literal
+occurrences. Exact per-edge differential testing against the original resolver also passed on the
+full current corpus. This checks target/site/mask/count equality, not just totals. It does not
+independently validate every JVM resolution rule against Companion's bytecode scanner.
+
+Windows process sampling for final run 2 recorded a peak working set of 3,538,321,408 bytes,
+about 3.30 GiB, and peak paged memory of 4,218,036,224 bytes. This is the entire benchmark JVM,
+which keeps the original index open while loading another copy. The monitor made 272 observations
+using `Get-Process` peak counters. There is no matching baseline peak measurement, so no measured
+peak-memory reduction is claimed. Streaming removes the explicit full-payload buffers in the code.
+
+The standalone `mixed-jdk` benchmark passed with 27,837 classes: 368 ms preparation, 1,527 ms build,
+270 ms save and 17,120,037 output bytes. It is a JDK-only check, not another ATM build measurement.
+
+Raw JSON, `final-2-memory.json`, the ordered manifest and the exact JDK class export are in
+`C:/Users/Admin/.codex/worktrees/jindex-audit/evidence`. This is an artifact directory, not a Git
+worktree. Full query p50/p95 and reference-count distributions are retained in the JSON files.
+See [the audit handoff](audit-handoff.md) for commits, reproduction commands, regression evidence
+and release decisions still requiring review.
