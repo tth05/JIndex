@@ -686,8 +686,8 @@ impl SemanticIndex {
             match kind {
                 SymbolKind::Field => {
                     for (member_ordinal, field) in class.fields().iter().enumerate() {
-                        let name = field.field_name(constant_pool);
-                        if let Some(match_offset) = search_ascii(name, query, options) {
+                        let name = constant_pool.string_view_at(field.field_name_index());
+                        if let Some(match_offset) = name.search(constant_pool, query, options) {
                             output.push(MemberSearchResult {
                                 kind,
                                 member: PackedMemberId::new(class_ordinal as u32, member_ordinal)
@@ -699,8 +699,8 @@ impl SemanticIndex {
                 }
                 SymbolKind::Method => {
                     for (member_ordinal, method) in class.methods().iter().enumerate() {
-                        let name = method.method_name(constant_pool);
-                        if let Some(match_offset) = search_ascii(name, query, options) {
+                        let name = constant_pool.string_view_at(method.method_name_index());
+                        if let Some(match_offset) = name.search(constant_pool, query, options) {
                             output.push(MemberSearchResult {
                                 kind,
                                 member: PackedMemberId::new(class_ordinal as u32, member_ordinal)

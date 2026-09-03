@@ -206,6 +206,10 @@ impl IndexedField {
             .into_ascii_str(constant_pool)
     }
 
+    pub(crate) fn field_name_index(&self) -> u32 {
+        self.name_index
+    }
+
     pub fn access_flags(&self) -> u16 {
         self.access_flags
     }

@@ -60,10 +60,12 @@ impl ConstantPoolStringView {
 
     pub fn as_ascii_str<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
         // Offsets and bytes can originate in a snapshot. Never fabricate invalid AsciiChar values.
-        AsciiStr::from_ascii(
-            &constant_pool.string_data[self.index as usize + 1..][..self.len as usize],
-        )
-        .expect("Constant pool contains non-ASCII data")
+        AsciiStr::from_ascii(self.as_bytes(constant_pool))
+            .expect("Constant pool contains non-ASCII data")
+    }
+
+    fn as_bytes<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a [u8] {
+        &constant_pool.string_data[self.index as usize + 1..][..self.len as usize]
     }
 
     pub fn is_empty(&self) -> bool {
@@ -141,7 +143,7 @@ impl ConstantPoolStringView {
         query: &AsciiStr,
         options: SearchOptions,
     ) -> Option<usize> {
-        search_ascii(self.as_ascii_str(constant_pool), query, options)
+        search_bytes(self.as_bytes(constant_pool), query, options)
     }
 
     pub fn len(&self) -> u8 {
@@ -192,6 +194,11 @@ pub(crate) fn search_ascii(
     query: &AsciiStr,
     options: SearchOptions,
 ) -> Option<usize> {
+    search_bytes(value.as_bytes(), query, options)
+}
+
+// Byte matching needs no ASCII cast for candidate strings. Typed string getters still validate.
+fn search_bytes(value: &[u8], query: &AsciiStr, options: SearchOptions) -> Option<usize> {
     if query.len() > value.len() {
         return None;
     }
@@ -201,19 +208,20 @@ pub(crate) fn search_ascii(
     };
 
     (0..=last_start).find(|&start| {
-        query.chars().enumerate().all(|(offset, expected)| {
-            let actual = value[start + offset];
-            match options.match_mode {
-                MatchMode::MatchCase => actual == expected,
-                MatchMode::IgnoreCase => {
-                    actual == expected || actual == switch_ascii_char_case(expected)
+        query
+            .as_bytes()
+            .iter()
+            .copied()
+            .enumerate()
+            .all(|(offset, expected)| {
+                let actual = value[start + offset];
+                match options.match_mode {
+                    MatchMode::MatchCase => actual == expected,
+                    MatchMode::IgnoreCase => actual.eq_ignore_ascii_case(&expected),
+                    MatchMode::MatchCaseFirstCharOnly if offset == 0 => actual == expected,
+                    MatchMode::MatchCaseFirstCharOnly => actual.eq_ignore_ascii_case(&expected),
                 }
-                MatchMode::MatchCaseFirstCharOnly if offset == 0 => actual == expected,
-                MatchMode::MatchCaseFirstCharOnly => {
-                    actual == expected || actual == switch_ascii_char_case(expected)
-                }
-            }
-        })
+            })
     })
 }
 
