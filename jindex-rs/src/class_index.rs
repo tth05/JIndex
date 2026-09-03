@@ -24,10 +24,11 @@ pub struct ClassIndex {
 impl ClassIndex {
     pub(crate) fn new(
         constant_pool: ClassIndexConstantPool,
-        package_index: PackageIndex,
+        mut package_index: PackageIndex,
         classes: Vec<IndexedClass>,
         semantic_index: SemanticIndex,
     ) -> Self {
+        package_index.rebuild_full_names(&constant_pool);
         //Construct prefix range map
         let mut prefix_count_map: FxHashMap<u8, u32> = FxHashMap::default();
 
@@ -176,6 +177,7 @@ impl ClassIndex {
         }
 
         let mut matches = Vec::new();
+        let mut binary_name = AsciiString::new();
         for class in &self.classes {
             if !self.includes_source(class, source_ids) {
                 continue;
@@ -184,12 +186,10 @@ impl ClassIndex {
             let package = self
                 .package_index
                 .package_at(class.package_index())
-                .package_name_with_parents(&self.package_index, &self.constant_pool);
+                .full_name();
             let class_name = class.class_name(&self.constant_pool);
-            let mut binary_name = AsciiString::with_capacity(
-                package.len() + usize::from(!package.is_empty()) + class_name.len(),
-            );
-            binary_name.push_str(&package);
+            binary_name.clear();
+            binary_name.push_str(package);
             if !package.is_empty() {
                 binary_name.push(AsciiChar::Slash);
             }
@@ -239,11 +239,8 @@ impl ClassIndex {
                 .then_with(|| {
                     self.package_index
                         .package_at(a.package_index())
-                        .package_name_with_parents_cmp(
-                            &self.package_index,
-                            &self.constant_pool,
-                            package_name,
-                        )
+                        .full_name()
+                        .cmp(package_name)
                 })
         });
         if let Ok(i) = index {

@@ -29,6 +29,8 @@ The current runtime inventory supplies 611 archive sources, not the old audit's 
 
 ## Remaining work
 
+Second checkpoint: full package names are cached, class sort and exact lookup use the same forward order, and binary-name queries reuse one scratch buffer. Snapshot version is now 5. Persistence streams through 64 KiB buffers and checks EOF/ZIP CRC. The added package-order test failed before the change and passes after it, including a save/load round trip. Native tests reject truncated payloads, trailing data and an incorrect ZIP checksum. Full `check benchmarkRuntimeCorpus` passed with 35 Java and 38 native tests. `packages-streaming.json` records build 10.666 seconds, save 1.418 seconds, first load 715 ms, warm median 646 ms. All recorded content counts match the corrected baseline. This is not evidence of a build-time improvement; the main reference optimization is still pending.
+
 1. Correctness and the Clippy gate are ready for the first checkpoint. Keep performance changes in later checkpoints.
 2. Clean up the agreed dead code and improve native DLL extraction. Preserve intentionally boxed vector layout with a measured rationale rather than claiming boxed slices are the same size.
 3. Implement and measure package-name caching, matching sort/lookup changes with a snapshot version bump, reference target deduplication and safe parallel resolution, and streaming persistence. Compare exact resolved references against an uncached test oracle, not just aggregate counts.

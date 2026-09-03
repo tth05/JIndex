@@ -36,21 +36,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
     this: JObject,
 ) -> jstring {
     with_jni_env!(env, {
-        let (_, class_index) = get_class_index(env, &this);
         let indexed_package = get_field_with_id::<IndexedPackage>(
             env,
             &this,
             &cached_field_ids().class_index_child_self_pointer,
         );
 
-        env.new_string(
-            indexed_package.package_name_with_parents(
-                class_index.package_index(),
-                class_index.constant_pool(),
-            ),
-        )
-        .unwrap()
-        .into_raw()
+        env.new_string(indexed_package.full_name())
+            .unwrap()
+            .into_raw()
     })
 }
 
@@ -62,21 +56,15 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedPackage_getNam
     this: JObject,
 ) -> jstring {
     with_jni_env!(env, {
-        let (_, class_index) = get_class_index(env, &this);
         let indexed_package = get_field_with_id::<IndexedPackage>(
             env,
             &this,
             &cached_field_ids().class_index_child_self_pointer,
         );
 
-        env.new_string(
-            indexed_package
-                .package_name_with_parents(class_index.package_index(), class_index.constant_pool())
-                .to_string()
-                .replace('/', "."),
-        )
-        .unwrap()
-        .into_raw()
+        env.new_string(indexed_package.full_name().as_str().replace('/', "."))
+            .unwrap()
+            .into_raw()
     })
 }
 

@@ -75,7 +75,7 @@ impl IndexedClass {
         package_index: &PackageIndex,
         constant_pool: &ClassIndexConstantPool,
     ) -> AsciiString {
-        self.name_with_package(self.class_name(constant_pool), package_index, constant_pool)
+        self.name_with_package(self.class_name(constant_pool), package_index)
     }
 
     pub fn simple_class_name_with_package(
@@ -83,27 +83,16 @@ impl IndexedClass {
         package_index: &PackageIndex,
         constant_pool: &ClassIndexConstantPool,
     ) -> AsciiString {
-        self.name_with_package(
-            self.simple_class_name(constant_pool),
-            package_index,
-            constant_pool,
-        )
+        self.name_with_package(self.simple_class_name(constant_pool), package_index)
     }
 
-    fn name_with_package(
-        &self,
-        name: &AsciiStr,
-        package_index: &PackageIndex,
-        constant_pool: &ClassIndexConstantPool,
-    ) -> AsciiString {
-        let package_name = package_index
-            .package_at(self.package_index)
-            .package_name_with_parents(package_index, constant_pool);
+    fn name_with_package(&self, name: &AsciiStr, package_index: &PackageIndex) -> AsciiString {
+        let package_name = package_index.package_at(self.package_index).full_name();
 
         if package_name.is_empty() {
             name.to_ascii_string()
         } else {
-            package_name + unsafe { "/".as_ascii_str_unchecked() } + name
+            package_name.to_ascii_string() + unsafe { "/".as_ascii_str_unchecked() } + name
         }
     }
 

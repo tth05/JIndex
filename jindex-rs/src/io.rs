@@ -1,5 +1,5 @@
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::{BufReader, BufWriter, Read, Seek, Write};
 use std::time::Instant;
 
 use crate::builder::BuildTimeInfo;
@@ -14,13 +14,24 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
 const SNAPSHOT_MAGIC: &[u8; 8] = b"JINDEX\0\0";
-const SNAPSHOT_VERSION: u16 = 4;
+const SNAPSHOT_VERSION: u16 = 5;
 const SNAPSHOT_HEADER_LENGTH: usize = SNAPSHOT_MAGIC.len() + size_of::<u16>();
 const SNAPSHOT_COMPRESSION_LEVEL: i32 = 3;
 
 pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
-    let mut archive = ZipArchive::new(OpenOptions::new().read(true).open(path)?)?;
+    let archive = ZipArchive::new(OpenOptions::new().read(true).open(path)?)?;
+    let mut info = BuildTimeInfo {
+        class_reading_time: now.elapsed().as_millis(),
+        ..Default::default()
+    };
+    let now = Instant::now();
+    let result = read_snapshot_archive(archive)?;
+    info.deserialization_time = now.elapsed().as_millis();
+    Ok((info, result))
+}
+
+fn read_snapshot_archive(mut archive: ZipArchive<impl Read + Seek>) -> anyhow::Result<ClassIndex> {
     let compression_method = archive
         .by_index_raw(0)
         .with_context(|| "File with index 0 not found")?
@@ -30,30 +41,29 @@ pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo
         "Unsupported JIndex snapshot compression {:?}; expected Zstandard",
         compression_method
     );
-    let mut file = archive
+    let file = archive
         .by_index(0)
         .with_context(|| "File with index 0 not found")?;
-    let file_size = file.size();
-
-    let mut output_buf = Vec::with_capacity(file_size as usize);
-    file.read_to_end(&mut output_buf)
-        .with_context(|| "Failed to read first file")?;
-
-    let mut info = BuildTimeInfo {
-        class_reading_time: now.elapsed().as_millis(),
-        ..Default::default()
-    };
-
-    let now = Instant::now();
-    let payload = snapshot_payload(&output_buf)?;
-    let result = ClassIndex::read_from_buffer(payload)
-        .with_context(|| "Failed to deserialize ClassIndex")?;
-    info.deserialization_time = now.elapsed().as_millis();
-
-    Ok((info, result))
+    read_snapshot(file)
 }
 
-fn snapshot_payload(bytes: &[u8]) -> anyhow::Result<&[u8]> {
+fn read_snapshot(file: impl Read) -> anyhow::Result<ClassIndex> {
+    // Buffer outside Speedy so we retain its unread bytes and can verify EOF and the ZIP CRC.
+    let mut file = BufReader::with_capacity(64 * 1024, file);
+    let mut header = [0; SNAPSHOT_HEADER_LENGTH];
+    file.read_exact(&mut header)
+        .with_context(|| "Unsupported JIndex snapshot: missing format header")?;
+    validate_snapshot_header(&header)?;
+    let result = ClassIndex::read_from_stream_unbuffered(&mut file)
+        .with_context(|| "Failed to deserialize ClassIndex")?;
+    ensure!(
+        file.read(&mut [0])? == 0,
+        "Unsupported JIndex snapshot: trailing payload bytes"
+    );
+    Ok(result)
+}
+
+fn validate_snapshot_header(bytes: &[u8]) -> anyhow::Result<()> {
     ensure!(
         bytes.len() >= SNAPSHOT_HEADER_LENGTH,
         "Unsupported JIndex snapshot: missing format header"
@@ -71,7 +81,7 @@ fn snapshot_payload(bytes: &[u8]) -> anyhow::Result<&[u8]> {
             SNAPSHOT_VERSION
         );
     }
-    Ok(&bytes[SNAPSHOT_HEADER_LENGTH..])
+    Ok(())
 }
 
 pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) -> anyhow::Result<()> {
@@ -82,10 +92,6 @@ pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) -> anyho
             .truncate(true)
             .open(path)?,
     );
-
-    let payload = class_index
-        .write_to_vec()
-        .with_context(|| "ClassIndex serialization failed")?;
 
     file.start_file(
         "index",
@@ -98,8 +104,15 @@ pub fn save_class_index_to_file(class_index: &ClassIndex, path: String) -> anyho
         .with_context(|| "Unable to write snapshot magic")?;
     file.write_all(&SNAPSHOT_VERSION.to_le_bytes())
         .with_context(|| "Unable to write snapshot version")?;
-    file.write_all(&payload)
-        .with_context(|| "Unable to write file contents")?;
+    {
+        let mut output = BufWriter::with_capacity(64 * 1024, &mut file);
+        class_index
+            .write_to_stream(&mut output)
+            .with_context(|| "ClassIndex serialization failed")?;
+        output
+            .flush()
+            .with_context(|| "Unable to write file contents")?;
+    }
     file.finish().with_context(|| "Failed to finish zip file")?;
     Ok(())
 }
@@ -360,6 +373,58 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    fn empty_snapshot() -> Vec<u8> {
+        let (_, index) =
+            crate::builder::workers::create_class_index_from_bytes(Vec::new()).unwrap();
+        let mut bytes = SNAPSHOT_MAGIC.to_vec();
+        bytes.extend_from_slice(&SNAPSHOT_VERSION.to_le_bytes());
+        index.write_to_stream(&mut bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn streaming_snapshot_round_trip_rejects_truncation_and_trailing_bytes() {
+        let bytes = empty_snapshot();
+        let loaded = read_snapshot(&bytes[..]).unwrap();
+        assert_eq!(
+            &bytes[SNAPSHOT_HEADER_LENGTH..],
+            &loaded.write_to_vec().unwrap()
+        );
+        for end in 0..bytes.len() {
+            assert!(
+                read_snapshot(&bytes[..end]).is_err(),
+                "Accepted truncated payload of {end} bytes"
+            );
+        }
+        let mut trailing = bytes;
+        trailing.push(1);
+        assert!(read_snapshot(&trailing[..])
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("trailing payload"));
+    }
+
+    #[test]
+    fn streaming_snapshot_checks_zip_crc_through_eof() {
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "index",
+            FileOptions::default().compression_method(CompressionMethod::Zstd),
+        )
+        .unwrap();
+        zip.write_all(&empty_snapshot()).unwrap();
+        let mut bytes = zip.finish().unwrap().into_inner();
+        assert!(read_snapshot_archive(ZipArchive::new(Cursor::new(&bytes)).unwrap()).is_ok());
+        let central = bytes
+            .windows(4)
+            .position(|window| window == b"PK\x01\x02")
+            .unwrap();
+        bytes[central + 16] ^= 1;
+        assert!(read_snapshot_archive(ZipArchive::new(Cursor::new(&bytes)).unwrap()).is_err());
+    }
 
     #[test]
     fn audit_invalid_signature_tags_return_errors() {
@@ -370,7 +435,7 @@ mod tests {
 
     #[test]
     fn snapshot_payload_rejects_missing_header() {
-        let error = snapshot_payload(&[1, 2, 3]).unwrap_err();
+        let error = validate_snapshot_header(&[1, 2, 3]).unwrap_err();
         assert_eq!(
             "Unsupported JIndex snapshot: missing format header",
             error.to_string()
@@ -382,7 +447,7 @@ mod tests {
         let mut snapshot = SNAPSHOT_MAGIC.to_vec();
         snapshot.extend_from_slice(&(SNAPSHOT_VERSION - 1).to_le_bytes());
 
-        let error = snapshot_payload(&snapshot).unwrap_err();
+        let error = validate_snapshot_header(&snapshot).unwrap_err();
         assert_eq!(
             format!(
                 "Unsupported JIndex snapshot version {}; expected {}",
@@ -399,6 +464,6 @@ mod tests {
         snapshot.extend_from_slice(&SNAPSHOT_VERSION.to_le_bytes());
         snapshot.extend_from_slice(&[1, 2, 3]);
 
-        assert_eq!(&[1, 2, 3], snapshot_payload(&snapshot).unwrap());
+        validate_snapshot_header(&snapshot).unwrap();
     }
 }

@@ -67,7 +67,7 @@ impl ClassIndexBuilder {
                 * 0.8) as u32,
         );
 
-        let mut package_index = PackageIndex::new();
+        let mut package_index = PackageIndex::new(&mut constant_pool)?;
         let mut classes: Vec<((&str, &str), IndexedClass)> = Vec::with_capacity(vec.len());
         let mut constant_pool_map: FxHashMap<&str, u32> = FxHashMap::with_capacity_and_hasher(
             vec.len() + self.expected_method_count as usize,
@@ -326,13 +326,8 @@ impl ClassIndexBuilder {
             a_name.cmp(b_name).then_with(|| {
                 package_index
                     .package_at(a.1.package_index())
-                    .package_name_with_parents_cmp(
-                        package_index,
-                        constant_pool,
-                        &package_index
-                            .package_at(b.1.package_index())
-                            .package_name_with_parents(package_index, constant_pool),
-                    )
+                    .full_name()
+                    .cmp(package_index.package_at(b.1.package_index()).full_name())
             })
         });
     }
