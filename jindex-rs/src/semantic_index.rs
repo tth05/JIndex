@@ -1,9 +1,9 @@
 use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
-use crate::constant_pool::{search_ascii, ClassIndexConstantPool, SearchMode, SearchOptions};
+use crate::constant_pool::{search_bytes, ClassIndexConstantPool, SearchMode, SearchOptions};
 use anyhow::{anyhow, ensure};
 use ascii::AsciiStr;
-use speedy::{Readable, Writable};
+use speedy::{Context, Readable, Reader, Writable};
 use std::cmp::Ordering;
 
 const SYMBOL_KIND_SHIFT: u64 = 62;
@@ -237,12 +237,44 @@ impl PackedMemberId {
     }
 }
 
-#[derive(Default, Readable, Writable)]
+/// Length-prefixed ASCII JVM descriptors. Entries are validated when a descriptor is added and
+/// when a snapshot is read; `get` still checks because stored offsets are not verified.
+#[derive(Default, Writable)]
 pub struct DescriptorPool {
     data: Vec<u8>,
 }
 
+impl<'a, C> Readable<'a, C> for DescriptorPool
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let data: Vec<u8> = reader.read_value()?;
+        DescriptorPool::validate(&data).map_err(speedy::Error::custom)?;
+        Ok(Self { data })
+    }
+}
+
 impl DescriptorPool {
+    fn validate(data: &[u8]) -> Result<(), &'static str> {
+        let mut offset = 0;
+        while let Some(length) = data.get(offset..offset + 2) {
+            let start = offset + 2;
+            let end = start + usize::from(u16::from_le_bytes([length[0], length[1]]));
+            let Some(entry) = data.get(start..end) else {
+                return Err("Descriptor pool lengths do not match its size");
+            };
+            if !entry.is_ascii() {
+                return Err("Descriptor pool contains non-ASCII data");
+            }
+            offset = end;
+        }
+        if offset != data.len() {
+            return Err("Descriptor pool lengths do not match its size");
+        }
+        Ok(())
+    }
+
     pub fn add(&mut self, descriptor: &str) -> anyhow::Result<u32> {
         ensure!(descriptor.is_ascii(), "JVM descriptor is not ASCII");
         let length = u16::try_from(descriptor.len())
@@ -265,7 +297,7 @@ impl DescriptorPool {
                 .expect("Invalid descriptor length"),
         ]) as usize;
         let bytes = &self.data[offset + 2..offset + 2 + length];
-        AsciiStr::from_ascii(bytes).expect("Descriptor pool contains non-ASCII data")
+        AsciiStr::from_ascii(bytes).expect("Descriptor pool offset does not select a descriptor")
     }
 }
 
@@ -636,7 +668,7 @@ impl SemanticIndex {
         }
 
         let start = members.partition_point(|member| {
-            compare_ascii_folded(member_name(class_index, kind, *member), query).is_lt()
+            compare_ascii_folded(member_name(class_index, kind, *member), query.as_bytes()).is_lt()
         });
         let mut match_count = 0;
         for member in &members[start..] {
@@ -651,7 +683,7 @@ impl SemanticIndex {
             }) {
                 continue;
             }
-            if let Some(match_offset) = search_ascii(name, query, options) {
+            if let Some(match_offset) = search_bytes(name, query, options) {
                 output.push(MemberSearchResult {
                     kind,
                     member: *member,
@@ -739,26 +771,26 @@ pub struct MemberSearchResult {
     pub match_offset: usize,
 }
 
-fn member_name(index: &ClassIndex, kind: SymbolKind, member: PackedMemberId) -> &AsciiStr {
+fn member_name(index: &ClassIndex, kind: SymbolKind, member: PackedMemberId) -> &[u8] {
     member_name_from_parts(index.classes(), index.constant_pool(), kind, member)
 }
 
+/// Raw name bytes: sorting and matching compare bytes and never need typed characters.
 fn member_name_from_parts<'a>(
     classes: &'a [IndexedClass],
     constant_pool: &'a ClassIndexConstantPool,
     kind: SymbolKind,
     member: PackedMemberId,
-) -> &'a AsciiStr {
+) -> &'a [u8] {
     let class = &classes[member.class_index() as usize];
-    match kind {
-        SymbolKind::Field => {
-            class.fields()[member.member_index() as usize].field_name(constant_pool)
-        }
-        SymbolKind::Method => {
-            class.methods()[member.member_index() as usize].method_name(constant_pool)
-        }
+    let name_index = match kind {
+        SymbolKind::Field => class.fields()[member.member_index() as usize].field_name_index(),
+        SymbolKind::Method => class.methods()[member.member_index() as usize].method_name_index(),
         SymbolKind::Class => panic!("Class is not a member kind"),
-    }
+    };
+    constant_pool
+        .string_view_at(name_index)
+        .as_bytes(constant_pool)
 }
 
 fn compare_member_names(
@@ -771,16 +803,15 @@ fn compare_member_names(
     compare_ascii_folded(left_name, right_name).then_with(|| left_name.cmp(right_name))
 }
 
-fn compare_ascii_folded(left: &AsciiStr, right: &AsciiStr) -> Ordering {
-    left.as_bytes()
-        .iter()
+fn compare_ascii_folded(left: &[u8], right: &[u8]) -> Ordering {
+    left.iter()
         .map(u8::to_ascii_lowercase)
-        .cmp(right.as_bytes().iter().map(u8::to_ascii_lowercase))
+        .cmp(right.iter().map(u8::to_ascii_lowercase))
 }
 
-fn starts_with_ascii_ignore_case(value: &AsciiStr, prefix: &AsciiStr) -> bool {
+fn starts_with_ascii_ignore_case(value: &[u8], prefix: &AsciiStr) -> bool {
     value.len() >= prefix.len()
-        && value.as_bytes()[..prefix.len()]
+        && value[..prefix.len()]
             .iter()
             .zip(prefix.as_bytes())
             .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
@@ -801,6 +832,38 @@ mod tests {
         let mut pool = DescriptorPool::default();
         let offset = pool.add(&descriptor).unwrap();
         assert_eq!(pool.get(offset).as_str(), descriptor);
+    }
+
+    #[test]
+    fn descriptor_pool_load_accepts_high_bit_length_prefixes() {
+        let mut pool = DescriptorPool::default();
+        let entries: Vec<_> = [127, 128, 255, 256, 32768, 65535]
+            .into_iter()
+            .map(|length| {
+                let descriptor = format!("L{};", "a".repeat(length - 2));
+                (pool.add(&descriptor).unwrap(), descriptor)
+            })
+            .collect();
+        let bytes = pool.write_to_vec().unwrap();
+        let loaded = DescriptorPool::read_from_buffer(&bytes).unwrap();
+        for (offset, descriptor) in entries {
+            assert_eq!(loaded.get(offset).as_str(), descriptor);
+        }
+    }
+
+    #[test]
+    fn descriptor_pool_load_rejects_corrupt_entries() {
+        for data in [
+            vec![1],
+            vec![1, 0, 255],
+            vec![5, 0, b'L', b'x'],
+            vec![0, 0, 1],
+        ] {
+            let bytes = DescriptorPool { data }.write_to_vec().unwrap();
+            assert!(DescriptorPool::read_from_buffer(&bytes).is_err());
+        }
+        let bytes = DescriptorPool::default().write_to_vec().unwrap();
+        assert!(DescriptorPool::read_from_buffer(&bytes).is_ok());
     }
 
     #[test]

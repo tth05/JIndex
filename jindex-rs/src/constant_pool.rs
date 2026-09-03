@@ -1,13 +1,44 @@
 use anyhow::{anyhow, Result};
 use ascii::{AsciiChar, AsciiStr};
-use speedy::{Readable, Writable};
+use speedy::{Context, Readable, Reader, Writable};
 
-#[derive(Readable, Writable)]
+/// Length-prefixed ASCII strings. Every entry is validated as ASCII when a string is added and
+/// when a snapshot is read. Length prefixes themselves may exceed 127, so a view still checks the
+/// bytes it exposes as text; offsets stored elsewhere in a snapshot are not verified to be entry
+/// starts.
+#[derive(Writable)]
 pub struct ClassIndexConstantPool {
     string_data: Vec<u8>, //Holds Ascii Strings prefixed with their length
 }
 
+impl<'a, C> Readable<'a, C> for ClassIndexConstantPool
+where
+    C: Context,
+{
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> std::result::Result<Self, C::Error> {
+        let string_data: Vec<u8> = reader.read_value()?;
+        ClassIndexConstantPool::validate(&string_data).map_err(speedy::Error::custom)?;
+        Ok(Self { string_data })
+    }
+}
+
 impl ClassIndexConstantPool {
+    fn validate(string_data: &[u8]) -> std::result::Result<(), &'static str> {
+        let mut offset = 0;
+        while let Some(length) = string_data.get(offset) {
+            let start = offset + 1;
+            let end = start + usize::from(*length);
+            let Some(entry) = string_data.get(start..end) else {
+                return Err("Constant pool string lengths do not match its size");
+            };
+            if !entry.is_ascii() {
+                return Err("Constant pool contains non-ASCII data");
+            }
+            offset = end;
+        }
+        Ok(())
+    }
+
     pub(crate) fn new(capacity: u32) -> Self {
         Self {
             string_data: Vec::with_capacity(capacity as usize),
@@ -59,12 +90,14 @@ impl ConstantPoolStringView {
     }
 
     pub fn as_ascii_str<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
-        // Offsets and bytes can originate in a snapshot. Never fabricate invalid AsciiChar values.
+        // Offsets can originate in a snapshot and select a length prefix instead of an entry, so
+        // never fabricate invalid AsciiChar values. Comparisons and searches use `as_bytes`.
         AsciiStr::from_ascii(self.as_bytes(constant_pool))
-            .expect("Constant pool contains non-ASCII data")
+            .expect("Constant pool offset does not select an ASCII string")
     }
 
-    fn as_bytes<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a [u8] {
+    /// The raw entry bytes, for comparisons and searches that do not need typed characters.
+    pub fn as_bytes<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a [u8] {
         &constant_pool.string_data[self.index as usize + 1..][..self.len as usize]
     }
 
@@ -189,16 +222,13 @@ fn switch_ascii_char_case(char: AsciiChar) -> AsciiChar {
     }
 }
 
-pub(crate) fn search_ascii(
-    value: &AsciiStr,
+/// Searches `query` in the candidate bytes and returns the first matching position. Candidate
+/// bytes need no ASCII cast; only the query is typed.
+pub(crate) fn search_bytes(
+    value: &[u8],
     query: &AsciiStr,
     options: SearchOptions,
 ) -> Option<usize> {
-    search_bytes(value.as_bytes(), query, options)
-}
-
-// Byte matching needs no ASCII cast for candidate strings. Typed string getters still validate.
-fn search_bytes(value: &[u8], query: &AsciiStr, options: SearchOptions) -> Option<usize> {
     if query.len() > value.len() {
         return None;
     }
@@ -227,19 +257,40 @@ fn search_bytes(value: &[u8], query: &AsciiStr, options: SearchOptions) -> Optio
 
 #[cfg(test)]
 mod tests {
-    use super::{search_ascii, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
+    use super::{search_bytes, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
     use ascii::AsAsciiStr;
+    use speedy::{Readable, Writable};
 
     #[test]
-    fn audit_corrupt_pool_bytes_are_rejected_before_ascii_access() {
-        let pool = ClassIndexConstantPool {
-            string_data: vec![1, 255],
-        };
-        assert!(std::panic::catch_unwind(|| pool.string_view_at(0).as_ascii_str(&pool)).is_err());
+    fn snapshot_pools_are_validated_when_read() {
+        for string_data in [vec![1, 255], vec![2, b'a'], vec![0, 1]] {
+            let bytes = ClassIndexConstantPool { string_data }
+                .write_to_vec()
+                .unwrap();
+            assert!(ClassIndexConstantPool::read_from_buffer(&bytes).is_err());
+        }
+        let mut string_data = vec![0, 1, b'a', 200];
+        string_data.extend_from_slice(&[b'b'; 200]);
+        let bytes = ClassIndexConstantPool { string_data }
+            .write_to_vec()
+            .unwrap();
+        let pool = ClassIndexConstantPool::read_from_buffer(&bytes).unwrap();
+        assert_eq!("a", pool.string_view_at(1).as_ascii_str(&pool));
+        assert_eq!(200, pool.string_view_at(3).as_ascii_str(&pool).len());
     }
 
     #[test]
-    fn audit_longer_queries_do_not_match() {
+    fn stale_offsets_never_produce_invalid_ascii() {
+        let mut pool = ClassIndexConstantPool::new(0);
+        pool.add_string(b"x").unwrap();
+        pool.add_string(&[b'a'; 200]).unwrap();
+        // Offset 1 selects the byte 'x' as a length, so the view spans the next length prefix.
+        let view = pool.string_view_at(1);
+        assert!(std::panic::catch_unwind(|| view.as_ascii_str(&pool).len()).is_err());
+    }
+
+    #[test]
+    fn longer_queries_do_not_match() {
         for search_mode in [SearchMode::Prefix, SearchMode::Contains] {
             for match_mode in [
                 MatchMode::IgnoreCase,
@@ -248,8 +299,8 @@ mod tests {
             ] {
                 assert_eq!(
                     None,
-                    search_ascii(
-                        "Object".as_ascii_str().unwrap(),
+                    search_bytes(
+                        b"Object",
                         "Objects".as_ascii_str().unwrap(),
                         SearchOptions {
                             search_mode,
@@ -263,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_pool_views_preserve_maximum_length_and_empty_values() {
+    fn pool_views_preserve_maximum_length_and_empty_values() {
         let mut pool = ClassIndexConstantPool::new(0);
         pool.add_string(b"").unwrap();
         let one = pool.add_string(b"x").unwrap();
@@ -277,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_oversized_unicode_error_does_not_panic() {
+    fn oversized_unicode_error_does_not_panic() {
         assert!(ClassIndexConstantPool::new(0)
             .add_string("Ä".repeat(256).as_bytes())
             .is_err());
@@ -285,11 +336,11 @@ mod tests {
 
     #[test]
     fn searches_ascii_with_every_match_mode() {
-        let value = "java/lang/String".as_ascii_str().unwrap();
+        let value = b"java/lang/String";
 
         assert_eq!(
             Some(10),
-            search_ascii(
+            search_bytes(
                 value,
                 "string".as_ascii_str().unwrap(),
                 SearchOptions {
@@ -301,7 +352,7 @@ mod tests {
         );
         assert_eq!(
             None,
-            search_ascii(
+            search_bytes(
                 value,
                 "string".as_ascii_str().unwrap(),
                 SearchOptions {
@@ -313,7 +364,7 @@ mod tests {
         );
         assert_eq!(
             Some(10),
-            search_ascii(
+            search_bytes(
                 value,
                 "String".as_ascii_str().unwrap(),
                 SearchOptions {
@@ -325,7 +376,7 @@ mod tests {
         );
         assert_eq!(
             None,
-            search_ascii(
+            search_bytes(
                 value,
                 "string".as_ascii_str().unwrap(),
                 SearchOptions {
@@ -339,12 +390,12 @@ mod tests {
 
     #[test]
     fn distinguishes_prefix_from_contains() {
-        let value = "java/lang/String".as_ascii_str().unwrap();
+        let value = b"java/lang/String";
         let query = "lang".as_ascii_str().unwrap();
 
         assert_eq!(
             None,
-            search_ascii(
+            search_bytes(
                 value,
                 query,
                 SearchOptions {
@@ -356,7 +407,7 @@ mod tests {
         );
         assert_eq!(
             Some(5),
-            search_ascii(
+            search_bytes(
                 value,
                 query,
                 SearchOptions {

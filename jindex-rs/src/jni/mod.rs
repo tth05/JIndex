@@ -14,11 +14,24 @@ pub mod jni_indexed_field;
 pub mod jni_indexed_method;
 pub mod jni_indexed_package;
 
-unsafe fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass> {
+fn get_java_lang_object(class_index: &ClassIndex) -> Option<&IndexedClass> {
     class_index.find_class(
-        "java/lang".as_ascii_str_unchecked(),
-        "Object".as_ascii_str_unchecked(),
+        "java/lang".as_ascii_str().expect("literal is ASCII"),
+        "Object".as_ascii_str().expect("literal is ASCII"),
     )
+}
+
+/// Position of a member inside its declaring class's member array, derived from the
+/// member pointer handed to Java when the array was materialized.
+fn member_position<T>(members: &[T], member: &T) -> u16 {
+    let base = members.as_ptr() as usize;
+    let address = member as *const T as usize;
+    let index = address
+        .checked_sub(base)
+        .map(|distance| distance / size_of::<T>())
+        .filter(|index| *index < members.len())
+        .expect("Member does not belong to its declaring class");
+    u16::try_from(index).expect("Member index exceeds the stored identifier range")
 }
 
 unsafe fn get_enum_ordinal(env: &mut Env<'_>, enum_object: JObject) -> u32 {

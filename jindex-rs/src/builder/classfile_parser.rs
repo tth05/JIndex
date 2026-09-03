@@ -22,6 +22,10 @@ pub(super) fn parse_class(
         .map_err(|error| anyhow!(error))
         .with_context(|| "Failed to parse class file")?;
     let pool = &class_file.constant_pool;
+    // ASCII member signatures can still name variables declared by a discarded class signature.
+    // Erase the class's members together so no generic references outlive their declarations.
+    let erase_member_signatures =
+        signature(&class_file.attributes, pool)?.is_some_and(|value| !value.is_ascii());
     let this_class = class_name(pool, class_file.this_class)?;
     let converted = convert_enclosing_type_and_inner_classes(
         this_class,
@@ -37,7 +41,9 @@ pub(super) fn parse_class(
         let descriptor = ascii(pool.get_utf8(field.descriptor_index)?, "field descriptor")?;
         let site = if name.is_ascii() {
             let site = RawReferenceSite::field(fields.len())?;
-            let parsed_signature = signature(&field.attributes, pool)?.unwrap_or(descriptor);
+            let parsed_signature = supported_signature(&field.attributes, pool)?
+                .filter(|_| !erase_member_signatures)
+                .unwrap_or(descriptor);
             fields.push(FieldInfo {
                 field_name: name.to_compact_string(),
                 jvm_descriptor: descriptor.to_compact_string(),
@@ -59,7 +65,9 @@ pub(super) fn parse_class(
         let descriptor = ascii(pool.get_utf8(method.descriptor_index)?, "method descriptor")?;
         let site = if method.access_flags & ACC_SYNTHETIC == 0 && name.is_ascii() {
             let site = RawReferenceSite::method(methods.len())?;
-            let parsed_signature = signature(&method.attributes, pool)?.unwrap_or(descriptor);
+            let parsed_signature = supported_signature(&method.attributes, pool)?
+                .filter(|_| !erase_member_signatures)
+                .unwrap_or(descriptor);
             let method_exceptions = exceptions(&method.attributes, pool)?;
             methods.push(MethodInfo {
                 method_name: name.to_compact_string(),
@@ -117,7 +125,7 @@ fn class_signature(
     class_file: &ClassFile,
     pool: &ConstantPool,
 ) -> anyhow::Result<RawClassSignature> {
-    if let Some(signature) = signature(&class_file.attributes, pool)? {
+    if let Some(signature) = supported_signature(&class_file.attributes, pool)? {
         return RawClassSignature::from_str(signature).with_context(|| "Invalid class signature");
     }
 
@@ -142,6 +150,17 @@ fn class_signature(
         super_class,
         (!interfaces.is_empty()).then_some(interfaces),
     ))
+}
+
+/// Returns the generic signature when JIndex can store it. Generic signatures are optional
+/// metadata, and the ASCII name pool cannot hold Unicode type-variable names, so a non-ASCII
+/// signature is dropped and the declaration keeps its erased JVM descriptor. This mirrors how
+/// non-ASCII member names are excluded without failing the build.
+fn supported_signature<'a>(
+    attributes: &'a [AttributeInfo],
+    pool: &'a ConstantPool,
+) -> anyhow::Result<Option<&'a str>> {
+    Ok(signature(attributes, pool)?.filter(|value| value.is_ascii()))
 }
 
 fn signature<'a>(

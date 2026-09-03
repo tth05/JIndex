@@ -78,3 +78,4 @@ dependencies {
 - Clone the repo
 - Install Java 21 and Rust 1.97.1
 - Run `./gradlew build`; the build compiles the locked native dependency graph, stages the DLL under `build/`, then packages and tests the Java API
+- `./gradlew check` also runs `cargo fmt --check`, `cargo clippy` with warnings denied, and the native test suite; all three must pass

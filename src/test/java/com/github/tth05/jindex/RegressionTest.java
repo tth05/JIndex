@@ -1,10 +1,12 @@
 package com.github.tth05.jindex;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -12,25 +14,72 @@ import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-final class AuditRegressionTest {
+final class RegressionTest {
     @Test
-    void unicodeGenericSignaturesFailExplicitly() {
-        for (Class<?> type : List.of(UnicodeClass.class, UnicodeField.class, UnicodeMethod.class)) {
-            var failure = assertThrows(ClassIndexBuildingException.class, () -> indexOf(type));
-            assertTrue(failure.getMessage().contains("ASCII"), failure.getMessage());
+    void unicodeGenericSignaturesFallBackToErasedDeclarations() throws IOException {
+        try (ClassIndex index = indexOf(UnicodeClass.class, UnicodeField.class, UnicodeMethod.class)) {
+            IndexedClass type = Objects.requireNonNull(index.findClass(UnicodeClass.class.getName()));
+            assertNull(type.getGenericSignatureString());
+
+            IndexedField field = Objects.requireNonNull(index.findClass(UnicodeField.class.getName())).getFields()[0];
+            assertEquals("field", field.getName());
+            assertNull(field.getGenericSignatureString());
+            assertEquals("Ljava/lang/Object;", field.getDescriptorString());
+
+            IndexedMethod method = Arrays.stream(Objects.requireNonNull(index.findClass(UnicodeMethod.class.getName())).getMethods())
+                    .filter(candidate -> candidate.getName().equals("run")).findFirst().orElseThrow();
+            assertNull(method.getGenericSignatureString());
+            assertEquals("(Ljava/lang/Object;)V", method.getDescriptorString());
+        }
+    }
+
+    @Test
+    void unicodeClassErasurePreservesMemberTypesAndExceptions(@TempDir Path directory) throws IOException {
+        Path snapshot = directory.resolve("unicode.index");
+        try (ClassIndex index = indexOf(MixedUnicodeClass.class, PresentException.class)) {
+            assertErasedUnicodeMembers(index);
+            index.saveToFile(snapshot.toString());
+        }
+        try (ClassIndex index = ClassIndex.fromFile(snapshot.toString())) {
+            assertErasedUnicodeMembers(index);
+        }
+    }
+
+    private static void assertErasedUnicodeMembers(ClassIndex index) {
+        IndexedClass type = Objects.requireNonNull(index.findClass(MixedUnicodeClass.class.getName()));
+        String exceptionDescriptor = "L" + PresentException.class.getName().replace('.', '/') + ";";
+        assertNull(type.getGenericSignatureString());
+        assertNull(type.getFields()[0].getGenericSignatureString());
+        assertEquals(exceptionDescriptor, type.getFields()[0].getDescriptorString());
+        IndexedMethod method = Arrays.stream(type.getMethods())
+                .filter(candidate -> candidate.getName().equals("run")).findFirst().orElseThrow();
+        assertNull(method.getGenericSignatureString());
+        assertEquals("(" + exceptionDescriptor + ")" + exceptionDescriptor, method.getDescriptorString());
+        assertEquals(List.of(PresentException.class.getName()),
+                Arrays.stream(method.getExceptions()).map(IndexedClass::getNameWithPackageDot).toList());
+    }
+
+    @Test
+    void descriptorStringsAreTheExactJvmDescriptors() throws IOException {
+        try (ClassIndex index = indexOf(ThrowsFixture.class)) {
+            IndexedClass type = Objects.requireNonNull(index.findClass(ThrowsFixture.class.getName()));
+            IndexedMethod method = Arrays.stream(type.getMethods())
+                    .filter(candidate -> candidate.getName().equals("unresolvedParameter")).findFirst().orElseThrow();
+            assertEquals("(Ljava/util/List;Lcom/github/tth05/jindex/CycleA;)Ljava/util/Map;", method.getDescriptorString());
+            assertEquals("Ljava/util/List;", type.getFields()[0].getDescriptorString());
         }
     }
 
     @Test
     void cyclicHierarchiesTerminateWithoutIncludingTheTargetItself() throws IOException {
-        byte[] cycle = classBytes(AuditCycleA.class);
-        replaceSuperclass(cycle, AuditCycleB.class.getName().replace('.', '/'));
-        try (ClassIndex index = ClassIndex.fromBytes(List.of(cycle, classBytes(AuditCycleB.class), classBytes(AuditNeedle.class)))) {
+        byte[] cycle = classBytes(CycleA.class);
+        replaceSuperclass(cycle, CycleB.class.getName().replace('.', '/'));
+        try (ClassIndex index = ClassIndex.fromBytes(List.of(cycle, classBytes(CycleB.class), classBytes(Needle.class)))) {
             assertTimeout(Duration.ofSeconds(2), () -> {
-                IndexedClass target = Objects.requireNonNull(index.findClass(AuditCycleA.class.getName()));
-                assertEquals(List.of(AuditCycleB.class.getName()), Arrays.stream(target.findImplementations(false))
+                IndexedClass target = Objects.requireNonNull(index.findClass(CycleA.class.getName()));
+                assertEquals(List.of(CycleB.class.getName()), Arrays.stream(target.findImplementations(false))
                         .map(IndexedClass::getNameWithPackageDot).toList());
-                assertEquals(0, Objects.requireNonNull(index.findClass(AuditNeedle.class.getName())).findImplementations(false).length);
+                assertEquals(0, Objects.requireNonNull(index.findClass(Needle.class.getName())).findImplementations(false).length);
                 IndexedMethod method = Arrays.stream(target.getMethods()).filter(candidate -> candidate.getName().equals("run")).findFirst().orElseThrow();
                 assertEquals(1, method.findBaseMethods().length);
             });
@@ -69,8 +118,8 @@ final class AuditRegressionTest {
     }
     @Test
     void aLongerPrefixReturnsNoMatches() throws IOException {
-        try (ClassIndex index = indexOf(AuditNeedle.class)) {
-            assertEquals(0, index.findClasses("AuditNeedles", SearchOptions.defaultOptions()).results().length);
+        try (ClassIndex index = indexOf(Needle.class)) {
+            assertEquals(0, index.findClasses("Needles", SearchOptions.defaultOptions()).results().length);
         }
     }
 
@@ -96,7 +145,7 @@ final class AuditRegressionTest {
 
     @Test
     void exactClassLookupValidatesBothNames() throws IOException {
-        try (ClassIndex index = indexOf(AuditNeedle.class)) {
+        try (ClassIndex index = indexOf(Needle.class)) {
             assertThrows(NullPointerException.class, () -> index.findClass(null, "Needle"));
             assertThrows(NullPointerException.class, () -> index.findClass("", null));
         }
@@ -124,18 +173,24 @@ final class AuditRegressionTest {
     private static class MissingException extends Exception { private static final long serialVersionUID = 1L; }
     private static class PresentException extends Exception { private static final long serialVersionUID = 1L; }
     private static class ThrowsFixture<T extends PresentException> {
+        java.util.List<T> unresolvedField;
         void run() throws MissingException, T {}
+        java.util.Map<String, T> unresolvedParameter(java.util.List<T> values, CycleA cycle) { return null; }
     }
     private static class UnicodeClass<Ä> {}
     private static class UnicodeField<Ä> { Ä field; }
     private static class UnicodeMethod { <Ä> void run(Ä value) {} }
+    private static class MixedUnicodeClass<Ä, T extends PresentException> {
+        T field;
+        T run(T value) throws T { return value; }
+    }
 }
 
-final class AuditNeedle {}
-class AuditCycleA {
-    Object create() { return new AuditCycleB(); }
+final class Needle {}
+class CycleA {
+    Object create() { return new CycleB(); }
     public void run() {}
 }
-class AuditCycleB extends AuditCycleA {
+class CycleB extends CycleA {
     @Override public void run() {}
 }

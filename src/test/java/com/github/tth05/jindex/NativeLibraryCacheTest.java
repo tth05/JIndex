@@ -3,7 +3,6 @@ package com.github.tth05.jindex;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,14 +24,14 @@ final class NativeLibraryCacheTest {
         try (var executor = Executors.newFixedThreadPool(8)) {
             var futures = new ArrayList<java.util.concurrent.Future<Path>>();
             for (int index = 0; index < 32; index++) {
-                futures.add(executor.submit(() -> NativeLibraryLoader.extract(new ByteArrayInputStream(bytes), directory)));
+                futures.add(executor.submit(() -> NativeLibraryLoader.extract(bytes, directory)));
             }
             Path expected = futures.getFirst().get(5, TimeUnit.SECONDS);
             for (var future : futures) {
                 assertEquals(expected, future.get(5, TimeUnit.SECONDS));
             }
             assertArrayEquals(bytes, Files.readAllBytes(expected));
-            assertNotEquals(expected, NativeLibraryLoader.extract(new ByteArrayInputStream(new byte[]{1, 2}), directory));
+            assertNotEquals(expected, NativeLibraryLoader.extract(new byte[]{1, 2}, directory));
         }
         try (var files = Files.list(directory)) {
             assertEquals(2, files.filter(path -> path.toString().endsWith(".dll")).count());
@@ -42,10 +41,10 @@ final class NativeLibraryCacheTest {
     @Test
     void aModifiedCachedLibraryFailsInsteadOfBeingLoadedOrOverwritten() throws Exception {
         byte[] bytes = {1, 2, 3};
-        Path cached = NativeLibraryLoader.extract(new ByteArrayInputStream(bytes), directory);
+        Path cached = NativeLibraryLoader.extract(bytes, directory);
         Files.writeString(cached, "corrupted");
         IOException failure = assertThrows(IOException.class,
-                () -> NativeLibraryLoader.extract(new ByteArrayInputStream(bytes), directory));
+                () -> NativeLibraryLoader.extract(bytes, directory));
         assertTrue(failure.getMessage().contains("checksum mismatch"));
         assertEquals("corrupted", Files.readString(cached));
     }

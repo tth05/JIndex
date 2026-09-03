@@ -2,7 +2,6 @@ package com.github.tth05.jindex;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.ByteArrayInputStream;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -13,8 +12,17 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 
-/** Content-addressed extraction with separate native field-ID caches for isolated class loaders. */
+/**
+ * Extracts the bundled native library into a content-addressed cache and loads it.
+ * <p>
+ * Windows keeps a loaded DLL locked, so a temporary copy per JVM could never be deleted. The cache
+ * path is derived from the library's SHA-256, so identical builds share one file across JVMs and
+ * a different build never overwrites a loaded one. The JVM refuses to load one DLL path into more
+ * than one class loader, so each additional loader in a JVM receives its own numbered copy.
+ */
 final class NativeLibraryLoader {
+    private static final String LOADER_SLOT_PROPERTY = "com.github.tth05.jindex.nativeLoaderCount.";
+
     private NativeLibraryLoader() {}
 
     static Path cacheDirectory() {
@@ -26,26 +34,32 @@ final class NativeLibraryLoader {
 
     static void load(InputStream resource, Path directory) throws IOException {
         byte[] bytes = resource.readAllBytes();
-        String key = "com.github.tth05.jindex.nativeLoaderCount." + HexFormat.of().formatHex(digest(bytes));
-        // Properties are JVM-wide even when this helper is loaded by isolated class loaders.
-        // Keep the value a String so ordinary System.getProperties() consumers remain valid.
+        byte[] hash = digest(bytes);
+        System.load(extract(bytes, hash, directory, claimLoaderSlot(hash)).toString());
+    }
+
+    /**
+     * System properties are JVM-wide even when this class is loaded by isolated class loaders, so
+     * they act as the per-library loader counter. The value stays a String so ordinary
+     * {@code System.getProperties()} consumers remain valid.
+     */
+    private static int claimLoaderSlot(byte[] hash) {
+        String key = LOADER_SLOT_PROPERTY + HexFormat.of().formatHex(hash);
         var properties = System.getProperties();
-        int slot;
         synchronized (properties) {
-            slot = Integer.parseInt(properties.getProperty(key, "0"));
+            int slot = Integer.parseInt(properties.getProperty(key, "0"));
             properties.setProperty(key, Integer.toString(Math.incrementExact(slot)));
+            return slot;
         }
-        System.load(extract(new ByteArrayInputStream(bytes), directory, slot).toString());
+    }
+
+    static Path extract(byte[] bytes, Path directory) throws IOException {
+        return extract(bytes, digest(bytes), directory, 0);
     }
 
     // Synchronization handles callers in this class loader; the file lock coordinates JVMs.
-    static synchronized Path extract(InputStream resource, Path directory) throws IOException {
-        return extract(resource, directory, 0);
-    }
-
-    private static synchronized Path extract(InputStream resource, Path directory, int slot) throws IOException {
-        byte[] bytes = resource.readAllBytes();
-        byte[] hash = digest(bytes);
+    private static synchronized Path extract(byte[] bytes, byte[] hash, Path directory, int slot)
+            throws IOException {
         String name = "jindex_rs-" + HexFormat.of().formatHex(hash) + (slot == 0 ? "" : "-loader" + slot);
         Files.createDirectories(directory);
         Path target = directory.resolve(name + ".dll").toAbsolutePath();

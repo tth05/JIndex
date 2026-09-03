@@ -11,7 +11,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[cfg(test)]
-mod audit_oracle;
+mod resolution_oracle;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum TargetKey {
@@ -381,7 +381,7 @@ pub(super) fn build_reference_index<'a>(
         .enumerate()
         .map(|(owner, references)| {
             let mut output = Vec::new();
-            audit_oracle::visit_resolved_references(
+            resolution_oracle::visit_resolved_references(
                 owner as u32,
                 references,
                 classes,
@@ -782,15 +782,15 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Requires JINDEX_AUDIT_MANIFEST and JINDEX_AUDIT_JDK_ARCHIVE exported by RuntimeCorpusBenchmark"]
-    fn audit_runtime_corpus_reference_equivalence() {
+    #[ignore = "Requires JINDEX_ORACLE_MANIFEST and JINDEX_ORACLE_JDK_ARCHIVE exported by RuntimeCorpusBenchmark"]
+    fn runtime_corpus_reference_equivalence() {
         use crate::builder::workers::{
             create_class_index_from_sources, ArchiveSource, DirectSource,
         };
         use std::io::Read;
 
         let manifest =
-            std::fs::read_to_string(std::env::var("JINDEX_AUDIT_MANIFEST").unwrap()).unwrap();
+            std::fs::read_to_string(std::env::var("JINDEX_ORACLE_MANIFEST").unwrap()).unwrap();
         assert_eq!(
             manifest.lines().next(),
             Some("totaldebug-runtime-sources-v1")
@@ -829,7 +829,7 @@ mod tests {
             })
             .collect();
         let archive_count = archives.len();
-        let jdk_archive = std::env::var("JINDEX_AUDIT_JDK_ARCHIVE").unwrap();
+        let jdk_archive = std::env::var("JINDEX_ORACLE_JDK_ARCHIVE").unwrap();
         let mut direct = Vec::new();
         {
             let mut zip = zip::ZipArchive::new(std::fs::File::open(jdk_archive).unwrap()).unwrap();

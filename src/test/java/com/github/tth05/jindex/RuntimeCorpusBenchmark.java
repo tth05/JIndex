@@ -48,7 +48,7 @@ public final class RuntimeCorpusBenchmark {
         long sourcePreparationStarted = System.nanoTime();
         LooseClasses jdkClasses = readJdkClasses();
         long sourcePreparationNanos = elapsedNanos(sourcePreparationStarted);
-        String oracleJdkArchive = System.getenv("JINDEX_AUDIT_JDK_ARCHIVE");
+        String oracleJdkArchive = System.getenv("JINDEX_ORACLE_JDK_ARCHIVE");
         if (oracleJdkArchive != null) {
             // Preserve the exact runtime-image class bytes/order for the native differential test.
             try (var archive = new ZipOutputStream(Files.newOutputStream(Path.of(oracleJdkArchive)))) {

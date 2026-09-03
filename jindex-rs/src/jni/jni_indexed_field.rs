@@ -4,8 +4,9 @@ use jni::sys::{jint, jstring};
 use jni::EnvUnowned;
 
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
-use crate::jni::{collect_type_parameters, is_basic_signature_type, with_jni_env};
-use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
+use crate::jni::{is_basic_signature_type, member_position, with_jni_env};
+use crate::semantic_index::SymbolKind;
+use crate::signature::indexed_signature::ToSignatureIndexedType;
 
 #[no_mangle]
 /// # Safety
@@ -65,17 +66,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedField_getDescr
             &this,
             &cached_field_ids().class_child_class_pointer,
         );
-        let signature = indexed_field.field_signature();
+        let member_index = member_position(indexed_class.fields(), indexed_field);
 
-        let mut type_parameters = Vec::new();
-        collect_type_parameters(indexed_class, class_index, &mut type_parameters);
-
-        env.new_string(signature.to_descriptor_string(
-            class_index,
-            //TODO: Pass generic data of super classes
-            &type_parameters,
+        env.new_string(class_index.semantic_index().descriptor(
+            SymbolKind::Field,
+            indexed_class.index(),
+            member_index,
         ))
-        .expect("Unable to create generic signature String")
+        .expect("Unable to create descriptor String")
         .into_raw()
     })
 }

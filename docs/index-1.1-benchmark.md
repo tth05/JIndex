@@ -241,14 +241,14 @@ The comparison baseline therefore includes the correctness fixes but precedes pe
 | Final byte-search pass, `final-2.json`, `ec402ab` | 10.205 s | 1.431 s | 800 ms | 678 ms | 85,631,598 |
 | Same final code, `final-3.json`, `ec402ab` | 9.288 s | 1.411 s | 738 ms | 644 ms | 85,631,598 |
 
-The final code's two fresh-process observations are 4–12% faster to build than the single corrected
+The `ec402ab` code's two fresh-process observations are 4–12% faster to build than the single corrected
 baseline observation. The intermediate 8.459-second result is not the final performance claim.
 Host variance is visible, and there is no repeated-baseline distribution or statistical confidence
 interval. Save time improved modestly; load time did not improve.
 
-The additional checked ASCII conversions initially slowed contains queries. Matching candidate
-bytes directly restored performance without creating unchecked ASCII values. Typed name getters
-still validate their output.
+Search and sorting compare candidate bytes directly. Snapshot string and descriptor pools validate
+each entry when loaded, excluding the binary length prefixes from ASCII checks. Typed string getters
+still check the selected bytes because stored offsets are not verified to point to entry starts.
 
 | Query p50 | Corrected baseline | Final run 2 | Final run 3 |
 |---|---:|---:|---:|
@@ -273,8 +273,44 @@ peak-memory reduction is claimed. Streaming removes the explicit full-payload bu
 The standalone `mixed-jdk` benchmark passed with 27,837 classes: 368 ms preparation, 1,527 ms build,
 270 ms save and 17,120,037 output bytes. It is a JDK-only check, not another ATM build measurement.
 
-Raw JSON, `final-2-memory.json`, the ordered manifest and the exact JDK class export are in
-`C:/Users/Admin/.codex/worktrees/jindex-audit/evidence`. This is an artifact directory, not a Git
-worktree. Full query p50/p95 and reference-count distributions are retained in the JSON files.
-See [the audit handoff](audit-handoff.md) for commits, reproduction commands, regression evidence
-and release decisions still requiring review.
+Raw JSON results, the ordered manifest and the exact JDK class export were kept outside the
+repository; the JSON files retain full query p50/p95 and reference-count distributions.
+
+### Unicode signature inventory
+
+The same 611 archives contain 180,800 class-file entries, including metadata and multi-release
+entries beyond the benchmark's runtime selection. A scan of class, field, method and record-component
+`Signature` attributes found no non-ASCII signatures among 449,371 attributes. The exact JDK export
+also had none among 36,906 attributes in 27,837 classes. A compiled Unicode fixture served as a
+positive control. Eight non-ASCII method names occur in JGraphT's `NamedGraphGenerator`; these are
+not generic signatures and do not trigger the class-signature fallback.
+
+A follow-up run with entry-by-entry pool validation and the corrected Unicode fallback recorded
+10.748 s build, 1.630 s save, 855 ms first load and 780 ms warm-load p50. Snapshot size remained
+85,631,598 bytes and all content totals above were unchanged. The raw result is
+`unicode-fix-verification.json`. This single observation does not establish a timing improvement
+over the earlier runs.
+
+### Decisions
+
+- Snapshot version 5 sorts classes by `(class name, full package name)` in forward order and
+  rebuilds derived package names and reverse hierarchy edges on load. Older snapshots are rejected,
+  not migrated.
+- `findSymbols` returns a `SymbolSearchPage` so callers can observe truncation; testing for more
+  results than the limit can never detect it.
+- A non-ASCII generic `Signature` attribute is dropped and the declaration keeps its erased JVM
+  descriptor, mirroring how non-ASCII member names are excluded. The build no longer fails on a
+  Unicode type-variable name, and the parsers reject non-ASCII input instead of casting it.
+  If the class signature is dropped, all of that class's field and method signatures are erased too.
+  This avoids dangling references to discarded type variables and uses the method's `Exceptions`
+  attribute to retain erased exception types. Regression tests cover this before and after loading
+  a snapshot.
+- Member `getDescriptorString()` returns the exact stored JVM descriptor instead of a
+  reconstruction from the generic signature, so unresolved types no longer yield a placeholder.
+- The previous per-edge resolver is retained as a test oracle (`resolution_oracle.rs`). The
+  full-corpus equivalence test is ignored by default and reads `JINDEX_ORACLE_MANIFEST` and
+  `JINDEX_ORACLE_JDK_ARCHIVE`, which `RuntimeCorpusBenchmark` exports when the latter is set.
+- Not implemented: immutable `IndexedClass` construction and a bounded top-k contains search. The
+  boxed-vector signature layout is kept because an optional boxed vector is one pointer wide.
+- JNI safety still relies on the Java lifecycle lock and valid native pointers; there is no
+  Rust-owned handle registry, and no sanitizer or Miri run was performed.

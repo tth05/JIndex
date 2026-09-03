@@ -139,11 +139,11 @@ impl IndexedPackage {
 }
 
 #[cfg(test)]
-mod audit_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn audit_cached_package_names_include_empty_and_nested_packages() {
+    fn cached_package_names_include_empty_and_nested_packages() {
         let mut pool = ClassIndexConstantPool::new(0);
         pool.add_string(b"existing").unwrap();
         let mut packages = PackageIndex::new(&mut pool).unwrap();

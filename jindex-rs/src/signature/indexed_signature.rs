@@ -748,7 +748,7 @@ fn index_for_object_type(
 }
 
 #[cfg(test)]
-mod audit_tests {
+mod tests {
     use super::*;
 
     #[test]

@@ -376,7 +376,7 @@ where
 }
 
 #[cfg(test)]
-mod audit_tests {
+mod tests {
     use super::*;
 
     #[test]

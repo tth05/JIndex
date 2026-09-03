@@ -1,8 +1,9 @@
 use crate::class_index::{ClassIndex, MethodWithClass};
 use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
-use crate::jni::{collect_type_parameters, is_basic_signature_type};
-use crate::signature::indexed_signature::{ToDescriptorIndexedType, ToSignatureIndexedType};
+use crate::jni::{collect_type_parameters, is_basic_signature_type, member_position};
+use crate::semantic_index::SymbolKind;
+use crate::signature::indexed_signature::ToSignatureIndexedType;
 use crate::signature::{IndexedMethodSignature, IndexedSignatureType, TypeParameterData};
 use jni::objects::{JObject, JValue};
 use jni::sys::{jint, jlong, jobject, jobjectArray, jsize, jstring};
@@ -99,16 +100,14 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
             &this,
             &cached_field_ids().class_child_class_pointer,
         );
-        let signature = indexed_method.method_signature();
+        let member_index = member_position(indexed_class.methods(), indexed_method);
 
-        let type_parameters = collect_method_type_parameters(class_index, indexed_class, signature);
-
-        env.new_string(signature.to_descriptor_string(
-            class_index,
-            //TODO: Pass generic data of super classes
-            &type_parameters,
+        env.new_string(class_index.semantic_index().descriptor(
+            SymbolKind::Method,
+            indexed_class.index(),
+            member_index,
         ))
-        .expect("Unable to create generic signature String")
+        .expect("Unable to create descriptor String")
         .into_raw()
     })
 }

@@ -4,7 +4,7 @@ use crate::package_index::PackageIndex;
 use crate::signature::{
     IndexedClassSignature, IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType,
 };
-use ascii::{AsAsciiStr, AsciiStr, AsciiString};
+use ascii::{AsciiChar, AsciiStr, AsciiString};
 use atomic_refcell::{AtomicRef, AtomicRefCell};
 use once_cell::unsync::OnceCell;
 use speedy::{Readable, Writable};
@@ -66,6 +66,13 @@ impl IndexedClass {
             .into_ascii_str(constant_pool)
     }
 
+    /// Raw name bytes for sorting and lookup comparisons.
+    pub fn class_name_bytes<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b [u8] {
+        constant_pool
+            .string_view_at(self.name_index)
+            .as_bytes(constant_pool)
+    }
+
     pub fn simple_class_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {
         &constant_pool
             .string_view_at(self.name_index)
@@ -90,12 +97,13 @@ impl IndexedClass {
 
     fn name_with_package(&self, name: &AsciiStr, package_index: &PackageIndex) -> AsciiString {
         let package_name = package_index.package_at(self.package_index).full_name();
-
-        if package_name.is_empty() {
-            name.to_ascii_string()
-        } else {
-            package_name.to_ascii_string() + unsafe { "/".as_ascii_str_unchecked() } + name
+        let mut result = AsciiString::with_capacity(package_name.len() + 1 + name.len());
+        result.push_str(package_name);
+        if !package_name.is_empty() {
+            result.push(AsciiChar::Slash);
         }
+        result.push_str(name);
+        result
     }
 
     pub(crate) fn add_member_class(&self, class: u32) {

@@ -327,8 +327,8 @@ impl ClassIndexBuilder {
         classes: &mut [((&str, &str), IndexedClass)],
     ) {
         classes.par_sort_by(|a, b| {
-            let a_name = a.1.class_name(constant_pool);
-            let b_name = b.1.class_name(constant_pool);
+            let a_name = a.1.class_name_bytes(constant_pool);
+            let b_name = b.1.class_name_bytes(constant_pool);
             a_name.cmp(b_name).then_with(|| {
                 package_index
                     .package_at(a.1.package_index())

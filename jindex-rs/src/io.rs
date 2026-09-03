@@ -427,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_invalid_signature_tags_return_errors() {
+    fn invalid_signature_tags_return_errors() {
         for bytes in [&[255_u8][..], &[1_u8, 255][..]] {
             assert!(IndexedSignatureType::read_from_buffer(bytes).is_err());
         }

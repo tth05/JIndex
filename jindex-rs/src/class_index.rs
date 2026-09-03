@@ -1,12 +1,12 @@
 use std::ops::Range;
 
-use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
+use ascii::{AsAsciiStr, AsciiChar, AsciiStr};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::all_direct_super_types;
 use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::constant_pool::{
-    search_ascii, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions,
+    search_bytes, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions,
 };
 use crate::package_index::{IndexedPackage, PackageIndex};
 use crate::rsplit_once;
@@ -42,16 +42,12 @@ impl ClassIndex {
         let mut prefix_count_map: FxHashMap<u8, u32> = FxHashMap::default();
 
         for class in classes.iter() {
-            let count = prefix_count_map
-                .entry(
-                    class
-                        .class_name(&constant_pool)
-                        .get_ascii(0)
-                        .unwrap()
-                        .as_byte(),
-                )
-                .or_insert(0);
-            *count += 1;
+            let first_byte = class
+                .class_name_bytes(&constant_pool)
+                .first()
+                .copied()
+                .expect("Class names are not empty");
+            *prefix_count_map.entry(first_byte).or_insert(0) += 1;
         }
 
         let mut range_map: FxHashMap<u8, Range<u32>> = FxHashMap::default();
@@ -187,7 +183,7 @@ impl ClassIndex {
         }
 
         let mut matches = Vec::new();
-        let mut binary_name = AsciiString::new();
+        let mut binary_name = Vec::new();
         for class in &self.classes {
             if !self.includes_source(class, source_ids) {
                 continue;
@@ -196,16 +192,16 @@ impl ClassIndex {
             let package = self
                 .package_index
                 .package_at(class.package_index())
-                .full_name();
-            let class_name = class.class_name(&self.constant_pool);
+                .full_name()
+                .as_bytes();
             binary_name.clear();
-            binary_name.push_str(package);
+            binary_name.extend_from_slice(package);
             if !package.is_empty() {
-                binary_name.push(AsciiChar::Slash);
+                binary_name.push(b'/');
             }
-            binary_name.push_str(class_name);
+            binary_name.extend_from_slice(class.class_name_bytes(&self.constant_pool));
 
-            let Some(position) = search_ascii(&binary_name, name, options) else {
+            let Some(position) = search_bytes(&binary_name, name, options) else {
                 continue;
             };
             matches.push((position, class));
@@ -230,8 +226,8 @@ impl ClassIndex {
 
     /// Finds a class with an exact package and class name.
     ///
-    /// This currently narrows candidates by the class name's first character. A package-first
-    /// lookup could reduce the range further, but should only replace this after a corpus benchmark.
+    /// Classes are sorted by `(class name, full package name)`, so the lookup binary-searches the
+    /// first-character range of the class name.
     pub fn find_class(
         &self,
         package_name: &AsciiStr,
@@ -244,8 +240,8 @@ impl ClassIndex {
         let class_iter = self.class_iter_for_char(class_name.get_ascii(0).unwrap().as_byte());
 
         let index = class_iter.binary_search_by(|a| {
-            a.class_name(&self.constant_pool)
-                .cmp(class_name)
+            a.class_name_bytes(&self.constant_pool)
+                .cmp(class_name.as_bytes())
                 .then_with(|| {
                     self.package_index
                         .package_at(a.package_index())
