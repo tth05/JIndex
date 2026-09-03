@@ -235,7 +235,7 @@ public class BasicTest {
                                 10
                         ),
                         EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
-                );
+                ).results();
                 assertArrayEquals(
                         new String[]{"directField:I", "directMethod:(I)Ljava/lang/String;"},
                         Arrays.stream(symbols)
@@ -282,19 +282,19 @@ public class BasicTest {
                         SearchOptions.defaultOptions(),
                         EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD),
                         1
-                ).length);
+                ).results().length);
                 assertEquals(0, mixedIndex.findSymbols(
                         "direct",
                         SearchOptions.defaultOptions(),
                         EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD),
                         0
-                ).length);
+                ).results().length);
                 assertEquals(0, mixedIndex.findSymbols(
                         "direct",
                         SearchOptions.defaultOptions(),
                         EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD),
                         new int[0]
-                ).length);
+                ).results().length);
             }
 
             try (ClassIndex explicitIndex = ClassIndex.fromSources(List.of(
@@ -347,7 +347,7 @@ public class BasicTest {
                                 1
                         ),
                         EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
-                );
+                ).results();
                 assertEquals(1, symbols.length);
                 assertEquals(SymbolKind.METHOD, symbols[0].kind());
                 assertEquals("matchA", symbols[0].name());
@@ -360,7 +360,7 @@ public class BasicTest {
                                 10
                         ),
                         EnumSet.of(SymbolKind.FIELD, SymbolKind.METHOD)
-                );
+                ).results();
                 assertArrayEquals(
                         new String[]{"matchA", "matchZ"},
                         Arrays.stream(contains).map(SymbolSearchResult::name).toArray(String[]::new)
@@ -697,7 +697,7 @@ public class BasicTest {
                         100
                 ),
                 EnumSet.of(SymbolKind.METHOD)
-        );
+        ).results();
 
         assertTrue(Arrays.stream(results).anyMatch(result ->
                 result.kind() == SymbolKind.METHOD
@@ -712,7 +712,7 @@ public class BasicTest {
                         "lastIndexOf",
                         SearchOptions.defaultOptions(),
                         EnumSet.noneOf(SymbolKind.class)
-                ).length
+                ).results().length
         );
     }
 

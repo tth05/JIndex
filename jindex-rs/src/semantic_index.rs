@@ -15,6 +15,15 @@ const REFERENCE_RELATION_SHIFT: u64 = 24;
 const REFERENCE_RELATION_MASK: u64 = (1 << 8) - 1;
 const REFERENCE_OCCURRENCE_MASK: u64 = (1 << REFERENCE_RELATION_SHIFT) - 1;
 
+pub struct ReferenceStorageStatistics {
+    pub site_count: u64,
+    pub occurrence_count: u64,
+    pub single_occurrence_site_count: u64,
+    pub count_over_255_site_count: u64,
+    pub count_over_65535_site_count: u64,
+    pub maximum_occurrence_count: u32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum SymbolKind {
@@ -256,7 +265,7 @@ impl DescriptorPool {
                 .expect("Invalid descriptor length"),
         ]) as usize;
         let bytes = &self.data[offset + 2..offset + 2 + length];
-        unsafe { AsciiStr::from_ascii_unchecked(bytes) }
+        AsciiStr::from_ascii(bytes).expect("Descriptor pool contains non-ASCII data")
     }
 }
 
@@ -329,7 +338,7 @@ impl SemanticIndex {
         self.reference_sites.len()
     }
 
-    pub fn reference_storage_statistics(&self) -> (u64, u64, u64, u64, u64, u32) {
+    pub fn reference_storage_statistics(&self) -> ReferenceStorageStatistics {
         let mut occurrence_count = 0_u64;
         let mut single_occurrence_site_count = 0_u64;
         let mut count_over_255_site_count = 0_u64;
@@ -343,14 +352,14 @@ impl SemanticIndex {
             count_over_65535_site_count += u64::from(count > u16::MAX.into());
             maximum_occurrence_count = maximum_occurrence_count.max(count);
         }
-        (
-            self.reference_sites.len() as u64,
+        ReferenceStorageStatistics {
+            site_count: self.reference_sites.len() as u64,
             occurrence_count,
             single_occurrence_site_count,
             count_over_255_site_count,
             count_over_65535_site_count,
             maximum_occurrence_count,
-        )
+        }
     }
 
     pub fn literal_count(&self) -> usize {
@@ -561,10 +570,15 @@ impl SemanticIndex {
         include_fields: bool,
         include_methods: bool,
         source_ids: Option<&[u32]>,
-    ) -> Vec<MemberSearchResult> {
-        if query.is_empty() || options.limit == 0 {
-            return Vec::new();
+    ) -> (Vec<MemberSearchResult>, bool) {
+        if query.is_empty() {
+            return (Vec::new(), false);
         }
+
+        let probe_options = SearchOptions {
+            limit: options.limit.saturating_add(1),
+            ..options
+        };
 
         let included_kind_count = usize::from(include_fields) + usize::from(include_methods);
         let mut results =
@@ -573,7 +587,7 @@ impl SemanticIndex {
             self.collect_matches(
                 class_index,
                 query,
-                options,
+                probe_options,
                 SymbolKind::Field,
                 &self.field_search,
                 source_ids,
@@ -584,7 +598,7 @@ impl SemanticIndex {
             self.collect_matches(
                 class_index,
                 query,
-                options,
+                probe_options,
                 SymbolKind::Method,
                 &self.method_search,
                 source_ids,
@@ -600,8 +614,9 @@ impl SemanticIndex {
                 .then_with(|| left.member.class_index().cmp(&right.member.class_index()))
                 .then_with(|| left.member.member_index().cmp(&right.member.member_index()))
         });
+        let truncated = results.len() > options.limit;
         results.truncate(options.limit);
-        results
+        (results, truncated)
     }
 
     #[allow(clippy::too_many_arguments)]

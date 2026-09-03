@@ -7,7 +7,7 @@ use anyhow::{anyhow, ensure};
 use ascii::{AsAsciiStr, AsciiStr, IntoAsciiString};
 use jni::objects::{JByteArray, JIntArray, JList, JObject, JObjectArray, JString, JValue};
 use jni::strings::JNIString;
-use jni::sys::{jint, jlong, jobject, jobjectArray};
+use jni::sys::{jint, jlong, jobject};
 use jni::{jni_sig, jni_str, Env, EnvUnowned};
 use jvmti_bindings::mutf8;
 use std::ffi::CString;
@@ -497,8 +497,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getReferen
 ) -> jobject {
     with_jni_env!(env, {
         let (_, class_index) = get_class_index(env, &this);
-        let (sites, occurrences, singles, over_255, over_65535, maximum) =
-            class_index.semantic_index().reference_storage_statistics();
+        let statistics = class_index.semantic_index().reference_storage_statistics();
         let result_class = env
             .find_class(jni_str!(
                 "com/github/tth05/jindex/ReferenceStorageStatistics"
@@ -508,12 +507,12 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_getReferen
             &result_class,
             jni_sig!("(JJJJJJ)V"),
             &[
-                JValue::Long(sites as jlong),
-                JValue::Long(occurrences as jlong),
-                JValue::Long(singles as jlong),
-                JValue::Long(over_255 as jlong),
-                JValue::Long(over_65535 as jlong),
-                JValue::Long(u64::from(maximum) as jlong),
+                JValue::Long(statistics.site_count as jlong),
+                JValue::Long(statistics.occurrence_count as jlong),
+                JValue::Long(statistics.single_occurrence_site_count as jlong),
+                JValue::Long(statistics.count_over_255_site_count as jlong),
+                JValue::Long(statistics.count_over_65535_site_count as jlong),
+                JValue::Long(u64::from(statistics.maximum_occurrence_count) as jlong),
             ],
         )
         .expect("Unable to create reference storage statistics")
@@ -1097,7 +1096,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
     options: JObject,
     kind_mask: jni::sys::jint,
     source_ids_array: JObject,
-) -> jobjectArray {
+) -> jobject {
     with_jni_env!(env, {
         let input = java_to_ascii_string!(env, input);
         let result_class = env
@@ -1109,7 +1108,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
             read_optional_source_ids(env, source_ids_array),
             JObject::null().into_raw()
         );
-        let results = class_index.semantic_index().find_members(
+        let (results, truncated) = class_index.semantic_index().find_members(
             class_index,
             &input,
             propagate_error!(
@@ -1184,7 +1183,19 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findSymbol
             .expect("Failed to create symbol result");
         }
 
-        result_array.into_raw()
+        let page_class = env
+            .find_class(jni_str!("com/github/tth05/jindex/SymbolSearchPage"))
+            .expect("Symbol search page class not found");
+        env.new_object(
+            &page_class,
+            jni_sig!("([Lcom/github/tth05/jindex/SymbolSearchResult;Z)V"),
+            &[
+                JValue::Object(result_array.as_ref()),
+                JValue::Bool(truncated),
+            ],
+        )
+        .expect("Unable to create symbol search page")
+        .into_raw()
     })
 }
 

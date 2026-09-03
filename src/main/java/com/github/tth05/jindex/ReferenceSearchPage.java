@@ -4,6 +4,7 @@ import java.util.Objects;
 
 /**
  * A bounded, deterministic page of declaration sites that reference a target.
+ * This reports a result limit, not cursor pagination.
  *
  * @param results the matching declaration sites
  * @param truncated whether additional matching sites exist after this page

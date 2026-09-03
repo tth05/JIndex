@@ -4,9 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.ref.Cleaner;
 import java.lang.ref.WeakReference;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -28,10 +25,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
                 ClassIndex.class.getResourceAsStream("/jindex_natives/jindex_rs.dll"),
                 "Missing bundled jindex native library"
         )) {
-            Path extractedLibrary = Files.createTempFile("jindex_rs-", ".dll");
-            Files.copy(nativeLibrary, extractedLibrary, StandardCopyOption.REPLACE_EXISTING);
-            extractedLibrary.toFile().deleteOnExit();
-            System.load(extractedLibrary.toAbsolutePath().toString());
+            NativeLibraryLoader.load(nativeLibrary, NativeLibraryLoader.cacheDirectory());
         } catch (IOException e) {
             throw new RuntimeException("Unable to load native library", e);
         }
@@ -193,9 +187,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @param query the member-name query
      * @param options matching and limit options
      * @param kinds field and method kinds to include
-     * @return deterministically ordered matching declarations
+     * @return deterministically ordered matching declarations and truncation state
      */
-    public SymbolSearchResult[] findSymbols(
+    public SymbolSearchPage findSymbols(
             String query,
             SearchOptions options,
             EnumSet<SymbolKind> kinds
@@ -214,9 +208,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @param options matching and limit options
      * @param kinds field and method kinds to include
      * @param sourceIds opaque source IDs to include
-     * @return deterministically ordered matching declarations from the selected sources
+     * @return deterministically ordered matching declarations and truncation state for the selected sources
      */
-    public SymbolSearchResult[] findSymbols(
+    public SymbolSearchPage findSymbols(
             String query,
             SearchOptions options,
             EnumSet<SymbolKind> kinds,
@@ -456,7 +450,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
             int[] sourceIds
     );
 
-    private native SymbolSearchResult[] findSymbolsNative(
+    private native SymbolSearchPage findSymbolsNative(
             String query,
             SearchOptions options,
             int kindMask,
