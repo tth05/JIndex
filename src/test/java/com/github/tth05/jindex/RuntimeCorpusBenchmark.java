@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 
 /** Records the mixed-source JIndex baseline against a TotalDebug runtime-source manifest. */
 public final class RuntimeCorpusBenchmark {
@@ -47,6 +48,17 @@ public final class RuntimeCorpusBenchmark {
         long sourcePreparationStarted = System.nanoTime();
         LooseClasses jdkClasses = readJdkClasses();
         long sourcePreparationNanos = elapsedNanos(sourcePreparationStarted);
+        String oracleJdkArchive = System.getenv("JINDEX_AUDIT_JDK_ARCHIVE");
+        if (oracleJdkArchive != null) {
+            // Preserve the exact runtime-image class bytes/order for the native differential test.
+            try (var archive = new ZipOutputStream(Files.newOutputStream(Path.of(oracleJdkArchive)))) {
+                for (int index = 0; index < jdkClasses.bytes().size(); index++) {
+                    archive.putNextEntry(new ZipEntry(index + ".class"));
+                    archive.write(jdkClasses.bytes().get(index));
+                    archive.closeEntry();
+                }
+            }
+        }
 
         Path workspace = Files.createTempDirectory("jindex-runtime-corpus-");
         try {

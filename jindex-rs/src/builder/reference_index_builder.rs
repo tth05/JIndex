@@ -7,7 +7,147 @@ use crate::semantic_index::{
     ReferenceSiteKind, Utf8Pool,
 };
 use anyhow::anyhow;
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+
+#[cfg(test)]
+mod audit_oracle;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum TargetKey {
+    Class(u32),
+    Field(u32, u32, u32),
+    Method(u32, u32, u32),
+}
+
+enum ResolvedTarget {
+    None,
+    One(u32),
+    Many(Box<[u32]>),
+}
+
+impl ResolvedTarget {
+    fn as_slice(&self) -> &[u32] {
+        match self {
+            Self::None => &[],
+            Self::One(target) => std::slice::from_ref(target),
+            Self::Many(targets) => targets,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ResolutionScratch {
+    visited: FxHashSet<u32>,
+    interfaces: Vec<u32>,
+    results: Vec<u32>,
+}
+
+struct TargetResolver<'a> {
+    fields: &'a [MemberLookupEntry],
+    methods: &'a [MemberLookupEntry],
+    hierarchy: &'a [HierarchyInfo],
+    constructor_name: Option<u32>,
+    class_count: u32,
+    field_count: u32,
+}
+
+impl TargetResolver<'_> {
+    fn resolve(&self, key: TargetKey, scratch: &mut ResolutionScratch) -> ResolvedTarget {
+        scratch.visited.clear();
+        match key {
+            TargetKey::Class(index) => ResolvedTarget::One(index),
+            TargetKey::Field(owner, name, descriptor) => resolve_field_from(
+                owner,
+                name,
+                descriptor,
+                self.fields,
+                self.hierarchy,
+                &mut scratch.visited,
+            )
+            .map_or(ResolvedTarget::None, |index| {
+                ResolvedTarget::One(self.class_count + index)
+            }),
+            TargetKey::Method(owner, name, descriptor) => {
+                let base = self.class_count + self.field_count;
+                if Some(name) == self.constructor_name {
+                    return find_member(self.methods, owner, name, descriptor)
+                        .map_or(ResolvedTarget::None, |index| {
+                            ResolvedTarget::One(base + index)
+                        });
+                }
+                scratch.interfaces.clear();
+                let mut current = Some(owner);
+                while let Some(class) = current {
+                    if !scratch.visited.insert(class) {
+                        break;
+                    }
+                    if let Some(method) = find_member(self.methods, class, name, descriptor) {
+                        return ResolvedTarget::One(base + method);
+                    }
+                    scratch
+                        .interfaces
+                        .extend_from_slice(&self.hierarchy[class as usize].interfaces);
+                    current = self.hierarchy[class as usize].super_class;
+                }
+                scratch.visited.clear();
+                scratch.results.clear();
+                for interface in &scratch.interfaces {
+                    collect_interface_methods(
+                        *interface,
+                        name,
+                        descriptor,
+                        self.methods,
+                        self.hierarchy,
+                        &mut scratch.visited,
+                        &mut scratch.results,
+                    );
+                }
+                scratch.results.sort_unstable();
+                scratch.results.dedup();
+                match scratch.results.as_slice() {
+                    [] => ResolvedTarget::None,
+                    [method] => ResolvedTarget::One(base + method),
+                    methods => {
+                        ResolvedTarget::Many(methods.iter().map(|index| base + index).collect())
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn target_key(
+    target: RawReferenceTarget,
+    references: &RawReferenceData,
+    classes: &ClassToIndexMap<'_>,
+    names: &FxHashMap<&str, u32>,
+    descriptors: &FxHashMap<&str, u32>,
+) -> Option<TargetKey> {
+    match target {
+        RawReferenceTarget::Class { name } => {
+            class_index(classes, references.string(name)).map(TargetKey::Class)
+        }
+        RawReferenceTarget::Field {
+            owner,
+            name,
+            descriptor,
+        } => Some(TargetKey::Field(
+            class_index(classes, references.string(owner))?,
+            *names.get(references.string(name))?,
+            *descriptors.get(references.string(descriptor))?,
+        )),
+        RawReferenceTarget::Method {
+            owner,
+            name,
+            descriptor,
+        } => Some(TargetKey::Method(
+            class_index(classes, references.string(owner))?,
+            *names.get(references.string(name))?,
+            *descriptors.get(references.string(descriptor))?,
+        )),
+    }
+}
 
 #[derive(Clone, Copy)]
 struct MemberLookupEntry {
@@ -150,28 +290,71 @@ pub(super) fn build_reference_index<'a>(
         .checked_add(field_count)
         .and_then(|value| value.checked_add(method_count))
         .ok_or_else(|| anyhow!("The reference target table exceeds 4294967295 symbols"))?;
-    let mut offsets = vec![0_u32; total_targets as usize + 1];
-    let raw_edge_count = references_by_index
-        .iter()
-        .map(|references| references.edges.len())
-        .sum();
-    let mut resolved = Vec::with_capacity(raw_edge_count);
+    let class_count = u32::try_from(class_count)?;
+    let resolver = TargetResolver {
+        fields: &field_lookup,
+        methods: &method_lookup,
+        hierarchy: &hierarchy,
+        constructor_name: constant_pool_map.get("<init>").copied(),
+        class_count,
+        field_count,
+    };
+    // Normalize while the builder's !Sync class references are confined to this thread.
+    // Rayon sees only immutable IDs, lookup tables and raw reference data.
+    let mut keys = Vec::new();
+    let mut key_ids = FxHashMap::default();
+    let mut local_target_ids = Vec::with_capacity(references_by_index.len());
+    for references in &references_by_index {
+        let mut ids = Vec::with_capacity(references.targets.len());
+        for target in &references.targets {
+            let id = if let Some(key) = target_key(
+                *target,
+                references,
+                classes,
+                constant_pool_map,
+                descriptor_pool_map,
+            ) {
+                Some(if let Some(id) = key_ids.get(&key) {
+                    *id
+                } else {
+                    let id = u32::try_from(keys.len())
+                        .map_err(|_| anyhow!("More than 4294967295 unique reference targets"))?;
+                    keys.push(key);
+                    key_ids.insert(key, id);
+                    id
+                })
+            } else {
+                None
+            };
+            ids.push(id);
+        }
+        local_target_ids.push(ids);
+    }
+    drop(key_ids);
+    let resolved_targets: Vec<_> = keys
+        .par_iter()
+        .map_init(ResolutionScratch::default, |scratch, key| {
+            resolver.resolve(*key, scratch)
+        })
+        .collect();
+    drop(keys);
+
     let raw_literal_edge_count = references_by_index
         .iter()
         .map(|references| references.literal_edges.len())
         .sum();
     let mut literal_ids: FxHashMap<Vec<u16>, u32> = FxHashMap::default();
     let mut resolved_literals = Vec::with_capacity(raw_literal_edge_count);
-    let class_count = u32::try_from(class_count)?;
-    for (owner, references) in references_by_index.into_iter().enumerate() {
+    let mut references_by_index = references_by_index;
+    for (owner, references) in references_by_index.iter_mut().enumerate() {
         let mut local_literal_ids = Vec::with_capacity(references.literals.len());
-        for value in &references.literals {
+        for value in std::mem::take(&mut references.literals) {
             let literal_id = if let Some(id) = literal_ids.get(value.as_slice()) {
                 *id
             } else {
                 let id = u32::try_from(literal_ids.len())
                     .map_err(|_| anyhow!("The index contains more than 4294967295 literals"))?;
-                literal_ids.insert(value.clone(), id);
+                literal_ids.insert(value, id);
                 id
             };
             local_literal_ids.push(literal_id);
@@ -190,35 +373,106 @@ pub(super) fn build_reference_index<'a>(
                 occurrence_count: edge.occurrence_count,
             });
         }
-        visit_resolved_references(
-            owner as u32,
-            &references,
-            classes,
-            constant_pool_map,
-            descriptor_pool_map,
-            &field_lookup,
-            &method_lookup,
-            &hierarchy,
-            field_offsets,
-            method_offsets,
-            &extra_site_offsets,
-            class_count,
-            field_count,
-            |target, site_identity, metadata| {
-                offsets[target as usize + 1] = offsets[target as usize + 1]
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("A symbol has more than 4294967295 reference sites"))?;
-                resolved.push(ResolvedReference {
-                    target,
-                    site_identity,
-                    metadata,
-                });
-                Ok(())
-            },
-        )?;
     }
-    let (reference_offsets, reference_sites) = build_reference_postings(offsets, resolved)?;
 
+    #[cfg(test)]
+    let expected = references_by_index
+        .iter()
+        .enumerate()
+        .map(|(owner, references)| {
+            let mut output = Vec::new();
+            audit_oracle::visit_resolved_references(
+                owner as u32,
+                references,
+                classes,
+                constant_pool_map,
+                descriptor_pool_map,
+                &field_lookup,
+                &method_lookup,
+                &hierarchy,
+                field_offsets,
+                method_offsets,
+                &extra_site_offsets,
+                class_count,
+                field_count,
+                |target, site_identity, metadata| {
+                    output.push((
+                        target,
+                        site_identity,
+                        metadata.relation_mask(),
+                        metadata.occurrence_count(),
+                    ));
+                    Ok(())
+                },
+            )
+            .unwrap();
+            output
+        })
+        .collect::<Vec<_>>();
+
+    let resolved = references_by_index
+        .into_par_iter()
+        .zip(local_target_ids)
+        .enumerate()
+        .map(|(owner, (references, local_ids))| {
+            let mut output = Vec::with_capacity(references.edges.len());
+            for edge in references.edges {
+                let Some(id) = local_ids[edge.target as usize] else {
+                    continue;
+                };
+                let targets = resolved_targets[id as usize].as_slice();
+                if targets.is_empty() {
+                    continue;
+                }
+                let site_identity = resolve_source_site_identity(
+                    edge.site,
+                    owner as u32,
+                    field_offsets,
+                    method_offsets,
+                    &extra_site_offsets,
+                )?;
+                output.extend(targets.iter().map(|target| ResolvedReference {
+                    target: *target,
+                    site_identity,
+                    metadata: edge.metadata,
+                }));
+            }
+            Ok(output)
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    drop(resolved_targets);
+
+    #[cfg(test)]
+    for (owner, (actual, expected)) in resolved.iter().zip(expected).enumerate() {
+        let actual = actual
+            .iter()
+            .map(|reference| {
+                (
+                    reference.target,
+                    reference.site_identity,
+                    reference.metadata.relation_mask(),
+                    reference.metadata.occurrence_count(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual, expected,
+            "Cached/parallel references differ from the per-edge oracle for class {owner}"
+        );
+    }
+
+    let mut offsets = vec![0_u32; total_targets as usize + 1];
+    let mut resolved_count = 0;
+    for class_references in &resolved {
+        resolved_count += class_references.len();
+        for reference in class_references {
+            offsets[reference.target as usize + 1] = offsets[reference.target as usize + 1]
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("A symbol has more than 4294967295 reference sites"))?;
+        }
+    }
+    let (reference_offsets, reference_sites) =
+        build_reference_postings(offsets, resolved.into_iter().flatten(), resolved_count)?;
     let literal_count = literal_ids.len();
     let mut literal_values_by_id = literal_ids.into_iter().collect::<Vec<_>>();
     literal_values_by_id.sort_unstable_by(|left, right| left.0.cmp(&right.0));
@@ -264,7 +518,8 @@ pub(super) fn build_reference_index<'a>(
 
 fn build_reference_postings(
     mut counts: Vec<u32>,
-    resolved: Vec<ResolvedReference>,
+    resolved: impl IntoIterator<Item = ResolvedReference>,
+    resolved_count: usize,
 ) -> anyhow::Result<(Vec<u32>, Vec<PackedReferenceSite>)> {
     for index in 1..counts.len() {
         counts[index] = counts[index]
@@ -273,7 +528,7 @@ fn build_reference_postings(
     }
 
     let placeholder = PackedReferenceSite::new(0, 0, 1, 1)?;
-    let mut sites = vec![placeholder; resolved.len()];
+    let mut sites = vec![placeholder; resolved_count];
     let mut write_positions = counts[..counts.len() - 1].to_vec();
     for reference in resolved {
         let position = &mut write_positions[reference.target as usize];
@@ -384,82 +639,6 @@ fn build_literal_postings(
     Ok((offsets, sites))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn visit_resolved_references(
-    owner: u32,
-    references: &RawReferenceData,
-    classes: &ClassToIndexMap<'_>,
-    names: &FxHashMap<&str, u32>,
-    descriptors: &FxHashMap<&str, u32>,
-    fields: &[MemberLookupEntry],
-    methods: &[MemberLookupEntry],
-    hierarchy: &[HierarchyInfo],
-    field_offsets: &[u32],
-    method_offsets: &[u32],
-    extra_site_offsets: &[u32],
-    class_count: u32,
-    field_count: u32,
-    mut visitor: impl FnMut(u32, u32, RawReferenceMetadata) -> anyhow::Result<()>,
-) -> anyhow::Result<()> {
-    for edge in &references.edges {
-        let site_identity = resolve_source_site_identity(
-            edge.site,
-            owner,
-            field_offsets,
-            method_offsets,
-            extra_site_offsets,
-        )?;
-        match references.targets[edge.target as usize] {
-            RawReferenceTarget::Class { name } => {
-                if let Some(target) = class_index(classes, references.string(name)) {
-                    visitor(target, site_identity, edge.metadata)?;
-                }
-            }
-            RawReferenceTarget::Field {
-                owner,
-                name,
-                descriptor,
-            } => {
-                if let Some(target) = resolve_field(
-                    references.string(owner),
-                    references.string(name),
-                    references.string(descriptor),
-                    classes,
-                    names,
-                    descriptors,
-                    fields,
-                    hierarchy,
-                ) {
-                    visitor(class_count + target, site_identity, edge.metadata)?;
-                }
-            }
-            RawReferenceTarget::Method {
-                owner,
-                name,
-                descriptor,
-            } => {
-                for target in resolve_methods(
-                    references.string(owner),
-                    references.string(name),
-                    references.string(descriptor),
-                    classes,
-                    names,
-                    descriptors,
-                    methods,
-                    hierarchy,
-                ) {
-                    visitor(
-                        class_count + field_count + target,
-                        site_identity,
-                        edge.metadata,
-                    )?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 fn build_hierarchy(
     class_infos: &[&ClassInfo],
     classes: &ClassToIndexMap<'_>,
@@ -503,30 +682,6 @@ fn resolve_source_site_identity(
     Ok((site.kind() << 30) | ordinal)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn resolve_field(
-    owner: &str,
-    name: &str,
-    descriptor: &str,
-    classes: &ClassToIndexMap<'_>,
-    names: &FxHashMap<&str, u32>,
-    descriptors: &FxHashMap<&str, u32>,
-    fields: &[MemberLookupEntry],
-    hierarchy: &[HierarchyInfo],
-) -> Option<u32> {
-    let owner = class_index(classes, owner)?;
-    let name = *names.get(name)?;
-    let descriptor = *descriptors.get(descriptor)?;
-    resolve_field_from(
-        owner,
-        name,
-        descriptor,
-        fields,
-        hierarchy,
-        &mut FxHashSet::default(),
-    )
-}
-
 fn resolve_field_from(
     owner: u32,
     name: u32,
@@ -551,64 +706,6 @@ fn resolve_field_from(
     hierarchy[owner as usize].super_class.and_then(|parent| {
         resolve_field_from(parent, name, descriptor, fields, hierarchy, visiting)
     })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolve_methods(
-    owner: &str,
-    name: &str,
-    descriptor: &str,
-    classes: &ClassToIndexMap<'_>,
-    names: &FxHashMap<&str, u32>,
-    descriptors: &FxHashMap<&str, u32>,
-    methods: &[MemberLookupEntry],
-    hierarchy: &[HierarchyInfo],
-) -> Vec<u32> {
-    let Some(owner) = class_index(classes, owner) else {
-        return Vec::new();
-    };
-    let Some(name_index) = names.get(name).copied() else {
-        return Vec::new();
-    };
-    let Some(descriptor_index) = descriptors.get(descriptor).copied() else {
-        return Vec::new();
-    };
-    if name == "<init>" {
-        return find_member(methods, owner, name_index, descriptor_index)
-            .into_iter()
-            .collect();
-    }
-
-    let mut interface_roots = Vec::new();
-    let mut current = Some(owner);
-    let mut visited_classes = FxHashSet::default();
-    while let Some(class) = current {
-        if !visited_classes.insert(class) {
-            break;
-        }
-        if let Some(method) = find_member(methods, class, name_index, descriptor_index) {
-            return vec![method];
-        }
-        interface_roots.extend_from_slice(&hierarchy[class as usize].interfaces);
-        current = hierarchy[class as usize].super_class;
-    }
-
-    let mut results = Vec::new();
-    let mut visited_interfaces = FxHashSet::default();
-    for interface in interface_roots {
-        collect_interface_methods(
-            interface,
-            name_index,
-            descriptor_index,
-            methods,
-            hierarchy,
-            &mut visited_interfaces,
-            &mut results,
-        );
-    }
-    results.sort_unstable();
-    results.dedup();
-    results
 }
 
 fn collect_interface_methods(
@@ -662,6 +759,116 @@ fn class_index(classes: &ClassToIndexMap<'_>, internal_name: &str) -> Option<u32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use speedy::Writable;
+
+    #[test]
+    fn cached_parallel_resolution_matches_oracle_and_is_deterministic() {
+        let build = |threads| {
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let (_, index) = crate::builder::workers::create_class_index_from_jars(
+                        vec!["../src/test/resources/Samples.jar".to_owned()],
+                        21,
+                    )
+                    .unwrap();
+                    assert!(index.semantic_index().reference_site_count() > 1_000);
+                    index.write_to_vec().unwrap()
+                })
+        };
+        assert_eq!(build(1), build(4));
+    }
+
+    #[test]
+    #[ignore = "Requires JINDEX_AUDIT_MANIFEST and JINDEX_AUDIT_JDK_ARCHIVE exported by RuntimeCorpusBenchmark"]
+    fn audit_runtime_corpus_reference_equivalence() {
+        use crate::builder::workers::{
+            create_class_index_from_sources, ArchiveSource, DirectSource,
+        };
+        use std::io::Read;
+
+        let manifest =
+            std::fs::read_to_string(std::env::var("JINDEX_AUDIT_MANIFEST").unwrap()).unwrap();
+        assert_eq!(
+            manifest.lines().next(),
+            Some("totaldebug-runtime-sources-v1")
+        );
+        let mut archives: Vec<_> = manifest
+            .lines()
+            .skip(1)
+            .enumerate()
+            .map(|(index, uri)| {
+                let path = uri
+                    .strip_prefix("file:///")
+                    .expect("Expected absolute file URI");
+                let mut bytes = Vec::new();
+                let mut characters = path.as_bytes().iter().copied();
+                while let Some(byte) = characters.next() {
+                    bytes.push(if byte == b'%' {
+                        let high = char::from(characters.next().unwrap()).to_digit(16).unwrap();
+                        let low = char::from(characters.next().unwrap()).to_digit(16).unwrap();
+                        ((high << 4) | low) as u8
+                    } else {
+                        byte
+                    });
+                }
+                let path = String::from_utf8(bytes).unwrap();
+                let path = if cfg!(windows) {
+                    path
+                } else {
+                    format!("/{path}")
+                };
+                ArchiveSource {
+                    source_id: index as u32,
+                    input_order: index as u32,
+                    target_java_release: 21,
+                    file_name: path,
+                }
+            })
+            .collect();
+        let archive_count = archives.len();
+        let jdk_archive = std::env::var("JINDEX_AUDIT_JDK_ARCHIVE").unwrap();
+        let mut direct = Vec::new();
+        {
+            let mut zip = zip::ZipArchive::new(std::fs::File::open(jdk_archive).unwrap()).unwrap();
+            for entry in 0..zip.len() {
+                let selected = {
+                    let file = zip.by_index_raw(entry).unwrap();
+                    file.name().ends_with(".class")
+                };
+                if !selected {
+                    continue;
+                }
+                let mut bytes = Vec::new();
+                zip.by_index(entry)
+                    .unwrap()
+                    .read_to_end(&mut bytes)
+                    .unwrap();
+                let index = (archive_count + direct.len()) as u32;
+                direct.push(DirectSource {
+                    source_id: index,
+                    input_order: direct.len() as u32,
+                    bytes,
+                });
+            }
+        }
+        eprintln!(
+            "Oracle corpus: {archive_count} archives, {} JDK classes",
+            direct.len()
+        );
+        // The mixed Java overload puts direct JDK classes before archives in precedence order.
+        for archive in &mut archives {
+            archive.input_order += direct.len() as u32;
+        }
+        let (_, index) = create_class_index_from_sources(archives, direct).unwrap();
+        eprintln!(
+            "Exact per-edge oracle comparison passed: {} classes, {} reference sites",
+            index.class_count(),
+            index.semantic_index().reference_site_count()
+        );
+    }
 
     #[test]
     fn packed_reference_site_stays_eight_bytes() {
