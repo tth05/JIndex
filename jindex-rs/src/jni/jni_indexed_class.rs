@@ -295,15 +295,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getSuper
         let super_class = indexed_class.signature().super_class().map_or_else(
             || {
                 //Object has no super class
-                if indexed_class.class_name_with_package(
-                    class_index.package_index(),
-                    class_index.constant_pool(),
-                ) == "java/lang/Object"
-                {
-                    None
-                } else {
-                    get_java_lang_object(class_index)
-                }
+                get_java_lang_object(class_index)
+                    .filter(|object| object.index() != indexed_class.index())
             },
             |s| match s {
                 SignatureType::Unresolved => None,
@@ -415,7 +408,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
             .super_class()
             .is_none_or(is_basic_signature_type)
         //Object has no signature
-        || indexed_class.class_name_with_package(class_index.package_index(), class_index.constant_pool()) == "java/lang/Object"
+        || get_java_lang_object(class_index).is_some_and(|object| object.index() == indexed_class.index())
         {
             return Ok(JObject::null().into_raw());
         }

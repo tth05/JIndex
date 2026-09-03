@@ -785,14 +785,14 @@ impl RawReferenceBuilder {
         pool: &ConstantPool,
         string_index: u16,
     ) -> anyhow::Result<()> {
-        let value = pool.get_java_string(string_index)?.to_utf16().into_owned();
-        let next_id = u32::try_from(self.literals.len())?;
-        let literal_id = match self.literals.entry(value) {
-            Entry::Occupied(entry) => *entry.get(),
-            Entry::Vacant(entry) => {
-                entry.insert(next_id);
-                next_id
-            }
+        let string = pool.get_java_string(string_index)?;
+        let value = string.to_utf16();
+        let literal_id = if let Some(id) = self.literals.get(value.as_ref()) {
+            *id
+        } else {
+            let id = u32::try_from(self.literals.len())?;
+            self.literals.insert(value.into_owned(), id);
+            id
         };
         let count = self.literal_edges.entry((site, literal_id)).or_default();
         *count = count

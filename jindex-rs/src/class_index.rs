@@ -1,4 +1,3 @@
-use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use ascii::{AsAsciiStr, AsciiChar, AsciiStr, AsciiString};
@@ -12,6 +11,7 @@ use crate::constant_pool::{
 use crate::package_index::{IndexedPackage, PackageIndex};
 use crate::rsplit_once;
 use crate::semantic_index::SemanticIndex;
+use crate::subtype_index::SubtypeIndex;
 
 pub struct ClassIndex {
     constant_pool: ClassIndexConstantPool,
@@ -19,6 +19,7 @@ pub struct ClassIndex {
     package_index: PackageIndex,
     classes: Vec<IndexedClass>,
     semantic_index: SemanticIndex,
+    subtypes: SubtypeIndex,
 }
 
 impl ClassIndex {
@@ -29,6 +30,14 @@ impl ClassIndex {
         semantic_index: SemanticIndex,
     ) -> Self {
         package_index.rebuild_full_names(&constant_pool);
+        let subtypes = SubtypeIndex::new(
+            classes.len(),
+            classes.iter().flat_map(|class| {
+                all_direct_super_types!(class)
+                    .filter_map(|signature| signature.extract_base_object_type())
+                    .map(|parent| (parent, class.index()))
+            }),
+        );
         //Construct prefix range map
         let mut prefix_count_map: FxHashMap<u8, u32> = FxHashMap::default();
 
@@ -65,6 +74,7 @@ impl ClassIndex {
             package_index,
             class_prefix_range_map: range_map,
             semantic_index,
+            subtypes,
         }
     }
 
@@ -326,76 +336,15 @@ impl ClassIndex {
         }
     }
 
-    pub fn find_methods(
-        &self,
-        name: &AsciiStr,
-        limit: usize,
-    ) -> anyhow::Result<Vec<&IndexedMethod>> {
-        let res = self
-            .classes
-            .iter()
-            .flat_map(|class| class.methods())
-            .filter(|method| {
-                self.constant_pool()
-                    .string_view_at(method.method_name_index())
-                    .starts_with(self.constant_pool(), name, MatchMode::MatchCase)
-            })
-            .take(limit)
-            .collect();
-        Ok(res)
-    }
-
     pub fn find_implementations_of_class(
         &self,
         index: u32,
         direct_sub_types_only: bool,
     ) -> Vec<&IndexedClass> {
-        let mut queue = Vec::new();
-        let mut visited = vec![usize::MAX; self.classes.len()];
-        self.classes
-            .iter()
-            .filter(|class| {
-                if class.index() == index {
-                    return false;
-                }
-                if direct_sub_types_only {
-                    class.is_direct_sub_type_of(index)
-                } else {
-                    queue.clear();
-                    queue.push(*class);
-                    while let Some(current) = queue.pop() {
-                        let marker = class.index() as usize;
-                        if visited[current.index() as usize] == marker {
-                            continue;
-                        }
-                        visited[current.index() as usize] = marker;
-                        if current.is_direct_sub_type_of(index) {
-                            return true;
-                        }
-
-                        if let Some(super_class) = current
-                            .signature()
-                            .super_class()
-                            .and_then(|s| s.extract_base_object_type())
-                            .map(|i| self.class_at_index(i))
-                        {
-                            queue.push(super_class);
-                        }
-
-                        if let Some(interfaces) =
-                            current.signature().interfaces().map(|interfaces| {
-                                interfaces.iter().filter_map(|i| {
-                                    i.extract_base_object_type().map(|i| self.class_at_index(i))
-                                })
-                            })
-                        {
-                            interfaces.for_each(|i| queue.push(i));
-                        }
-                    }
-
-                    false
-                }
-            })
+        self.subtypes
+            .implementations(index, direct_sub_types_only)
+            .into_iter()
+            .map(|index| self.class_at_index(index))
             .collect()
     }
 
@@ -534,21 +483,4 @@ impl ClassIndex {
 pub struct MethodWithClass<'a> {
     pub class: &'a IndexedClass,
     pub method: &'a IndexedMethod,
-}
-
-impl PartialEq<Self> for MethodWithClass<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        // NOTE: This implementation ignores method overloading, but it's fine for our use case
-        self.class.index() == other.class.index()
-            && self.method.method_name_index() == other.method.method_name_index()
-    }
-}
-
-impl Eq for MethodWithClass<'_> {}
-
-impl Hash for MethodWithClass<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.class.index().hash(state);
-        self.method.method_name_index().hash(state);
-    }
 }

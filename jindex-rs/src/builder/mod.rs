@@ -129,7 +129,11 @@ impl ClassIndexBuilder {
                     class_info.class_name.as_str(),
                 ))
                 .ok_or_else(|| {
-                    anyhow::anyhow!("Indexed class not found in map {:?}", class_info)
+                    anyhow::anyhow!(
+                        "Indexed class not found in map: {}/{}",
+                        class_info.package_name,
+                        class_info.class_name
+                    )
                 })?;
 
             //Add class to its package
@@ -195,8 +199,9 @@ impl ClassIndexBuilder {
 
             indexed_class.set_fields(indexed_fields).map_err(|_| {
                 anyhow!(
-                    "Failed to set fields for class. Already visited. {:?}",
-                    class_info
+                    "Fields already set for class {}/{}",
+                    class_info.package_name,
+                    class_info.class_name
                 )
             })?;
             field_descriptors_by_class[*indexed_class_index as usize] =
@@ -230,8 +235,9 @@ impl ClassIndexBuilder {
 
             indexed_class.set_methods(indexed_methods).map_err(|_| {
                 anyhow!(
-                    "Failed to set methods for class. Already visited. {:?}",
-                    class_info
+                    "Methods already set for class {}/{}",
+                    class_info.package_name,
+                    class_info.class_name
                 )
             })?;
             method_descriptors_by_class[*indexed_class_index as usize] =

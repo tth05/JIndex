@@ -12,6 +12,7 @@ pub mod package_index;
 pub(crate) mod reference_relations;
 pub mod semantic_index;
 pub mod signature;
+mod subtype_index;
 
 pub mod jni;
 

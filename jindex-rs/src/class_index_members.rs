@@ -30,10 +30,12 @@ pub struct IndexedClass {
 #[macro_export]
 macro_rules! all_direct_super_types {
     ($ref: ident) => {
-        $ref.signature()
-            .super_class()
-            .into_iter()
-            .chain($ref.signature().interfaces().iter().flat_map(|v| v.iter()))
+        $ref.signature().super_class().into_iter().chain(
+            $ref.signature()
+                .interfaces()
+                .into_iter()
+                .flat_map(|v| v.iter()),
+        )
     };
 }
 
@@ -104,12 +106,6 @@ impl IndexedClass {
         self.enclosing_type_info()
             .filter(|info| info.class_name().is_some())
             .map(|info| class_index.class_at_index(*info.class_name().unwrap()))
-    }
-
-    pub fn is_direct_sub_type_of(&self, other_class: u32) -> bool {
-        all_direct_super_types!(self)
-            .filter_map(|s| s.extract_base_object_type())
-            .any(|o| o == other_class)
     }
 
     pub fn index(&self) -> u32 {

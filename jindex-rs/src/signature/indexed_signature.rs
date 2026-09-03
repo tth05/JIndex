@@ -746,3 +746,53 @@ fn index_for_object_type(
     let class_name_parts = name.rsplit_once('/').unwrap_or_else(|| ("", name.as_str()));
     class_to_index_map.get(&class_name_parts).map(|p| p.0)
 }
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn erased_comparison_is_symmetric_and_variables_never_match_primitives() {
+        let types = [
+            IndexedSignatureType::Unresolved,
+            IndexedSignatureType::Primitive(jni::signature::Primitive::Int),
+            IndexedSignatureType::Primitive(jni::signature::Primitive::Void),
+            IndexedSignatureType::Generic(0),
+            IndexedSignatureType::Object(1),
+            IndexedSignatureType::Object(2),
+            IndexedSignatureType::ObjectPlus(Box::new(IndexedSignatureType::Object(1))),
+            IndexedSignatureType::ObjectTypeBounds(Box::new((1, Vec::new()))),
+            IndexedSignatureType::Array(Box::new(IndexedSignatureType::Generic(0))),
+            IndexedSignatureType::Array(Box::new(IndexedSignatureType::Object(1))),
+            IndexedSignatureType::Array(Box::new(IndexedSignatureType::Primitive(
+                jni::signature::Primitive::Int,
+            ))),
+        ];
+        for left in &types {
+            for right in &types {
+                assert_eq!(
+                    left.eq_erased(right),
+                    right.eq_erased(left),
+                    "{left:?}, {right:?}"
+                );
+            }
+        }
+        assert!(!types[3].eq_erased(&types[1]));
+        assert!(!types[3].eq_erased(&types[2]));
+        assert!(!types[8].eq_erased(&types[10]));
+        assert!(types[8].eq_erased(&types[9]));
+    }
+
+    #[test]
+    #[allow(clippy::box_collection)]
+    fn optional_boxed_vector_is_one_pointer_not_a_fat_pointer() {
+        assert_eq!(
+            size_of::<Option<Box<Vec<IndexedSignatureType>>>>(),
+            size_of::<usize>()
+        );
+        assert_eq!(
+            size_of::<Option<Box<[IndexedSignatureType]>>>(),
+            2 * size_of::<usize>()
+        );
+    }
+}

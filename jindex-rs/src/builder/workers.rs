@@ -47,11 +47,6 @@ fn process_jar_worker(source: ArchiveSource) -> anyhow::Result<Vec<ClassInfo>> {
     let file_path = Path::new(&file_name)
         .canonicalize()
         .with_context(|| format!("Failed to canonicalize path {}", file_name))?;
-    if !file_path.exists() {
-        return Err(anyhow!("File {} does not exist", file_name));
-    }
-
-    file_buf.clear();
     let mut file =
         File::open(file_path).with_context(|| format!("Failed to open file {}", file_name))?;
     file.read_to_end(&mut file_buf)?;
@@ -62,7 +57,7 @@ fn process_jar_worker(source: ArchiveSource) -> anyhow::Result<Vec<ClassInfo>> {
     let mut selected_entries: FxHashMap<String, (u32, usize)> = FxHashMap::default();
 
     for i in 0..archive.len() {
-        let entry = archive.by_index(i)?;
+        let entry = archive.by_index_raw(i)?;
         if entry.is_dir() {
             continue;
         }

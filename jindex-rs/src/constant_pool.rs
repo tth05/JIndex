@@ -59,11 +59,11 @@ impl ConstantPoolStringView {
     }
 
     pub fn as_ascii_str<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
-        unsafe {
-            AsciiStr::from_ascii_unchecked(
-                &constant_pool.string_data[(self.index + 1) as usize..][..self.len as usize],
-            )
-        }
+        // Offsets and bytes can originate in a snapshot. Never fabricate invalid AsciiChar values.
+        AsciiStr::from_ascii(
+            &constant_pool.string_data[self.index as usize + 1..][..self.len as usize],
+        )
+        .expect("Constant pool contains non-ASCII data")
     }
 
     pub fn is_empty(&self) -> bool {
@@ -221,6 +221,14 @@ pub(crate) fn search_ascii(
 mod tests {
     use super::{search_ascii, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
     use ascii::AsAsciiStr;
+
+    #[test]
+    fn audit_corrupt_pool_bytes_are_rejected_before_ascii_access() {
+        let pool = ClassIndexConstantPool {
+            string_data: vec![1, 255],
+        };
+        assert!(std::panic::catch_unwind(|| pool.string_view_at(0).as_ascii_str(&pool)).is_err());
+    }
 
     #[test]
     fn audit_longer_queries_do_not_match() {
