@@ -331,14 +331,13 @@ fn convert_enclosing_type_and_inner_classes(
     let member_classes = inner_classes
         .iter()
         .enumerate()
-        .filter_map(|(index, entry)| {
-            (Some(index) != self_inner_class_index
+        .filter(|&(index, entry)| {
+            Some(index) != self_inner_class_index
                 && entry.outer_class_name == Some(this_name.as_str())
-                && entry.inner_name.is_some())
-            .then(|| {
-                ascii(entry.inner_class_name, "member class name")
-                    .map(|name| name.to_compact_string())
-            })
+                && entry.inner_name.is_some()
+        })
+        .map(|(_index, entry)| {
+            ascii(entry.inner_class_name, "member class name").map(|name| name.to_compact_string())
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
 

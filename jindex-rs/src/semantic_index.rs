@@ -1,6 +1,6 @@
 use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
-use crate::constant_pool::{ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
+use crate::constant_pool::{search_ascii, ClassIndexConstantPool, SearchMode, SearchOptions};
 use anyhow::{anyhow, ensure};
 use ascii::AsciiStr;
 use speedy::{Readable, Writable};
@@ -604,6 +604,7 @@ impl SemanticIndex {
         results
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn collect_matches(
         &self,
         class_index: &ClassIndex,
@@ -723,11 +724,7 @@ pub struct MemberSearchResult {
     pub match_offset: usize,
 }
 
-fn member_name<'a>(
-    index: &'a ClassIndex,
-    kind: SymbolKind,
-    member: PackedMemberId,
-) -> &'a AsciiStr {
+fn member_name(index: &ClassIndex, kind: SymbolKind, member: PackedMemberId) -> &AsciiStr {
     member_name_from_parts(index.classes(), index.constant_pool(), kind, member)
 }
 
@@ -772,37 +769,6 @@ fn starts_with_ascii_ignore_case(value: &AsciiStr, prefix: &AsciiStr) -> bool {
             .iter()
             .zip(prefix.as_bytes())
             .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-}
-
-fn search_ascii(value: &AsciiStr, query: &AsciiStr, options: SearchOptions) -> Option<usize> {
-    if query.len() > value.len() {
-        return None;
-    }
-    let last_start = match options.search_mode {
-        SearchMode::Prefix => 0,
-        SearchMode::Contains => value.len() - query.len(),
-    };
-    for start in 0..=last_start {
-        let matches = value.as_bytes()[start..start + query.len()]
-            .iter()
-            .zip(query.as_bytes().iter())
-            .enumerate()
-            .all(|(offset, (actual, expected))| match options.match_mode {
-                MatchMode::MatchCase => actual == expected,
-                MatchMode::IgnoreCase => actual.eq_ignore_ascii_case(expected),
-                MatchMode::MatchCaseFirstCharOnly if start == 0 && offset == 0 => {
-                    actual == expected
-                }
-                MatchMode::MatchCaseFirstCharOnly => actual.eq_ignore_ascii_case(expected),
-            });
-        if matches {
-            return Some(start);
-        }
-        if matches!(options.search_mode, SearchMode::Prefix) {
-            break;
-        }
-    }
-    None
 }
 
 #[cfg(test)]

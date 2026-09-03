@@ -71,8 +71,13 @@ tasks.register('testNativeLibrary', Exec) {
     commandLine 'cargo', 'test', '--all-targets', '--locked'
 }
 
+tasks.register('checkNativeLints', Exec) {
+    workingDir rustProjectDirectory
+    commandLine 'cargo', 'clippy', '--all-targets', '--locked', '--', '-D', 'warnings'
+}
+
 tasks.named('check') {
-    dependsOn tasks.named('checkNativeFormatting'), tasks.named('testNativeLibrary')
+    dependsOn tasks.named('checkNativeFormatting'), tasks.named('checkNativeLints'), tasks.named('testNativeLibrary')
 }
 
 tasks.register('stageNativeLibrary', Sync) {

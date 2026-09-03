@@ -88,8 +88,6 @@ impl IndexedPackage {
         constant_pool: &ClassIndexConstantPool,
         str: &AsciiStr,
     ) -> Ordering {
-        let mut index = str.len() - 1;
-
         let mut current_package = self;
         let mut current_part = constant_pool.string_view_at(current_package.package_name_index);
         if str.is_empty() {
@@ -99,6 +97,8 @@ impl IndexedPackage {
                 Ordering::Greater
             };
         }
+
+        let mut index = str.len() - 1;
 
         loop {
             for i in (0..current_part.len()).rev() {
@@ -191,5 +191,25 @@ impl IndexedPackage {
 
     pub fn previous_package_index(&self) -> u32 {
         self.previous_package_index
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn audit_default_package_comparison() {
+        let mut pool = ClassIndexConstantPool::new(0);
+        pool.add_string(b"").unwrap();
+        let packages = PackageIndex::new();
+        assert_eq!(
+            Ordering::Equal,
+            packages.package_at(0).package_name_with_parents_cmp(
+                &packages,
+                &pool,
+                "".as_ascii_str().unwrap()
+            )
+        );
     }
 }

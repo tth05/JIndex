@@ -222,7 +222,12 @@ where
                 6 => jni::signature::Primitive::Long,
                 7 => jni::signature::Primitive::Short,
                 8 => jni::signature::Primitive::Void,
-                _ => unreachable!(),
+                tag => {
+                    return Err(speedy::Error::custom(format!(
+                        "Unknown JIndex primitive tag {tag}"
+                    ))
+                    .into())
+                }
             }),
             2 => IndexedSignatureType::Generic(reader.read_u32()?),
             3 => IndexedSignatureType::Object(reader.read_u32()?),
@@ -235,7 +240,11 @@ where
             6 => IndexedSignatureType::ObjectTypeBounds(Box::new(<_>::read_from(reader)?)),
             7 => IndexedSignatureType::ObjectInnerClass(Box::new(<_>::read_from(reader)?)),
             8 => IndexedSignatureType::Array(Box::new(<_>::read_from(reader)?)),
-            _ => unreachable!(),
+            tag => {
+                return Err(
+                    speedy::Error::custom(format!("Unknown JIndex signature tag {tag}")).into(),
+                )
+            }
         })
     }
 }
@@ -351,6 +360,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audit_invalid_signature_tags_return_errors() {
+        for bytes in [&[255_u8][..], &[1_u8, 255][..]] {
+            assert!(IndexedSignatureType::read_from_buffer(bytes).is_err());
+        }
+    }
 
     #[test]
     fn snapshot_payload_rejects_missing_header() {

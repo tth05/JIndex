@@ -429,9 +429,10 @@ impl BuildTimeInfo {
     }
 }
 
-impl ToString for BuildTimeInfo {
-    fn to_string(&self) -> String {
-        format!(
+impl std::fmt::Display for BuildTimeInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "Deserialization: {}ms\nClass reading: {}ms\nIndexing: {}ms\nTotal: {}ms",
             self.deserialization_time,
             self.class_reading_time,

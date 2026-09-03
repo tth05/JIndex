@@ -354,14 +354,24 @@ impl ClassIndex {
         direct_sub_types_only: bool,
     ) -> Vec<&IndexedClass> {
         let mut queue = Vec::new();
+        let mut visited = vec![usize::MAX; self.classes.len()];
         self.classes
             .iter()
             .filter(|class| {
+                if class.index() == index {
+                    return false;
+                }
                 if direct_sub_types_only {
                     class.is_direct_sub_type_of(index)
                 } else {
+                    queue.clear();
                     queue.push(*class);
                     while let Some(current) = queue.pop() {
+                        let marker = class.index() as usize;
+                        if visited[current.index() as usize] == marker {
+                            continue;
+                        }
+                        visited[current.index() as usize] = marker;
                         if current.is_direct_sub_type_of(index) {
                             return true;
                         }
@@ -448,40 +458,32 @@ impl ClassIndex {
         class: &'a IndexedClass,
         target_method: &'a IndexedMethod,
     ) -> Vec<MethodWithClass<'a>> {
-        self.find_base_methods_starting_at(class, class, target_method)
-    }
-
-    fn find_base_methods_starting_at<'a>(
-        &'a self,
-        current_class: &'a IndexedClass,
-        declaring_class: &'a IndexedClass,
-        target_method: &'a IndexedMethod,
-    ) -> Vec<MethodWithClass<'a>> {
-        // Check all super types of the given class
-        all_direct_super_types!(current_class)
-            .filter_map(|c| c.extract_base_object_type())
-            .map(|i| self.class_at_index(i))
-            .flat_map(|c| {
-                c.methods()
-                    .iter()
-                    // Collect all methods from the current class
-                    .filter(|method| {
-                        self.method_overrides(declaring_class, target_method, c, method)
-                    })
-                    // We don't use `c` here directly to satisfy the borrow checker
-                    .map(|m| MethodWithClass {
-                        class: self.class_at_index(c.index()),
-                        method: m,
-                    })
-                    .chain(
-                        // Recursively search super types of current class
-                        self.find_base_methods_starting_at(c, declaring_class, target_method)
-                            .into_iter(),
-                    )
-            })
-            .collect::<FxHashSet<MethodWithClass>>() // Remove duplicates
-            .into_iter()
-            .collect()
+        let mut visited = FxHashSet::default();
+        visited.insert(class.index());
+        let mut queue = all_direct_super_types!(class)
+            .filter_map(|signature| signature.extract_base_object_type())
+            .collect::<Vec<_>>();
+        let mut results = Vec::new();
+        while let Some(index) = queue.pop() {
+            if !visited.insert(index) {
+                continue;
+            }
+            let ancestor = self.class_at_index(index);
+            for method in ancestor.methods() {
+                if self.method_overrides(class, target_method, ancestor, method) {
+                    results.push(MethodWithClass {
+                        class: ancestor,
+                        method,
+                    });
+                }
+            }
+            queue.extend(
+                all_direct_super_types!(ancestor)
+                    .filter_map(|signature| signature.extract_base_object_type()),
+            );
+        }
+        results.sort_by_key(|result| (result.class.index(), result.method.method_name_index()));
+        results
     }
 
     fn method_overrides(

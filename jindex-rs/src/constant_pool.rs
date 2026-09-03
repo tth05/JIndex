@@ -20,11 +20,12 @@ impl ClassIndexConstantPool {
         if length > u8::MAX as usize {
             return Err(anyhow!(
                 "The string {} exceeds the maximum size of {}",
-                AsciiStr::from_ascii(str).unwrap(),
+                String::from_utf8_lossy(str),
                 u8::MAX
             ));
         }
 
+        AsciiStr::from_ascii(str)?;
         self.string_data.try_reserve(1 + str.len())?;
         self.string_data.push(length as u8);
         self.string_data.extend_from_slice(str);
@@ -35,7 +36,7 @@ impl ClassIndexConstantPool {
     pub fn string_view_at(&self, index: u32) -> ConstantPoolStringView {
         ConstantPoolStringView {
             index,
-            end: 1 + /* Add the length */ self.string_data.get(index as usize).unwrap(),
+            len: *self.string_data.get(index as usize).unwrap(),
         }
     }
 }
@@ -43,30 +44,30 @@ impl ClassIndexConstantPool {
 #[derive(Debug, Eq)]
 pub struct ConstantPoolStringView {
     index: u32,
-    end: u8,
+    len: u8,
 }
 
 impl PartialEq for ConstantPoolStringView {
     fn eq(&self, other: &Self) -> bool {
-        self.index == other.index && self.end == other.end
+        self.index == other.index && self.len == other.len
     }
 }
 
 impl ConstantPoolStringView {
-    pub fn into_ascii_str<'a>(self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
+    pub fn into_ascii_str(self, constant_pool: &ClassIndexConstantPool) -> &AsciiStr {
         self.as_ascii_str(constant_pool)
     }
 
     pub fn as_ascii_str<'a>(&self, constant_pool: &'a ClassIndexConstantPool) -> &'a AsciiStr {
         unsafe {
             AsciiStr::from_ascii_unchecked(
-                &constant_pool.string_data[(self.index + 1) as usize..][..(self.end - 1) as usize],
+                &constant_pool.string_data[(self.index + 1) as usize..][..self.len as usize],
             )
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.end as u32 == self.index + 1
+        self.len == 0
     }
 
     pub fn byte_at(&self, constant_pool: &ClassIndexConstantPool, index: u8) -> u8 {
@@ -144,7 +145,7 @@ impl ConstantPoolStringView {
     }
 
     pub fn len(&self) -> u8 {
-        self.end - 1
+        self.len
     }
 }
 
@@ -191,6 +192,9 @@ pub(crate) fn search_ascii(
     query: &AsciiStr,
     options: SearchOptions,
 ) -> Option<usize> {
+    if query.len() > value.len() {
+        return None;
+    }
     let last_start = match options.search_mode {
         SearchMode::Prefix => 0,
         SearchMode::Contains => value.len().checked_sub(query.len())?,
@@ -215,8 +219,53 @@ pub(crate) fn search_ascii(
 
 #[cfg(test)]
 mod tests {
-    use super::{search_ascii, MatchMode, SearchMode, SearchOptions};
+    use super::{search_ascii, ClassIndexConstantPool, MatchMode, SearchMode, SearchOptions};
     use ascii::AsAsciiStr;
+
+    #[test]
+    fn audit_longer_queries_do_not_match() {
+        for search_mode in [SearchMode::Prefix, SearchMode::Contains] {
+            for match_mode in [
+                MatchMode::IgnoreCase,
+                MatchMode::MatchCase,
+                MatchMode::MatchCaseFirstCharOnly,
+            ] {
+                assert_eq!(
+                    None,
+                    search_ascii(
+                        "Object".as_ascii_str().unwrap(),
+                        "Objects".as_ascii_str().unwrap(),
+                        SearchOptions {
+                            search_mode,
+                            match_mode,
+                            limit: 1
+                        }
+                    )
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn audit_pool_views_preserve_maximum_length_and_empty_values() {
+        let mut pool = ClassIndexConstantPool::new(0);
+        pool.add_string(b"").unwrap();
+        let one = pool.add_string(b"x").unwrap();
+        let empty = pool.add_string(b"").unwrap();
+        let maximum = pool.add_string(&[b'x'; 255]).unwrap();
+        assert!(!pool.string_view_at(one).is_empty());
+        assert!(pool.string_view_at(empty).is_empty());
+        let view = pool.string_view_at(maximum);
+        assert_eq!(255, view.len());
+        assert_eq!(255, view.as_ascii_str(&pool).len());
+    }
+
+    #[test]
+    fn audit_oversized_unicode_error_does_not_panic() {
+        assert!(ClassIndexConstantPool::new(0)
+            .add_string("Ä".repeat(256).as_bytes())
+            .is_err());
+    }
 
     #[test]
     fn searches_ascii_with_every_match_mode() {

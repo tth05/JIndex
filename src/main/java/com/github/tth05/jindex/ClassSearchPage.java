@@ -4,6 +4,9 @@ import java.util.Objects;
 
 /**
  * A bounded, deterministic page of indexed classes.
+ * This is a result limit, not cursor pagination. Simple-name searches select a
+ * bounded set before ranking it by match position; a truncated set need not
+ * contain the globally best-positioned matches.
  *
  * @param results matching classes in search order
  * @param truncated whether additional matching classes exist after this page

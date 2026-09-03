@@ -152,7 +152,7 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getGene
             && is_basic_signature_type(signature.return_type())
             && signature
                 .exceptions()
-                .map_or(true, |v| !v.iter().any(|s| !is_basic_signature_type(s)))
+                .is_none_or(|v| !v.iter().any(|s| !is_basic_signature_type(s)))
         {
             return Ok(JObject::null().into_raw());
         }
@@ -184,8 +184,29 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExce
             &cached_field_ids().class_child_class_pointer,
         );
 
-        let exceptions = indexed_method.method_signature().exceptions();
-        let array_length = exceptions.map_or(0, |v| v.len());
+        let generic_data = collect_method_type_parameters(
+            class_index,
+            indexed_class,
+            indexed_method.method_signature(),
+        );
+        let exceptions: Vec<u32> = indexed_method
+            .method_signature()
+            .exceptions()
+            .into_iter()
+            .flatten()
+            .filter_map(|signature| {
+                signature.extract_base_object_type().or_else(|| {
+                    if matches!(signature, IndexedSignatureType::Generic(_)) {
+                        signature
+                            .resolve_generic_type_bound(class_index, &generic_data)
+                            .and_then(|bound| bound.extract_base_object_type())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+        let array_length = exceptions.len();
 
         let result_class = env
             .find_class(jni_str!("com/github/tth05/jindex/IndexedClass"))
@@ -199,28 +220,8 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getExce
             return Ok(result_array.into_raw());
         }
 
-        for (index, exception_signature) in exceptions.unwrap().iter().enumerate() {
-            let exception_class_index = exception_signature.extract_base_object_type().or_else(
-                || match exception_signature {
-                    IndexedSignatureType::Generic(_) => {
-                        let generic_data = collect_method_type_parameters(
-                            class_index,
-                            indexed_class,
-                            indexed_method.method_signature(),
-                        );
-
-                        exception_signature
-                            .resolve_generic_type_bound(class_index, &generic_data)
-                            .and_then(|s| s.extract_base_object_type())
-                    }
-                    _ => Option::None,
-                },
-            );
-            if exception_class_index.is_none() {
-                continue;
-            }
-
-            let class = class_index.class_at_index(exception_class_index.unwrap());
+        for (index, exception_class_index) in exceptions.into_iter().enumerate() {
+            let class = class_index.class_at_index(exception_class_index);
 
             let object = env
                 .new_object(

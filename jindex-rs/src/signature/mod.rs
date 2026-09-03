@@ -81,6 +81,9 @@ impl<T> ClassSignature<T> {
 /// without the Boxes the size of this struct would be doubled, even though
 /// generic data, exceptions and parameters are used for less than half of all
 /// methods
+// The optional boxed Vec is one pointer; an optional boxed slice is two.
+// Keep sparse per-method storage small and measure changes with the corpus.
+#[allow(clippy::box_collection)]
 pub struct MethodSignature<T> {
     generic_data: Option<Box<Vec<TypeParameterData<T>>>>,
     parameters: Option<Box<Vec<SignatureType<T>>>>,
@@ -321,7 +324,7 @@ mod tests {
         assert_eq!(2, result.len());
 
         //Check first parameter
-        let data = result.get(0).unwrap();
+        let data = result.first().unwrap();
         assert_eq!("T", data.name);
         assert!(data.type_bound.is_some());
         assert_is_object_signature("java/lang/String", data.type_bound.as_ref().unwrap());
@@ -329,7 +332,7 @@ mod tests {
         assert!(data.interface_bounds.is_some());
         let interface_bounds = data.interface_bounds.as_ref().unwrap();
         assert_eq!(1, interface_bounds.len());
-        assert_is_object_signature("java/lang/Comparable", interface_bounds.get(0).unwrap());
+        assert_is_object_signature("java/lang/Comparable", interface_bounds.first().unwrap());
 
         //Check second parameter
         let data = result.get(1).unwrap();
@@ -339,7 +342,7 @@ mod tests {
         assert!(data.interface_bounds.is_some());
         let interface_bounds = data.interface_bounds.as_ref().unwrap();
         assert_eq!(1, interface_bounds.len());
-        assert_is_object_signature("java/lang/Comparable", interface_bounds.get(0).unwrap());
+        assert_is_object_signature("java/lang/Comparable", interface_bounds.first().unwrap());
     }
 
     #[test]

@@ -410,10 +410,10 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedClass_getGener
         if signature.generic_data().is_none()
         && signature
             .interfaces()
-            .map_or(true, |v| v.iter().all(is_basic_signature_type))
+            .is_none_or(|v| v.iter().all(is_basic_signature_type))
         && signature
             .super_class()
-            .map_or(true, is_basic_signature_type)
+            .is_none_or(is_basic_signature_type)
         //Object has no signature
         || indexed_class.class_name_with_package(class_index.package_index(), class_index.constant_pool()) == "java/lang/Object"
         {

@@ -52,22 +52,32 @@ pub unsafe fn init_field_ids(env: &mut Env<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Borrows a native child for one JNI invocation.
+///
+/// # Safety
+/// `this` must belong to a live index. Its Java owner must hold the lifecycle read
+/// lock until this borrow ends, and the field must point to a `T` in that index.
 pub unsafe fn get_field_with_id<'a, T>(
     env: &mut Env<'_>,
-    this: &JObject<'_>,
+    this: &'a JObject<'_>,
     field_id: &JFieldID,
 ) -> &'a T {
-    &*(env
+    let pointer = env
         .get_field_unchecked(this, *field_id, ReturnType::Primitive(Primitive::Long))
         .unwrap()
         .j()
-        .unwrap() as *mut T)
+        .unwrap() as *const T;
+    assert!(!pointer.is_null(), "Native index child pointer is null");
+    &*pointer
 }
 
-pub unsafe fn get_class_index(
+/// # Safety
+/// `this` must retain its Java owner, whose lifecycle read lock must remain held
+/// for the returned borrow. Only the owner's cleanup action may free this index.
+pub unsafe fn get_class_index<'a>(
     env: &mut Env<'_>,
-    this: &JObject<'_>,
-) -> (jlong, &'static ClassIndex) {
+    this: &'a JObject<'_>,
+) -> (jlong, &'a ClassIndex) {
     let class_index_pointer = env
         .get_field_unchecked(
             this,
@@ -77,6 +87,7 @@ pub unsafe fn get_class_index(
         .unwrap()
         .j()
         .unwrap();
+    assert_ne!(class_index_pointer, 0, "Native class index pointer is null");
     let class_index = &*(class_index_pointer as *const ClassIndex);
     (class_index_pointer, class_index)
 }

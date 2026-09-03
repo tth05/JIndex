@@ -57,6 +57,11 @@ impl<T> SignatureType<T> {
 
 impl IndexedSignatureType {
     pub fn eq_erased(&self, other: &IndexedSignatureType) -> bool {
+        // A type variable can stand for a reference type, never a JVM primitive.
+        // Bounds are not resolved by this comparison.
+        if matches!(self, Self::Generic(_)) || matches!(other, Self::Generic(_)) {
+            return !matches!(self, Self::Primitive(_)) && !matches!(other, Self::Primitive(_));
+        }
         match self {
             IndexedSignatureType::Primitive(p) => match other {
                 IndexedSignatureType::Primitive(q) => p == q,
@@ -67,18 +72,11 @@ impl IndexedSignatureType {
                 _ => false,
             },
             IndexedSignatureType::Unresolved => matches!(other, IndexedSignatureType::Unresolved),
-            // Generics gets erased to Object
-            IndexedSignatureType::Generic(_) => true,
-            _ => match other {
-                // Generics gets erased to Object
-                IndexedSignatureType::Generic(_) => true,
-                _ => {
-                    // Compare the base object type
-                    self.extract_base_object_type()
-                        .and_then(|t| other.extract_base_object_type().map(|u| t == u))
-                        == Some(true)
-                }
-            },
+            _ => {
+                self.extract_base_object_type()
+                    .and_then(|t| other.extract_base_object_type().map(|u| t == u))
+                    == Some(true)
+            }
         }
     }
 
@@ -244,7 +242,7 @@ impl ToSignatureIndexedType for IndexedSignatureType {
 
                             //Removes the 'L' and ';'
                             let b = &b[1..b.len() - 1];
-                            let class_name_start_index = (match b.find(|c| c == '<') {
+                            let class_name_start_index = (match b.find('<') {
                                 Some(end) => &b[..end], //Removes the type parameters
                                 None => b,
                             })

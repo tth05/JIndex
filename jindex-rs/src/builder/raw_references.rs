@@ -270,11 +270,7 @@ impl RawReferenceBuilder {
         for (target, index) in self.targets {
             targets[index as usize] = Some(target);
         }
-        let mut literals = self
-            .literals
-            .into_iter()
-            .map(|(value, old_id)| (value, old_id))
-            .collect::<Vec<_>>();
+        let mut literals = self.literals.into_iter().collect::<Vec<_>>();
         literals.sort_unstable_by(|left, right| left.0.cmp(&right.0));
         let mut literal_remap = vec![0_u32; literals.len()];
         for (new_id, (_, old_id)) in literals.iter().enumerate() {

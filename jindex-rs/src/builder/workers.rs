@@ -16,10 +16,10 @@ where
     F: (Fn(I) -> anyhow::Result<O>) + Sync,
     I: Sync + Send,
 {
-    Ok(queue
+    queue
         .into_par_iter()
-        .map(|el| func(el))
-        .collect::<anyhow::Result<Vec<O>>>()?)
+        .map(func)
+        .collect::<anyhow::Result<Vec<O>>>()
 }
 
 pub(crate) struct ArchiveSource {
@@ -156,7 +156,7 @@ fn is_multi_release<R: Read + Seek>(archive: &mut ZipArchive<R>) -> anyhow::Resu
         .is_some_and(|value| value.eq_ignore_ascii_case("true")))
 }
 
-fn manifest_attribute<'a>(manifest: &'a [u8], requested_name: &str) -> Option<String> {
+fn manifest_attribute(manifest: &[u8], requested_name: &str) -> Option<String> {
     let text = String::from_utf8_lossy(manifest);
     let mut current_name = None::<&str>;
     let mut current_value = String::new();

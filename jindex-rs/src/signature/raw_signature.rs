@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 impl RawSignatureType {
     pub(super) fn parse_str(input: &str) -> Result<ParseResultData<RawSignatureType>, ParseError> {
-        return RawSignatureType::parse_ascii(input.as_ascii_str()?);
+        RawSignatureType::parse_ascii(input.as_ascii_str()?)
     }
 
     pub(super) fn parse_ascii(
@@ -139,9 +139,9 @@ impl FromStr for RawSignatureType {
     }
 }
 
-impl ToString for RawSignatureType {
-    fn to_string(&self) -> String {
-        match &self {
+impl std::fmt::Display for RawSignatureType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match &self {
             SignatureType::ObjectTypeBounds(inner) => {
                 let (actual_type, type_bounds) = inner.as_ref();
 
@@ -177,13 +177,14 @@ impl ToString for RawSignatureType {
             SignatureType::ObjectPlus(inner) => String::from('+') + &inner.to_string(),
             SignatureType::Array(inner) => String::from('[') + &inner.to_string(),
             _ => unreachable!(),
-        }
+        };
+        f.write_str(&value)
     }
 }
 
-impl ToString for RawTypeParameterData {
-    fn to_string(&self) -> String {
-        self.name.to_string()
+impl std::fmt::Display for RawTypeParameterData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = self.name.to_string()
             + ":"
             + &self
                 .type_bound
@@ -195,7 +196,8 @@ impl ToString for RawTypeParameterData {
                 .unwrap_or(&Vec::new())
                 .iter()
                 .map(|i| i.to_string())
-                .fold(String::new(), |a, b| a + ":" + &b)
+                .fold(String::new(), |a, b| a + ":" + &b);
+        f.write_str(&value)
     }
 }
 
@@ -212,9 +214,9 @@ impl RawClassSignature {
     }
 }
 
-impl ToString for RawClassSignature {
-    fn to_string(&self) -> String {
-        (if self.generic_data.is_some() {
+impl std::fmt::Display for RawClassSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = (if self.generic_data.is_some() {
             String::from('<') + &join_vec(self.generic_data.as_ref()) + ">"
         } else {
             String::new()
@@ -222,7 +224,8 @@ impl ToString for RawClassSignature {
             .super_class
             .as_ref()
             .map_or(String::new(), |s| s.to_string())
-            + &join_vec(self.interfaces.as_ref())
+            + &join_vec(self.interfaces.as_ref());
+        f.write_str(&value)
     }
 }
 
@@ -230,8 +233,12 @@ impl FromStr for RawClassSignature {
     type Err = ParseError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        let generic_data = parse_generic_signature_data(input).ok();
-        let input = unsafe { input.as_ascii_str_unchecked() }; //parse_generic_signature_data validated the input for us
+        let input = input.as_ascii_str()?;
+        let generic_data = if input.as_bytes().first() == Some(&b'<') {
+            Some(parse_generic_signature_data(input.as_str())?)
+        } else {
+            None
+        };
 
         let mut start_index = if let Some(ref result) = generic_data {
             result.0 as usize
@@ -239,7 +246,7 @@ impl FromStr for RawClassSignature {
             0
         };
 
-        let mut other_classes = {
+        let other_classes = {
             let mut parameters = Vec::new();
             while start_index < input.len() {
                 let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
@@ -250,23 +257,26 @@ impl FromStr for RawClassSignature {
             parameters
         };
 
+        let mut other_classes = other_classes.into_iter();
+        let super_class = other_classes.next().ok_or(ParseError::Eof)?;
+        let interfaces: Vec<_> = other_classes.collect();
         Ok(RawClassSignature {
             generic_data: generic_data.map(|v| v.1),
-            super_class: Some(other_classes.remove(0)).filter(|s| {
+            super_class: Some(super_class).filter(|s| {
                 if let SignatureType::Object(name) = s {
                     name.as_bytes() != "java/lang/Object".as_bytes()
                 } else {
                     true
                 }
             }),
-            interfaces: Some(other_classes).filter(|v| !v.is_empty()),
+            interfaces: Some(interfaces).filter(|v| !v.is_empty()),
         })
     }
 }
 
-impl ToString for RawMethodSignature {
-    fn to_string(&self) -> String {
-        (if self.generic_data.is_some() {
+impl std::fmt::Display for RawMethodSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = (if self.generic_data.is_some() {
             String::from('<') + &join_vec(self.generic_data()) + ">"
         } else {
             String::new()
@@ -282,7 +292,8 @@ impl ToString for RawMethodSignature {
                         .collect::<Vec<_>>()
                         .join("")
                 })
-                .unwrap_or_default()
+                .unwrap_or_default();
+        f.write_str(&value)
     }
 }
 
@@ -291,8 +302,12 @@ impl RawMethodSignature {
         input: &'a str,
         exception_attribute_supplier: &dyn Fn() -> Option<&'a Vec<Cow<'a, str>>>,
     ) -> Result<Self, ParseError> {
-        let generic_data = parse_generic_signature_data(input).ok();
-        let input = unsafe { input.as_ascii_str_unchecked() }; //parse_generic_signature_data validated the input for us
+        let input = input.as_ascii_str()?;
+        let generic_data = if input.as_bytes().first() == Some(&b'<') {
+            Some(parse_generic_signature_data(input.as_str())?)
+        } else {
+            None
+        };
 
         let mut start_index = if let Some(ref result) = generic_data {
             result.0 as usize
@@ -323,7 +338,7 @@ impl RawMethodSignature {
         start_index += return_type.0 as usize;
 
         let mut exceptions = Vec::new();
-        while input.get_ascii(start_index).map_or(false, |ch| ch == '^') {
+        while input.get_ascii(start_index).is_some_and(|ch| ch == '^') {
             start_index += 1; //Skip '^'
 
             let parse_result = SignatureType::parse_ascii(&input[start_index..])?;
@@ -358,4 +373,31 @@ where
         .iter()
         .map(|t| t.to_string())
         .fold(String::new(), |a, b| a + &b)
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn unicode_signatures_are_checked_before_ascii_access() {
+        assert!(matches!(
+            RawClassSignature::from_str("<Ä:Ljava/lang/Object;>Ljava/lang/Object;"),
+            Err(ParseError::AsciiStringError(_))
+        ));
+        assert!(matches!(
+            RawMethodSignature::from_data("<Ä:Ljava/lang/Object;>()V", &|| None),
+            Err(ParseError::AsciiStringError(_))
+        ));
+        assert!(matches!(
+            RawSignatureType::from_str("TÄ;"),
+            Err(ParseError::AsciiStringError(_))
+        ));
+    }
+
+    #[test]
+    fn class_signatures_require_a_superclass() {
+        assert!(RawClassSignature::from_str("").is_err());
+        assert!(RawClassSignature::from_str("<T:Ljava/lang/Object;>").is_err());
+    }
 }

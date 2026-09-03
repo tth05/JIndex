@@ -1,4 +1,3 @@
-#![recursion_limit = "40"]
 #![deny(warnings)]
 
 use ascii::{AsciiChar, AsciiStr};

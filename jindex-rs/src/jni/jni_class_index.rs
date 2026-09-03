@@ -49,13 +49,19 @@ macro_rules! java_to_ascii_string {
 
 #[no_mangle]
 /// # Safety
-/// The pointer field has to be valid...
+/// A nonzero pointer must be a live allocation returned by `Box::into_raw` for
+/// this index. Java's cleanup action claims it at most once after all operations
+/// have released the lifecycle read lock, or after the owner becomes unreachable.
 pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroyPointer(
-    _env: EnvUnowned<'_>,
+    mut _env: EnvUnowned<'_>,
     _class: JObject,
     pointer: jlong,
 ) {
-    let _class_index = Box::from_raw(pointer as *mut ClassIndex);
+    with_jni_env!(_env, {
+        if pointer != 0 {
+            drop(Box::from_raw(pointer as *mut ClassIndex));
+        }
+    })
 }
 
 #[no_mangle]

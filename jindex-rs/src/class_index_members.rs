@@ -263,7 +263,8 @@ impl IndexedMethod {
     ) -> bool {
         let invalid_candidate = ACC_PRIVATE | ACC_STATIC | ACC_BRIDGE;
         let invalid_base = ACC_PRIVATE | ACC_STATIC | ACC_FINAL;
-        if self.access_flags & invalid_candidate != 0
+        if self.name_index != base_method.name_index
+            || self.access_flags & invalid_candidate != 0
             || base_method.access_flags & invalid_base != 0
         {
             return false;
@@ -274,9 +275,7 @@ impl IndexedMethod {
             return false;
         }
 
-        self.name_index == base_method.name_index
-            && self.method_signature.parameter_count()
-                == base_method.method_signature.parameter_count()
+        self.method_signature.parameter_count() == base_method.method_signature.parameter_count()
             && self
                 .method_signature
                 .parameters()

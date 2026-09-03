@@ -55,6 +55,8 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The class, or {@code null} if no class matching the input was found
      */
     public IndexedClass findClass(String packageName, String className) {
+        Objects.requireNonNull(packageName, "packageName");
+        Objects.requireNonNull(className, "className");
         return executeWhileOpen(() -> findClassNative(packageName, className));
     }
 
@@ -543,12 +545,12 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
         WeakReference<ClassIndex> ownerReference = new WeakReference<>(this);
         OWNERS.put(pointer, ownerReference);
+        NativeCleanup cleanup = new NativeCleanup(pointer, ownerReference);
         try {
-            this.cleanable = CLEANER.register(this, new NativeCleanup(pointer, ownerReference));
+            this.cleanable = CLEANER.register(this, cleanup);
             this.destroyed = false;
         } catch (RuntimeException | Error e) {
-            OWNERS.remove(pointer, ownerReference);
-            destroyPointer(pointer);
+            cleanup.run();
             clearClassIndexPointer();
             throw e;
         }
@@ -566,8 +568,9 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
     private record NativeCleanup(long pointer, WeakReference<ClassIndex> ownerReference) implements Runnable {
         @Override
         public void run() {
-            OWNERS.remove(this.pointer, this.ownerReference);
-            destroyPointer(this.pointer);
+            if (OWNERS.remove(this.pointer, this.ownerReference)) {
+                destroyPointer(this.pointer);
+            }
         }
     }
 
