@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'com.github.tth05'
-version = providers.gradleProperty('jindexVersion').orElse('1.1.0-SNAPSHOT').get()
+version = providers.gradleProperty('jindexVersion').orElse('2.0.0').get()
 
 repositories {
     mavenCentral()
