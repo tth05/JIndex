@@ -14,33 +14,12 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, IndexedSignatureType};
 
 const SNAPSHOT_MAGIC: &[u8; 8] = b"JINDEX\0\0";
-const SNAPSHOT_VERSION: u16 = 5;
+// Older snapshots contain references to shadowed interface declarations.
+const SNAPSHOT_VERSION: u16 = 6;
 const SNAPSHOT_HEADER_LENGTH: usize = SNAPSHOT_MAGIC.len() + size_of::<u16>();
 const SNAPSHOT_COMPRESSION_LEVEL: i32 = 3;
 
-thread_local! {
-    static SIGNATURE_DEPTH: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
-}
-
-struct SignatureDepth;
-
-impl SignatureDepth {
-    fn enter() -> Option<Self> {
-        SIGNATURE_DEPTH.with(|depth| {
-            if depth.get() >= 256 {
-                return None;
-            }
-            depth.set(depth.get() + 1);
-            Some(Self)
-        })
-    }
-}
-
-impl Drop for SignatureDepth {
-    fn drop(&mut self) {
-        SIGNATURE_DEPTH.with(|depth| depth.set(depth.get() - 1));
-    }
-}
+use crate::signature::nesting::SignatureDepth;
 
 pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();

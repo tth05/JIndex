@@ -154,7 +154,6 @@ fn resolve_methods(
             &mut results,
         );
     }
-    results.sort_unstable();
-    results.dedup();
-    results
+    retain_maximal_interface_methods(&mut results, hierarchy);
+    results.into_iter().map(|method| method.ordinal).collect()
 }

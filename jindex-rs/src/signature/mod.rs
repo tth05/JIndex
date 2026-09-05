@@ -1,5 +1,6 @@
 mod generic_data_parser;
 pub mod indexed_signature;
+pub(crate) mod nesting;
 pub mod raw_signature;
 
 use ascii::{AsAsciiStrError, AsciiStr};
@@ -307,6 +308,7 @@ where
 }
 
 pub enum ParseError {
+    NestingLimit,
     Eof,
     AsciiStringError(AsAsciiStrError),
     UnexpectedChar(char),
@@ -336,6 +338,7 @@ impl ParseError {
     fn as_str(&self) -> String {
         use self::ParseError::*;
         match self {
+            NestingLimit => "Signature nesting exceeds the supported limit of 256".to_owned(),
             UnexpectedChar(c) => format!("Unexpected char '{}'", c),
             AsciiStringError(e) => e.to_string(),
             Eof => "End of input reached unexpectedly".to_owned(),

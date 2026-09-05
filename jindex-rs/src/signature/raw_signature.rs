@@ -16,6 +16,7 @@ impl RawSignatureType {
     pub(super) fn parse_ascii(
         input: &AsciiStr,
     ) -> Result<ParseResultData<RawSignatureType>, ParseError> {
+        let _depth = super::nesting::SignatureDepth::enter().ok_or(ParseError::NestingLimit)?;
         if let Some(first_char) = input.get_ascii(0) {
             let result = match first_char {
                 AsciiChar::Z => (1, SignatureType::Primitive(SignaturePrimitive::Boolean)),
@@ -89,12 +90,12 @@ impl RawSignatureType {
         let base_type = unsafe { CompactString::from_utf8_unchecked(&input[..special_char_index]) };
 
         //Parse the generic type bounds if there are any
-        let sig = match SignatureType::parse_generic_type_bounds(&input[special_char_index..]) {
-            Ok(data) => {
-                special_char_index += data.0 as usize;
-                SignatureType::ObjectTypeBounds(Box::new((base_type, data.1)))
-            }
-            Err(_) => SignatureType::Object(base_type),
+        let sig = if input[special_char_index] == '<' {
+            let data = SignatureType::parse_generic_type_bounds(&input[special_char_index..])?;
+            special_char_index += data.0 as usize;
+            SignatureType::ObjectTypeBounds(Box::new((base_type, data.1)))
+        } else {
+            SignatureType::Object(base_type)
         };
 
         Ok((special_char_index as u16 + 1, sig))
@@ -378,6 +379,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn excessive_signature_nesting_is_rejected_without_poisoning_later_parses() {
+        assert!(RawSignatureType::from_str(&format!("{}I", "[".repeat(300))).is_err());
+        let generic = format!(
+            "{}Ljava/lang/String;{}",
+            "Ljava/util/List<".repeat(300),
+            ">;".repeat(300)
+        );
+        assert!(RawSignatureType::from_str(&generic).is_err());
+        assert!(RawSignatureType::from_str("[Ljava/lang/String;").is_ok());
+        assert!(RawSignatureType::from_str(&format!("{}I", "[".repeat(255))).is_ok());
+    }
 
     #[test]
     fn unicode_signatures_are_checked_before_ascii_access() {

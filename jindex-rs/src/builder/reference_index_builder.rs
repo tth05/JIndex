@@ -40,7 +40,7 @@ impl ResolvedTarget {
 struct ResolutionScratch {
     visited: FxHashSet<u32>,
     interfaces: Vec<u32>,
-    results: Vec<u32>,
+    results: Vec<MemberLookupEntry>,
 }
 
 struct TargetResolver<'a> {
@@ -103,14 +103,13 @@ impl TargetResolver<'_> {
                         &mut scratch.results,
                     );
                 }
-                scratch.results.sort_unstable();
-                scratch.results.dedup();
+                retain_maximal_interface_methods(&mut scratch.results, self.hierarchy);
                 match scratch.results.as_slice() {
                     [] => ResolvedTarget::None,
-                    [method] => ResolvedTarget::One(base + method),
-                    methods => {
-                        ResolvedTarget::Many(methods.iter().map(|index| base + index).collect())
-                    }
+                    [method] => ResolvedTarget::One(base + method.ordinal),
+                    methods => ResolvedTarget::Many(
+                        methods.iter().map(|method| base + method.ordinal).collect(),
+                    ),
                 }
             }
         }
@@ -155,6 +154,7 @@ struct MemberLookupEntry {
     name: u32,
     descriptor: u32,
     ordinal: u32,
+    access_flags: u16,
 }
 
 #[derive(Default)]
@@ -231,6 +231,7 @@ pub(super) fn build_reference_index<'a>(
                     .get(field.jvm_descriptor.as_str())
                     .expect("Indexed field descriptor is missing from the descriptor pool map"),
                 ordinal: field_offsets[owner] + member_index as u32,
+                access_flags: field.access_flags,
             });
         }
         for (member_index, method) in class_info.methods.iter().enumerate() {
@@ -243,6 +244,7 @@ pub(super) fn build_reference_index<'a>(
                     .get(method.jvm_descriptor.as_str())
                     .expect("Indexed method descriptor is missing from the descriptor pool map"),
                 ordinal: method_offsets[owner] + member_index as u32,
+                access_flags: method.access_flags,
             });
         }
     }
@@ -715,14 +717,16 @@ fn collect_interface_methods(
     methods: &[MemberLookupEntry],
     hierarchy: &[HierarchyInfo],
     visited: &mut FxHashSet<u32>,
-    output: &mut Vec<u32>,
+    output: &mut Vec<MemberLookupEntry>,
 ) {
     if !visited.insert(interface) {
         return;
     }
-    if let Some(method) = find_member(methods, interface, name, descriptor) {
-        output.push(method);
-        return;
+    if let Some(method) = find_member_entry(methods, interface, name, descriptor) {
+        if method.access_flags & (0x0002 | 0x0008) == 0 {
+            output.push(*method);
+            return;
+        }
     }
     for parent in &hierarchy[interface as usize].interfaces {
         collect_interface_methods(
@@ -731,16 +735,58 @@ fn collect_interface_methods(
     }
 }
 
+fn retain_maximal_interface_methods(
+    methods: &mut Vec<MemberLookupEntry>,
+    hierarchy: &[HierarchyInfo],
+) {
+    if methods.len() < 2 {
+        return;
+    }
+    // An inherited declaration is shadowed by the same signature in a subinterface.
+    // Walk only candidates' ancestor interfaces, never the full class graph per reference.
+    let mut supers = FxHashSet::default();
+    let mut pending = Vec::new();
+    for method in methods.iter() {
+        pending.extend_from_slice(&hierarchy[method.owner as usize].interfaces);
+    }
+    while let Some(interface) = pending.pop() {
+        if supers.insert(interface) {
+            pending.extend_from_slice(&hierarchy[interface as usize].interfaces);
+        }
+    }
+    methods.retain(|method| !supers.contains(&method.owner));
+    methods.sort_unstable_by_key(|method| method.ordinal);
+    methods.dedup_by_key(|method| method.ordinal);
+    let mut defaults = methods
+        .iter()
+        .filter(|method| method.access_flags & 0x0400 == 0);
+    if let Some(selected) = defaults.next().copied() {
+        if defaults.next().is_none() {
+            methods.clear();
+            methods.push(selected);
+        }
+    }
+}
+
+fn find_member_entry(
+    members: &[MemberLookupEntry],
+    owner: u32,
+    name: u32,
+    descriptor: u32,
+) -> Option<&MemberLookupEntry> {
+    members
+        .binary_search_by_key(&(owner, name, descriptor), member_key)
+        .ok()
+        .map(|index| &members[index])
+}
+
 fn find_member(
     members: &[MemberLookupEntry],
     owner: u32,
     name: u32,
     descriptor: u32,
 ) -> Option<u32> {
-    members
-        .binary_search_by_key(&(owner, name, descriptor), member_key)
-        .ok()
-        .map(|index| members[index].ordinal)
+    find_member_entry(members, owner, name, descriptor).map(|member| member.ordinal)
 }
 
 fn member_key(member: &MemberLookupEntry) -> (u32, u32, u32) {

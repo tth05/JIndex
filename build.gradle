@@ -44,6 +44,16 @@ tasks.register('benchmarkRuntimeCorpus', JavaExec) {
     }
 }
 
+tasks.register('verifyRuntimeMemberReferences', JavaExec) {
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.github.tth05.jindex.RuntimeReferenceOracle'
+    maxHeapSize = '4g'
+    def manifest = providers.gradleProperty('benchmarkManifest')
+    def output = providers.gradleProperty('benchmarkOutput')
+    doFirst { args manifest.get(), output.get() }
+}
+
 def rustProjectDirectory = file("${projectDir}/jindex-rs")
 def nativeLibrary = file("${rustProjectDirectory}/target/release/jindex_rs.dll")
 def generatedNativeResources = layout.buildDirectory.dir('generated-resources/jindex')
