@@ -595,15 +595,6 @@ public class BasicTest {
     }
 
     @Test
-    public void testCloseIsIdempotentAndGuardsIndexOperations() {
-        ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
-        closedIndex.close();
-        assertDoesNotThrow(closedIndex::close);
-        assertTrue(closedIndex.isDestroyed());
-        assertClosed(() -> closedIndex.findClass("java/lang", "String"));
-    }
-
-    @Test
     public void testRetainedChildrenAreGuardedAfterClose() {
         ClassIndex closedIndex = ClassIndex.fromJars(Collections.singletonList("src/test/resources/Samples.jar"));
         try {

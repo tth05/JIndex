@@ -50,6 +50,7 @@ final class ApiContractTest {
         assertTrue(index.isDestroyed());
         assertDoesNotThrow(index::close);
         assertThrows(IllegalStateException.class, index::getStatistics);
+        assertThrows(IllegalStateException.class, () -> index.findClass(Fixture.class.getName()));
     }
 
     private static ClassIndex fixtureIndex() throws Exception {

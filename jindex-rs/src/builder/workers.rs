@@ -1,6 +1,6 @@
 use crate::builder::{BuildTimeInfo, ClassIndexBuilder, ClassInfo};
 use crate::class_index::ClassIndex;
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::fs::File;
@@ -104,6 +104,7 @@ fn process_jar_worker(source: ArchiveSource) -> anyhow::Result<Vec<ClassInfo>> {
     Ok(output)
 }
 
+#[cfg(test)]
 pub fn create_class_index_from_jars(
     jar_names: Vec<String>,
     target_java_release: u32,
@@ -113,7 +114,7 @@ pub fn create_class_index_from_jars(
         .enumerate()
         .map(|(index, file_name)| {
             let input_order = u32::try_from(index)
-                .map_err(|_| anyhow!("More than 4294967295 archive sources"))?;
+                .map_err(|_| anyhow::anyhow!("More than 4294967295 archive sources"))?;
             Ok(ArchiveSource {
                 source_id: input_order,
                 input_order,
@@ -191,6 +192,7 @@ fn process_class(bytes: &[u8], source_id: u32, input_order: u32) -> anyhow::Resu
     super::classfile_parser::parse_class(bytes, source_id, input_order)
 }
 
+#[cfg(test)]
 pub fn create_class_index_from_bytes(
     class_bytes: Vec<Vec<u8>>,
 ) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
@@ -199,7 +201,7 @@ pub fn create_class_index_from_bytes(
         .enumerate()
         .map(|(index, bytes)| {
             let input_order = u32::try_from(index)
-                .map_err(|_| anyhow!("More than 4294967295 direct class sources"))?;
+                .map_err(|_| anyhow::anyhow!("More than 4294967295 direct class sources"))?;
             Ok(DirectSource {
                 source_id: input_order,
                 input_order,

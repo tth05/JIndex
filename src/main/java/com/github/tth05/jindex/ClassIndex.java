@@ -420,10 +420,6 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
         return destroyed;
     }
 
-    private native BuildTimeInfo createClassIndexFromBytes(List<byte[]> classes);
-
-    private native BuildTimeInfo createClassIndexFromJars(List<String> classes, int targetJavaRelease);
-
     private native BuildTimeInfo createClassIndexFromExplicitSources(
             List<String> jarFilePaths,
             int[] jarSourceIds,
@@ -578,13 +574,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The class index
      */
     public static ClassIndex fromJars(List<String> jarFilePaths) {
-        ClassIndex c = new ClassIndex();
-        c.buildTimeInfo = c.createClassIndexFromJars(
-                jarFilePaths,
-                IndexBuildOptions.currentRuntime().targetJavaRelease()
-        );
-        c.registerCleanup();
-        return c;
+        return fromSources(jarFilePaths, List.of());
     }
 
     /**
@@ -594,10 +584,7 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
      * @return The class index
      */
     public static ClassIndex fromBytes(List<byte[]> classes) {
-        ClassIndex c = new ClassIndex();
-        c.buildTimeInfo = c.createClassIndexFromBytes(classes);
-        c.registerCleanup();
-        return c;
+        return fromSources(List.of(), classes);
     }
 
     /**

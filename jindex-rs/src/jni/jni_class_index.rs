@@ -1,7 +1,4 @@
-use crate::builder::workers::{
-    create_class_index_from_bytes, create_class_index_from_jars, create_class_index_from_sources,
-    ArchiveSource, DirectSource,
-};
+use crate::builder::workers::{create_class_index_from_sources, ArchiveSource, DirectSource};
 use crate::builder::BuildTimeInfo;
 use anyhow::{anyhow, ensure};
 use ascii::{AsAsciiStr, AsciiStr, IntoAsciiString};
@@ -61,88 +58,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_destroyPoi
         if pointer != 0 {
             drop(Box::from_raw(pointer as *mut ClassIndex));
         }
-    })
-}
-
-#[no_mangle]
-/// # Safety
-/// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromBytes(
-    mut env: EnvUnowned<'_>,
-    this: JObject,
-    byte_array_list: JObject,
-) -> jobject {
-    with_jni_env!(env, {
-        propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
-
-        let java_list = env.cast_local::<JList>(byte_array_list).unwrap();
-        let list_size = java_list.size(env).unwrap();
-        let mut class_bytes = Vec::with_capacity(list_size as usize);
-        for index in 0..list_size {
-            let ar = java_list.get(env, index).unwrap();
-            let byte_array = env.cast_local::<JByteArray>(ar).unwrap();
-            class_bytes.push(env.convert_byte_array(&byte_array).unwrap());
-        }
-
-        let (info, class_index) = propagate_error!(
-            env,
-            create_class_index_from_bytes(class_bytes),
-            JObject::null().into_raw()
-        );
-
-        env.set_field(
-            &this,
-            jni_str!("classIndexPointer"),
-            jni_sig!("J"),
-            JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
-        )
-        .expect("Unable to set field");
-
-        convert_build_time_info(env, info)
-    })
-}
-
-#[no_mangle]
-/// # Safety
-/// The pointer field has to be valid...
-pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_createClassIndexFromJars(
-    mut env: EnvUnowned<'_>,
-    this: JObject,
-    jar_names_list: JObject,
-    target_java_release: jint,
-) -> jobject {
-    with_jni_env!(env, {
-        propagate_error!(env, init_field_ids(env), JObject::null().into_raw());
-
-        let java_list = env.cast_local::<JList>(jar_names_list).unwrap();
-        let list_size = java_list.size(env).unwrap();
-        let mut jar_names = Vec::with_capacity(list_size as usize);
-        for index in 0..list_size {
-            let ar = java_list.get(env, index).unwrap();
-            let string = env.cast_local::<JString>(ar).unwrap();
-            jar_names.push(string.try_to_string(env).expect("Not a string"));
-        }
-        let target_java_release = propagate_error!(
-            env,
-            require_positive_java_release(target_java_release),
-            JObject::null().into_raw()
-        );
-
-        let (info, class_index) = propagate_error!(
-            env,
-            create_class_index_from_jars(jar_names, target_java_release),
-            JObject::null().into_raw()
-        );
-
-        env.set_field(
-            &this,
-            jni_str!("classIndexPointer"),
-            jni_sig!("J"),
-            JValue::Long(Box::into_raw(Box::new(class_index)) as jlong),
-        )
-        .expect("Unable to set field");
-
-        convert_build_time_info(env, info)
     })
 }
 
