@@ -6,3 +6,5 @@ out
 *.h
 *.jar
 *.txt
+.codex/
+.codex-remote-attachments/
