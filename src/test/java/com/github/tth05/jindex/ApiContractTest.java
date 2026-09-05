@@ -44,11 +44,10 @@ final class ApiContractTest {
     }
 
     @Test
-    void destroyRemainsAnIdempotentCloseAlias() throws Exception {
+    void closeIsIdempotentAndRejectsSubsequentQueries() throws Exception {
         ClassIndex index = fixtureIndex();
-        index.destroy();
+        index.close();
         assertTrue(index.isDestroyed());
-        assertDoesNotThrow(index::destroy);
         assertDoesNotThrow(index::close);
         assertThrows(IllegalStateException.class, index::getStatistics);
     }

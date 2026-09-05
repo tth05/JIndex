@@ -1,81 +1,40 @@
 # JIndex
 
-Java class file indexing library, implemented in Rust with JNI bindings. The implementation was made in Rust to greatly
-reduce memory consumption and increase indexing speed.
+JIndex builds an immutable index of JVM class sources. Rust owns the index and Java 21 accesses it through JNI. The packaged native library currently targets Windows x64.
 
-## Features
+## Indexed data and queries
 
-The current implementation supports indexing of the following data:
+The index exposes packages, classes, fields and methods, including JVM descriptors, generic signatures, source IDs, nesting and declaration modifiers. Queries cover class names and binary names, packages, field/method symbols, semantic references, string literals and hierarchy relationships. Search pages report truncation; symbol and reference queries can select caller-assigned source IDs.
 
-- Packages
-    - Package name
-    - Parent package
-    - Contained classes
-    - Sub-packages
-- Classes
-    - Package
-    - Name and Source Name (for inner classes)
-    - Super class
-    - Implemented interfaces
-    - Modifiers
-    - Inner class type (member, anonymous, local)
-    - Generic signature
-    - Enclosing class (and method)
-    - Inner classes with the member type
-    - Methods
-        - Name
-        - Modifiers
-        - Generic signature and descriptor
-        - Exceptions
-        - Parameter types
-        - Return type
-    - Fields
-        - Name
-        - Generic signature and descriptor
+Class sources can be archives or loose class bytes. A source ID identifies input within one index; the caller owns its meaning. Snapshots can be saved and reopened. Objects and IDs obtained from an index expire when that index closes. Use try-with-resources; `close()` is idempotent and releases native memory.
 
-The following global operations are supported: 
-- Find a class
-- Find classes by name matching a query
-- Find a package
-- Find packages by prefix
-- Find implementations of a class
-- Find implementations of a method
-- Find base methods of a method
+Name lookup uses the native ASCII representation; this is not a promise of unrestricted Unicode identifier support. Generic signatures remain available as strings. String-literal queries represent semantic literal occurrences rather than every UTF-8 constant-pool entry. See [the domain model](CONTEXT.md) and [the implementation plan](docs/index-1.1-plan.md) for the precise scope and remaining acceptance work.
 
-After the indexing operation is complete, no further modifications to the class index are possible. The whole library
-only works with ASCII strings. Supplying a non ASCII string will result in an error, or it will be ignored.
+## Build and dependency
 
-NOTE: The Java bindings are incomplete and don't expose all data as usable objects (e.g. generic signatures are only
-available as strings).
+Install a full JDK 21 and the Rust toolchain pinned in [rust-toolchain.toml](jindex-rs/rust-toolchain.toml), including Clippy and rustfmt. On Windows:
 
-## Performance
+```powershell
+.\gradlew.bat clean build publishToMavenLocal --warning-mode fail
+```
 
-JIndex was made with [TotalDebugCompanion](https://github.com/Minecraft-TA/TotalDebugCompanion) in mind with the goal
-to be fast and also be able to fit the indexed data nicely into memory.
+The wrapper builds the locked native dependency graph, stages the DLL under `build/`, packages the Java API, and runs Java tests, native tests, formatting and Clippy. Push/PR builds run the same checks on Windows.
 
-It has been tested with a set of around 330 jars containing 175k classes, 1.2 million methods and 500k fields. These
-take roughly 3 seconds to index on modern CPU, a third of this time is spent on file reading. The resulting index amounts
-to 256MB of memory. When serialized, the index becomes a 13MB file (54MB uncompressed) with a deserialization time of
-500ms.
+The current source defaults to `1.1.0-SNAPSHOT` for local development. Release builds set `-PjindexVersion=<version>`. Publish the selected immutable release before using it in public consumers:
 
-## Usage
-
-If anyone wants to use this (not recommended), the java bindings are available on packagecloud. Check the tags for the
-newest version.
-
-```grooy
+```groovy
 repositories {
-    maven { url "https://packagecloud.io/tth05/repo/maven2" }
+    maven { url = uri('https://packagecloud.io/tth05/repo/maven2') }
 }
-
 dependencies {
-    implementation("com.github.tth05:jindex:VERSION")
+    implementation 'com.github.tth05:jindex:RELEASE_VERSION'
 }
 ```
 
-## Development
+Replace `RELEASE_VERSION` with a published release. Local coordinated consumers use Maven Local explicitly until that publication exists.
 
-- Clone the repo
-- Install Java 21 and Rust 1.97.1
-- Run `./gradlew build`; the build compiles the locked native dependency graph, stages the DLL under `build/`, then packages and tests the Java API
-- `./gradlew check` also runs `cargo fmt --check`, `cargo clippy` with warnings denied, and the native test suite; all three must pass
+## Performance and acceptance
+
+Use [the benchmark record](docs/index-1.1-benchmark.md) for measured results, corpus hashes, source revisions and commands. Its stages measure different index contents and should not be compared as one universal speed or memory claim.
+
+The runtime corpus includes 175,265 class inputs from ATM10 To the Sky and a Java 21 runtime. The benchmark records build/load timing, query latency and process working set. A full corpus run is separate from ordinary CI because its input archives are external. Before a stable release, repeat it with the recorded manifest and candidate bytes. Independent ASM extraction parity and the remaining malformed-input acceptance cases are still open in the release audit; the existing Rust resolver comparison is not an independent extractor.

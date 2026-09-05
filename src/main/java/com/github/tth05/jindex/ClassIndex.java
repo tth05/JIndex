@@ -394,12 +394,8 @@ public class ClassIndex extends ClassIndexChildObject implements AutoCloseable {
 
     /**
      * Drops all natively managed memory used by this class index. This method is idempotent. Objects obtained from
-     * this index must not be used after it is destroyed.
+     * this index must not be used after it is closed.
      */
-    public void destroy() {
-        close();
-    }
-
     @Override
     public void close() {
         var writeLock = this.lifecycleLock.writeLock();
