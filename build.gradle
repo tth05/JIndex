@@ -107,10 +107,20 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             from components.java
+            pom {
+                name = 'JIndex'
+                description = 'Native-backed Java class, member, hierarchy and reference indexing.'
+                url = 'https://github.com/tth05/JIndex'
+                scm {
+                    url = 'https://github.com/tth05/JIndex'
+                    connection = 'scm:git:https://github.com/tth05/JIndex.git'
+                }
+            }
         }
     }
     repositories {
         maven {
+            name = 'packagecloud'
             url = "https://packagecloud.io/tth05/repo/java/maven2/"
             credentials {
                 username = System.getenv("PACKAGECLOUD_TOKEN")
