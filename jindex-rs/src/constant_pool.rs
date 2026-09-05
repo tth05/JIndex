@@ -23,6 +23,16 @@ where
 }
 
 impl ClassIndexConstantPool {
+    pub(crate) fn entry_offsets(&self) -> rustc_hash::FxHashSet<u32> {
+        let mut entries = rustc_hash::FxHashSet::default();
+        let mut offset = 0;
+        while offset < self.string_data.len() {
+            entries.insert(offset as u32);
+            offset += 1 + usize::from(self.string_data[offset]);
+        }
+        entries
+    }
+
     fn validate(string_data: &[u8]) -> std::result::Result<(), &'static str> {
         let mut offset = 0;
         while let Some(length) = string_data.get(offset) {

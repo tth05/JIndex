@@ -10,6 +10,78 @@ pub struct PackageIndex {
 }
 
 impl PackageIndex {
+    pub(crate) fn validate_snapshot(
+        &self,
+        pool: &ClassIndexConstantPool,
+        entries: &rustc_hash::FxHashSet<u32>,
+        classes: &[crate::class_index_members::IndexedClass],
+    ) -> Result<()> {
+        use anyhow::ensure;
+        ensure!(
+            !self.indexed_packages.is_empty(),
+            "Snapshot has no root package"
+        );
+        let mut seen_packages = vec![false; self.indexed_packages.len()];
+        let mut seen_classes = vec![false; classes.len()];
+        seen_packages[0] = true;
+        for (index, package) in self.indexed_packages.iter().enumerate() {
+            ensure!(
+                entries.contains(&package.package_name_index),
+                "Invalid package name offset"
+            );
+            if index == 0 {
+                ensure!(
+                    package.package_name(pool).is_empty() && package.previous_package_index == 0,
+                    "Invalid root package"
+                );
+            } else {
+                ensure!(
+                    (package.previous_package_index as usize) < index,
+                    "Invalid package parent index"
+                );
+            }
+            let mut names = rustc_hash::FxHashSet::default();
+            for child in &package.sub_packages_indices {
+                let child = *child as usize;
+                ensure!(
+                    child < self.indexed_packages.len() && !seen_packages[child],
+                    "Invalid or duplicate child package index"
+                );
+                let child_package = &self.indexed_packages[child];
+                ensure!(
+                    child_package.previous_package_index as usize == index,
+                    "Package parent/child mismatch"
+                );
+                ensure!(
+                    entries.contains(&child_package.package_name_index),
+                    "Invalid child package name offset"
+                );
+                ensure!(
+                    names.insert(child_package.package_name(pool)),
+                    "Duplicate child package name"
+                );
+                seen_packages[child] = true;
+            }
+            for class in package.sub_classes_indices.borrow().iter().copied() {
+                let class = class as usize;
+                ensure!(
+                    class < classes.len() && !seen_classes[class],
+                    "Invalid or duplicate package class index"
+                );
+                ensure!(
+                    classes[class].package_index() as usize == index,
+                    "Class/package mismatch"
+                );
+                seen_classes[class] = true;
+            }
+        }
+        ensure!(
+            seen_packages.iter().all(|seen| *seen) && seen_classes.iter().all(|seen| *seen),
+            "Snapshot contains orphan packages or classes"
+        );
+        Ok(())
+    }
+
     pub(crate) fn new(constant_pool: &mut ClassIndexConstantPool) -> Result<Self> {
         Ok(Self {
             indexed_packages: vec![IndexedPackage::new(constant_pool.add_string(b"")?, 0)],

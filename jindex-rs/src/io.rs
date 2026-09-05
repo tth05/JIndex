@@ -18,6 +18,30 @@ const SNAPSHOT_VERSION: u16 = 5;
 const SNAPSHOT_HEADER_LENGTH: usize = SNAPSHOT_MAGIC.len() + size_of::<u16>();
 const SNAPSHOT_COMPRESSION_LEVEL: i32 = 3;
 
+thread_local! {
+    static SIGNATURE_DEPTH: std::cell::Cell<u16> = const { std::cell::Cell::new(0) };
+}
+
+struct SignatureDepth;
+
+impl SignatureDepth {
+    fn enter() -> Option<Self> {
+        SIGNATURE_DEPTH.with(|depth| {
+            if depth.get() >= 256 {
+                return None;
+            }
+            depth.set(depth.get() + 1);
+            Some(Self)
+        })
+    }
+}
+
+impl Drop for SignatureDepth {
+    fn drop(&mut self) {
+        SIGNATURE_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
+}
+
 pub fn load_class_index_from_file(path: String) -> anyhow::Result<(BuildTimeInfo, ClassIndex)> {
     let now = Instant::now();
     let archive = ZipArchive::new(OpenOptions::new().read(true).open(path)?)?;
@@ -122,12 +146,13 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        Ok(ClassIndex::new(
-            reader.read_value()?,
-            reader.read_value()?,
-            reader.read_value()?,
-            reader.read_value()?,
-        ))
+        let pool = reader.read_value()?;
+        let packages = reader.read_value()?;
+        let classes: Vec<IndexedClass> = reader.read_value()?;
+        let semantic = reader.read_value()?;
+        crate::snapshot_validation::validate(&pool, &packages, &classes, &semantic)
+            .map_err(|error| speedy::Error::custom(format!("Invalid JIndex snapshot: {error}")))?;
+        Ok(ClassIndex::new(pool, packages, classes, semantic))
     }
 }
 
@@ -223,6 +248,9 @@ where
     C: Context,
 {
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let _depth = SignatureDepth::enter().ok_or_else(|| {
+            speedy::Error::custom("Snapshot signature nesting exceeds 256 levels")
+        })?;
         Ok(match reader.read_u8()? {
             0 => IndexedSignatureType::Unresolved,
             1 => IndexedSignatureType::Primitive(match reader.read_u8()? {
@@ -382,6 +410,113 @@ mod tests {
         bytes.extend_from_slice(&SNAPSHOT_VERSION.to_le_bytes());
         index.write_to_stream(&mut bytes).unwrap();
         bytes
+    }
+
+    #[test]
+    fn valid_zip_crc_does_not_make_invalid_snapshot_ranges_valid() {
+        use crate::semantic_index::{DescriptorPool, ReferenceIndexData, SemanticIndex};
+        for (sources, field_offsets, reference_offsets) in [
+            (vec![7], vec![0], vec![0]),
+            (vec![], vec![1], vec![0]),
+            (vec![], vec![0], vec![1]),
+        ] {
+            let mut pool = crate::constant_pool::ClassIndexConstantPool::new(0);
+            let packages = crate::package_index::PackageIndex::new(&mut pool).unwrap();
+            let semantic = SemanticIndex::new(
+                sources,
+                DescriptorPool::default(),
+                field_offsets,
+                vec![0],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                ReferenceIndexData {
+                    offsets: reference_offsets,
+                    literal_offsets: vec![0],
+                    literal_posting_offsets: vec![0],
+                    ..Default::default()
+                },
+            );
+            let mut payload = SNAPSHOT_MAGIC.to_vec();
+            payload.extend_from_slice(&SNAPSHOT_VERSION.to_le_bytes());
+            (pool, packages, Vec::<IndexedClass>::new(), semantic)
+                .write_to_stream(&mut payload)
+                .unwrap();
+            let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+            zip.start_file(
+                "index",
+                FileOptions::default().compression_method(CompressionMethod::Zstd),
+            )
+            .unwrap();
+            zip.write_all(&payload).unwrap();
+            let bytes = zip.finish().unwrap().into_inner();
+            let result = std::panic::catch_unwind(|| {
+                read_snapshot_archive(ZipArchive::new(Cursor::new(bytes)).unwrap())
+            });
+            assert!(
+                result.is_ok(),
+                "Malformed snapshot panicked instead of returning an error"
+            );
+            assert!(
+                result.unwrap().is_err(),
+                "Accepted invalid cross-section ranges with a valid ZIP CRC"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_rejects_invalid_class_and_package_links_without_panicking() {
+        use crate::constant_pool::ClassIndexConstantPool;
+        use crate::semantic_index::{DescriptorPool, ReferenceIndexData, SemanticIndex};
+        use crate::signature::IndexedClassSignature;
+        for corruption in 0..5 {
+            let mut pool = ClassIndexConstantPool::new(0);
+            let root_name = pool.add_string(b"").unwrap();
+            let class_name = pool.add_string(b"Fixture").unwrap();
+            let root = IndexedPackage::new(if corruption == 1 { 99 } else { root_name }, 0);
+            root.add_class(if corruption == 2 { 99 } else { 0 });
+            let mut class =
+                IndexedClass::new(0, if corruption == 3 { 99 } else { class_name }, 0, 0);
+            class.set_index(if corruption == 4 { 99 } else { 0 });
+            class.set_signature(IndexedClassSignature::read_from_buffer(&[0, 0, 0]).unwrap());
+            class.set_fields(vec![]).unwrap();
+            class.set_methods(vec![]).unwrap();
+            let semantic = SemanticIndex::new(
+                vec![0],
+                DescriptorPool::default(),
+                vec![0, 0],
+                vec![0, 0],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                ReferenceIndexData {
+                    offsets: vec![0, 0],
+                    literal_offsets: vec![0],
+                    literal_posting_offsets: vec![0],
+                    ..Default::default()
+                },
+            );
+            let payload = (pool, vec![root], vec![class], semantic)
+                .write_to_vec()
+                .unwrap();
+            let result = std::panic::catch_unwind(|| ClassIndex::read_from_buffer(&payload));
+            assert!(result.is_ok(), "Corruption {corruption} caused a panic");
+            assert_eq!(
+                corruption == 0,
+                result.unwrap().is_ok(),
+                "Corruption {corruption} had an incorrect verdict"
+            );
+        }
+    }
+
+    #[test]
+    fn signature_nesting_is_bounded_and_a_failed_read_does_not_poison_the_next() {
+        let mut payload = vec![8; 300];
+        payload.extend_from_slice(&[1, 5]);
+        assert!(IndexedSignatureType::read_from_buffer(&payload).is_err());
+        assert!(IndexedSignatureType::read_from_buffer(&[8, 1, 5]).is_ok());
     }
 
     #[test]

@@ -322,6 +322,173 @@ pub struct SemanticIndex {
 }
 
 impl SemanticIndex {
+    pub(crate) fn validate_snapshot(
+        &self,
+        classes: &[IndexedClass],
+        pool: &ClassIndexConstantPool,
+    ) -> anyhow::Result<()> {
+        ensure!(
+            self.class_source_ids.len() == classes.len(),
+            "Class source count does not match class count"
+        );
+        validate_offsets(
+            &self.field_offsets,
+            classes.len(),
+            self.field_descriptors.len(),
+            "field",
+        )?;
+        validate_offsets(
+            &self.method_offsets,
+            classes.len(),
+            self.method_descriptors.len(),
+            "method",
+        )?;
+        for (index, class) in classes.iter().enumerate() {
+            ensure!(
+                (self.field_offsets[index + 1] - self.field_offsets[index]) as usize
+                    == class.fields().len(),
+                "Field offset count mismatch"
+            );
+            ensure!(
+                (self.method_offsets[index + 1] - self.method_offsets[index]) as usize
+                    == class.methods().len(),
+                "Method offset count mismatch"
+            );
+        }
+        let descriptors = pool_offsets(&self.descriptor_pool.data, true)?;
+        for offset in self
+            .field_descriptors
+            .iter()
+            .chain(&self.method_descriptors)
+        {
+            ensure!(
+                descriptors.contains(offset),
+                "Invalid descriptor entry offset"
+            );
+        }
+        for (kind, search, count) in [
+            (SymbolKind::Field, &self.field_search, self.field_count()),
+            (SymbolKind::Method, &self.method_search, self.method_count()),
+        ] {
+            ensure!(search.len() == count, "Member search count mismatch");
+            let mut seen = vec![false; count];
+            let offsets = if kind == SymbolKind::Field {
+                &self.field_offsets
+            } else {
+                &self.method_offsets
+            };
+            for member in search {
+                ensure!(
+                    member.0 >> 48 == 0 && (member.class_index() as usize) < classes.len(),
+                    "Invalid search member owner"
+                );
+                let class = &classes[member.class_index() as usize];
+                let members = if kind == SymbolKind::Field {
+                    class.fields().len()
+                } else {
+                    class.methods().len()
+                };
+                ensure!(
+                    (member.member_index() as usize) < members,
+                    "Invalid search member index"
+                );
+                let ordinal = offsets[member.class_index() as usize] as usize
+                    + member.member_index() as usize;
+                ensure!(!seen[ordinal], "Duplicate search member index");
+                seen[ordinal] = true;
+            }
+            ensure!(
+                search
+                    .windows(2)
+                    .all(|pair| compare_members(classes, pool, kind, pair[0], pair[1]).is_le()),
+                "Member search is not sorted"
+            );
+        }
+        let names = pool_offsets(&self.extra_site_names.data, false)?;
+        for site in &self.extra_sites {
+            ensure!(
+                (site.owner_class_index as usize) < classes.len() && (1..=3).contains(&site.kind),
+                "Invalid extra reference site owner or kind"
+            );
+            ensure!(
+                names.contains(&site.name_offset) && descriptors.contains(&site.descriptor_offset),
+                "Invalid extra reference site name or descriptor offset"
+            );
+        }
+        let target_count = classes.len() + self.field_count() + self.method_count();
+        validate_offsets(
+            &self.reference_offsets,
+            target_count,
+            self.reference_sites.len(),
+            "reference",
+        )?;
+        for site in &self.reference_sites {
+            self.validate_site(site.storage_kind(), site.ordinal())?;
+            ensure!(
+                site.occurrence_count() > 0 && site.relation_mask() > 0,
+                "Invalid reference occurrence or relation count"
+            );
+        }
+        for range in self.reference_offsets.windows(2) {
+            ensure!(
+                self.reference_sites[range[0] as usize..range[1] as usize]
+                    .windows(2)
+                    .all(|pair| pair[0].identity() < pair[1].identity()),
+                "Reference postings are not strictly sorted"
+            );
+        }
+        ensure!(!self.literal_offsets.is_empty(), "Missing literal offsets");
+        let literal_count = self.literal_offsets.len() - 1;
+        validate_offsets(
+            &self.literal_offsets,
+            literal_count,
+            self.literal_values.len(),
+            "literal value",
+        )?;
+        validate_offsets(
+            &self.literal_posting_offsets,
+            literal_count,
+            self.literal_sites.len(),
+            "literal posting",
+        )?;
+        ensure!(
+            (1..literal_count)
+                .all(|index| self.literal((index - 1) as u32) < self.literal(index as u32)),
+            "Literals are not strictly sorted"
+        );
+        for site in &self.literal_sites {
+            self.validate_site(site.storage_kind(), site.ordinal())?;
+            ensure!(
+                site.occurrence_count() > 0,
+                "Invalid literal occurrence count"
+            );
+        }
+        for range in self.literal_posting_offsets.windows(2) {
+            ensure!(
+                self.literal_sites[range[0] as usize..range[1] as usize]
+                    .windows(2)
+                    .all(|pair| pair[0].identity() < pair[1].identity()),
+                "Literal postings are not strictly sorted"
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_site(&self, kind: u8, ordinal: u32) -> anyhow::Result<()> {
+        let count = match kind {
+            0 => self.class_source_ids.len(),
+            1 => self.field_count(),
+            2 => self.method_count(),
+            3 => self.extra_sites.len(),
+            _ => unreachable!(),
+        };
+        ensure!(
+            (ordinal as usize) < count,
+            "Reference site ordinal is out of range"
+        );
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         class_source_ids: Vec<u32>,
@@ -755,13 +922,53 @@ pub(crate) fn sort_members_for_search(
     members: &mut [PackedMemberId],
 ) {
     members.sort_unstable_by(|left, right| {
-        let left_name = member_name_from_parts(classes, constant_pool, kind, *left);
-        let right_name = member_name_from_parts(classes, constant_pool, kind, *right);
-        compare_ascii_folded(left_name, right_name)
-            .then_with(|| left_name.cmp(right_name))
-            .then_with(|| left.class_index().cmp(&right.class_index()))
-            .then_with(|| left.member_index().cmp(&right.member_index()))
+        compare_members(classes, constant_pool, kind, *left, *right)
     });
+}
+
+fn compare_members(
+    classes: &[IndexedClass],
+    pool: &ClassIndexConstantPool,
+    kind: SymbolKind,
+    left: PackedMemberId,
+    right: PackedMemberId,
+) -> Ordering {
+    let left_name = member_name_from_parts(classes, pool, kind, left);
+    let right_name = member_name_from_parts(classes, pool, kind, right);
+    compare_ascii_folded(left_name, right_name)
+        .then_with(|| left_name.cmp(right_name))
+        .then_with(|| left.class_index().cmp(&right.class_index()))
+        .then_with(|| left.member_index().cmp(&right.member_index()))
+}
+
+fn validate_offsets(offsets: &[u32], count: usize, total: usize, name: &str) -> anyhow::Result<()> {
+    ensure!(
+        offsets.len() == count + 1
+            && offsets.first() == Some(&0)
+            && offsets.last().copied().map(|value| value as usize) == Some(total)
+            && offsets.windows(2).all(|pair| pair[0] <= pair[1]),
+        "Invalid {name} section offsets"
+    );
+    Ok(())
+}
+
+fn pool_offsets(data: &[u8], ascii: bool) -> anyhow::Result<rustc_hash::FxHashSet<u32>> {
+    let mut entries = rustc_hash::FxHashSet::default();
+    let mut offset = 0;
+    while offset < data.len() {
+        let length = data
+            .get(offset..offset + 2)
+            .ok_or_else(|| anyhow!("Truncated string pool length"))?;
+        let length = u16::from_le_bytes([length[0], length[1]]) as usize;
+        let value = data
+            .get(offset + 2..offset + 2 + length)
+            .ok_or_else(|| anyhow!("Truncated string pool entry"))?;
+        ensure!(!ascii || value.is_ascii(), "Non-ASCII descriptor entry");
+        std::str::from_utf8(value).map_err(|_| anyhow!("Invalid UTF-8 string pool entry"))?;
+        entries.insert(offset as u32);
+        offset += 2 + length;
+    }
+    Ok(entries)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -870,6 +1077,62 @@ mod tests {
     fn symbol_ids_are_tagged_without_losing_the_ordinal() {
         let id = SymbolId::new(SymbolKind::Method, 123_456).unwrap();
         assert_eq!(id.as_u64(), (2_u64 << SYMBOL_KIND_SHIFT) | 123_456);
+    }
+
+    #[test]
+    fn snapshot_member_search_rejects_duplicates_invalid_links_and_wrong_order() {
+        use crate::class_index_members::IndexedField;
+        use crate::signature::IndexedSignatureType;
+
+        let mut pool = ClassIndexConstantPool::new(0);
+        let name = pool.add_string(b"value").unwrap();
+        let classes: Vec<_> = (0..2)
+            .map(|index| {
+                let mut class = IndexedClass::new(0, name, 0, 0);
+                class.set_index(index);
+                class
+                    .set_fields(vec![IndexedField::new(
+                        name,
+                        0,
+                        IndexedSignatureType::Unresolved,
+                    )])
+                    .unwrap();
+                class.set_methods(vec![]).unwrap();
+                class
+            })
+            .collect();
+        let first = PackedMemberId::new(0, 0).unwrap();
+        let second = PackedMemberId::new(1, 0).unwrap();
+        for (search, accepted) in [
+            (vec![first, second], true),
+            (vec![first, first], false),
+            (vec![second, first], false),
+            (vec![first, PackedMemberId::new(2, 0).unwrap()], false),
+            (vec![first, PackedMemberId::new(1, 1).unwrap()], false),
+        ] {
+            let mut descriptors = DescriptorPool::default();
+            let descriptor = descriptors.add("I").unwrap();
+            let semantic = SemanticIndex::new(
+                vec![0, 0],
+                descriptors,
+                vec![0, 1, 2],
+                vec![0, 0, 0],
+                vec![descriptor; 2],
+                vec![],
+                search,
+                vec![],
+                ReferenceIndexData {
+                    offsets: vec![0; 5],
+                    literal_offsets: vec![0],
+                    literal_posting_offsets: vec![0],
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                accepted,
+                semantic.validate_snapshot(&classes, &pool).is_ok()
+            );
+        }
     }
 
     #[test]

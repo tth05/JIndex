@@ -116,6 +116,127 @@ impl<T> MethodSignature<T> {
 pub type RawMethodSignature = MethodSignature<CompactString>;
 pub type IndexedMethodSignature = MethodSignature<u32>;
 
+impl SignatureType<u32> {
+    pub(crate) fn validate_snapshot(
+        &self,
+        entries: &rustc_hash::FxHashSet<u32>,
+        classes: usize,
+    ) -> anyhow::Result<()> {
+        use anyhow::ensure;
+        match self {
+            Self::Unresolved | Self::Primitive(_) => {}
+            Self::Generic(name) => ensure!(entries.contains(name), "Invalid generic name offset"),
+            Self::Object(class) => {
+                ensure!((*class as usize) < classes, "Invalid signature class index")
+            }
+            Self::ObjectPlus(inner) | Self::ObjectMinus(inner) | Self::Array(inner) => {
+                inner.validate_snapshot(entries, classes)?
+            }
+            Self::ObjectInnerClass(parts) => {
+                ensure!(!parts.is_empty(), "Empty inner-class signature");
+                for part in parts.iter() {
+                    part.validate_snapshot(entries, classes)?;
+                }
+            }
+            Self::ObjectTypeBounds(bounds) => {
+                ensure!(
+                    (bounds.0 as usize) < classes,
+                    "Invalid bounded signature class index"
+                );
+                for bound in bounds.1.iter().flatten() {
+                    bound.validate_snapshot(entries, classes)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl TypeParameterData<u32> {
+    fn validate_snapshot(
+        &self,
+        entries: &rustc_hash::FxHashSet<u32>,
+        classes: usize,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            entries.contains(&self.name),
+            "Invalid type parameter name offset"
+        );
+        for bound in self
+            .type_bound
+            .iter()
+            .chain(self.interface_bounds.iter().flatten())
+        {
+            bound.validate_snapshot(entries, classes)?;
+        }
+        Ok(())
+    }
+}
+
+impl ClassSignature<u32> {
+    pub(crate) fn validate_snapshot(
+        &self,
+        entries: &rustc_hash::FxHashSet<u32>,
+        classes: usize,
+    ) -> anyhow::Result<()> {
+        for parameter in self.generic_data.iter().flatten() {
+            parameter.validate_snapshot(entries, classes)?;
+        }
+        for signature in self
+            .super_class
+            .iter()
+            .chain(self.interfaces.iter().flatten())
+        {
+            signature.validate_snapshot(entries, classes)?;
+        }
+        Ok(())
+    }
+}
+
+impl MethodSignature<u32> {
+    pub(crate) fn validate_snapshot(
+        &self,
+        entries: &rustc_hash::FxHashSet<u32>,
+        classes: usize,
+    ) -> anyhow::Result<()> {
+        for parameter in self.generic_data().into_iter().flatten() {
+            parameter.validate_snapshot(entries, classes)?;
+        }
+        for signature in self
+            .parameters()
+            .into_iter()
+            .flatten()
+            .chain(self.exceptions().into_iter().flatten())
+            .chain(std::iter::once(&self.return_type))
+        {
+            signature.validate_snapshot(entries, classes)?;
+        }
+        Ok(())
+    }
+}
+
+impl EnclosingTypeInfo<u32> {
+    pub(crate) fn validate_snapshot(
+        &self,
+        entries: &rustc_hash::FxHashSet<u32>,
+        classes: usize,
+    ) -> anyhow::Result<()> {
+        if let Some(class) = self.class_name {
+            anyhow::ensure!((class as usize) < classes, "Invalid enclosing class index");
+        }
+        if let Some(name) = self.method_name {
+            anyhow::ensure!(
+                entries.contains(&name),
+                "Invalid enclosing method name offset"
+            );
+        }
+        if let Some(method) = &self.method_descriptor {
+            method.validate_snapshot(entries, classes)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Readable, Writable, Eq, PartialEq, Clone, Copy, Debug)]
 pub enum InnerClassType {
     Member,
