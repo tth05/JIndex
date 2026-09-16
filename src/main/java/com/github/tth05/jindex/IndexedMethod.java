@@ -27,6 +27,11 @@ public class IndexedMethod extends ClassChildObject {
         return executeWhileOwnerOpen(this::getAccessFlagsNative);
     }
 
+    /** Original class-file names in JVM descriptor order; unknown entries are null. */
+    public String[] getParameterNames() {
+        return executeWhileOwnerOpen(this::getParameterNamesNative);
+    }
+
     /**
      * @return The descriptor of this method
      */
@@ -74,6 +79,8 @@ public class IndexedMethod extends ClassChildObject {
     private native String getNameNative();
 
     private native int getAccessFlagsNative();
+
+    private native String[] getParameterNamesNative();
 
     private native String getDescriptorStringNative();
 

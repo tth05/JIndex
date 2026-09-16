@@ -6,6 +6,8 @@ JIndex builds an immutable, searchable index of JVM class sources. Rust owns the
 
 The index exposes packages, classes, fields and methods, including JVM descriptors, generic signatures, source IDs, nesting and declaration modifiers. Queries cover class and member names, semantic references, string literals and type hierarchies. Search pages report truncation; symbol and reference queries can filter by source ID.
 
+`IndexedMethod.getParameterNames()` returns original `MethodParameters` names, falling back to entry-scope local-variable names. Entries follow the raw JVM descriptor, including synthetic constructor parameters; missing names are `null`. Unicode names are preserved. Naming mappings and generated display names belong to the consumer.
+
 Sources can be archives or loose class bytes. Their order determines duplicate-class precedence. Multi-release JAR selection follows the target Java release. Source IDs identify inputs within one index; callers supply their application-specific meaning.
 
 Snapshots can be saved and reopened. Objects and IDs obtained from an index expire when it closes. Use try-with-resources to release native memory.

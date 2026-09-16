@@ -112,6 +112,41 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
     })
 }
 
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getParameterNamesNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+) -> jobjectArray {
+    with_jni_env!(env, {
+        let method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let string_class = env
+            .find_class(jni_str!("java/lang/String"))
+            .expect("String class");
+        let result = env
+            .new_object_array(
+                method.parameter_names().len() as jsize,
+                &string_class,
+                JObject::null(),
+            )
+            .expect("Parameter name array");
+        for (index, name) in method.parameter_names().iter().enumerate() {
+            if let Some(name) = name {
+                let value = env.new_string(name).expect("Parameter name");
+                result
+                    .set_element(env, index, &value)
+                    .expect("Parameter name element");
+            }
+        }
+        result.into_raw()
+    })
+}
+
 unsafe fn collect_method_type_parameters<'a>(
     class_index: &'a ClassIndex,
     indexed_class: &'a IndexedClass,
