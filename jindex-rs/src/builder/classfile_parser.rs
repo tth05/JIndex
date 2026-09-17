@@ -132,7 +132,7 @@ fn parameter_names(
     pool: &ConstantPool,
     descriptor: &str,
     access: u16,
-) -> anyhow::Result<Vec<Option<String>>> {
+) -> anyhow::Result<Vec<Option<Vec<u16>>>> {
     let signature = RawMethodSignature::from_data(descriptor, &|| None)?;
     let parameters = signature
         .parameters()
@@ -146,7 +146,11 @@ fn parameter_names(
         {
             for (name, entry) in names.iter_mut().zip(entries) {
                 if entry.name_index != 0 {
-                    *name = Some(pool.get_utf8(entry.name_index)?.to_owned());
+                    *name = Some(
+                        pool.get_java_string(entry.name_index)?
+                            .to_utf16()
+                            .into_owned(),
+                    );
                 }
             }
         }
@@ -161,7 +165,11 @@ fn parameter_names(
                             if let Some(entry) = entries.iter().find(|entry| {
                                 entry.index == slot && entry.start_pc == 0 && entry.length > 0
                             }) {
-                                names[ordinal] = Some(pool.get_utf8(entry.name_index)?.to_owned());
+                                names[ordinal] = Some(
+                                    pool.get_java_string(entry.name_index)?
+                                        .to_utf16()
+                                        .into_owned(),
+                                );
                             }
                         }
                     }

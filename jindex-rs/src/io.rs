@@ -15,7 +15,7 @@ use crate::signature::{IndexedEnclosingTypeInfo, IndexedMethodSignature, Indexed
 
 const SNAPSHOT_MAGIC: &[u8; 8] = b"JINDEX\0\0";
 // Method records now retain original parameter names in JVM descriptor order.
-const SNAPSHOT_VERSION: u16 = 7;
+const SNAPSHOT_VERSION: u16 = 8;
 const SNAPSHOT_HEADER_LENGTH: usize = SNAPSHOT_MAGIC.len() + size_of::<u16>();
 const SNAPSHOT_COMPRESSION_LEVEL: i32 = 3;
 

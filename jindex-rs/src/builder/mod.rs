@@ -410,7 +410,7 @@ struct MethodInfo {
     pub jvm_descriptor: CompactString,
     pub signature: RawMethodSignature,
     pub access_flags: u16,
-    pub parameter_names: Vec<Option<String>>,
+    pub parameter_names: Vec<Option<Vec<u16>>>,
 }
 
 #[derive(Debug, Default)]

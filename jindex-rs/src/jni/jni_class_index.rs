@@ -7,14 +7,13 @@ use jni::strings::JNIString;
 use jni::sys::{jint, jlong, jobject};
 use jni::{jni_sig, jni_str, Env, EnvUnowned};
 use jvmti_bindings::mutf8;
-use std::ffi::CString;
 
 use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
 use crate::constant_pool::{MatchMode, SearchMode, SearchOptions};
 use crate::io::{load_class_index_from_file, save_class_index_to_file};
 use crate::jni::cache::{get_class_index, init_field_ids};
-use crate::jni::{get_enum_ordinal, propagate_error, with_jni_env};
+use crate::jni::{get_enum_ordinal, new_java_string_from_utf16, propagate_error, with_jni_env};
 use crate::package_index::IndexedPackage;
 use crate::reference_relations::{public_mask, STRING_LITERAL_PUBLIC_MASK};
 use crate::semantic_index::{
@@ -679,16 +678,6 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_ClassIndex_findLitera
 fn java_string_to_utf16(env: &Env<'_>, value: &JString<'_>) -> anyhow::Result<Vec<u16>> {
     let chars = value.mutf8_chars(env)?;
     Ok(mutf8::decode_utf16(chars.to_bytes())?)
-}
-
-fn new_java_string_from_utf16<'local>(
-    env: &mut Env<'local>,
-    value: &[u16],
-) -> jni::errors::Result<JString<'local>> {
-    let encoded = mutf8::encode_utf16(value);
-    let encoded = CString::new(encoded).expect("Modified UTF-8 contains no zero bytes");
-    let encoded = unsafe { JNIString::from_cstring(encoded) };
-    JString::from_jni_str(env, &encoded)
 }
 
 trait StoredReferenceSite: Copy {

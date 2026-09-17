@@ -18,6 +18,26 @@ class ParameterNamesTest {
         try (ClassIndex index = ClassIndex.fromFile(snapshot.toString())) { verify(index); }
     }
 
+    @Test void preservesAllJavaUtf16NamesFromBothMetadataSources(@TempDir Path directory) throws Exception {
+        String[] names = {new String(new char[]{0xd800}), new String(new char[]{0xdc00}), "supplementary_\uD83D\uDE80"};
+        var writer = new ClassWriter(0);
+        writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT, "UtfNames", null, "java/lang/Object", null);
+        var parameters = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT, "parameters", "(III)V", null, null);
+        for (String name : names) parameters.visitParameter(name, 0);
+        parameters.visitEnd();
+        var locals = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "locals", "(III)V", null, null);
+        body(locals, names, new String[]{"I", "I", "I"}, new int[]{0, 1, 2}, 3);
+        writer.visitEnd();
+        Path snapshot = directory.resolve("utf16.index");
+        try (var index = ClassIndex.fromBytes(List.of(writer.toByteArray()))) {
+            for (var method : index.findClass("UtfNames").getMethods()) assertArrayEquals(names, method.getParameterNames());
+            index.saveToFile(snapshot.toString());
+        }
+        try (var index = ClassIndex.fromFile(snapshot.toString())) {
+            for (var method : index.findClass("UtfNames").getMethods()) assertArrayEquals(names, method.getParameterNames());
+        }
+    }
+
     private static void verify(ClassIndex index) {
         var methods = index.findClass("Names").getMethods();
         assertArrayEquals(new String[]{"ticks", "ratio", "名前"}, named(methods, "instance").getParameterNames());

@@ -232,14 +232,14 @@ pub struct IndexedMethod {
     name_index: u32,
     access_flags: u16,
     method_signature: IndexedMethodSignature,
-    parameter_names: Vec<Option<String>>,
+    parameter_names: Vec<Option<Vec<u16>>>,
 }
 
 impl IndexedMethod {
     pub(crate) fn new(
         name_index: u32,
         access_flags: u16,
-        parameter_names: Vec<Option<String>>,
+        parameter_names: Vec<Option<Vec<u16>>>,
         method_signature: IndexedMethodSignature,
     ) -> Self {
         Self {
@@ -250,7 +250,7 @@ impl IndexedMethod {
         }
     }
 
-    pub fn parameter_names(&self) -> &[Option<String>] {
+    pub fn parameter_names(&self) -> &[Option<Vec<u16>>] {
         &self.parameter_names
     }
 
