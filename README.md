@@ -35,7 +35,7 @@ repositories {
     maven { url = uri('https://packagecloud.io/tth05/repo/maven2') }
 }
 dependencies {
-    implementation 'com.github.tth05:jindex:2.0.0'
+    implementation 'com.github.tth05:jindex:2.1.0'
 }
 ```
 
