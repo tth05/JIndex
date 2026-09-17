@@ -77,6 +77,12 @@ pub(super) fn parse_class(
                 })
                 .with_context(|| format!("Invalid method signature {parsed_signature}"))?,
                 access_flags: method.access_flags,
+                parameter_names: parameter_names(
+                    &method.attributes,
+                    pool,
+                    descriptor,
+                    method.access_flags,
+                )?,
             });
             site
         } else {
@@ -119,6 +125,66 @@ pub(super) fn parse_class(
         methods,
         references: references.finish(),
     })
+}
+
+fn parameter_names(
+    attributes: &[AttributeInfo],
+    pool: &ConstantPool,
+    descriptor: &str,
+    access: u16,
+) -> anyhow::Result<Vec<Option<Vec<u16>>>> {
+    let signature = RawMethodSignature::from_data(descriptor, &|| None)?;
+    let parameters = signature
+        .parameters()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut names = vec![None; parameters.len()];
+    for attribute in attributes {
+        if let AttributeInfo::MethodParameters {
+            parameters: entries,
+        } = attribute
+        {
+            for (name, entry) in names.iter_mut().zip(entries) {
+                if entry.name_index != 0 {
+                    *name = Some(
+                        pool.get_java_string(entry.name_index)?
+                            .to_utf16()
+                            .into_owned(),
+                    );
+                }
+            }
+        }
+    }
+    let mut slot = if access & 0x0008 == 0 { 1 } else { 0 };
+    for (ordinal, parameter) in parameters.iter().enumerate() {
+        if names[ordinal].is_none() {
+            for attribute in attributes {
+                if let AttributeInfo::Code(code) = attribute {
+                    for nested in &code.attributes {
+                        if let AttributeInfo::LocalVariableTable { entries } = nested {
+                            if let Some(entry) = entries.iter().find(|entry| {
+                                entry.index == slot && entry.start_pc == 0 && entry.length > 0
+                            }) {
+                                names[ordinal] = Some(
+                                    pool.get_java_string(entry.name_index)?
+                                        .to_utf16()
+                                        .into_owned(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        slot += match parameter {
+            RawSignatureType::Primitive(
+                crate::signature::SignaturePrimitive::Long
+                | crate::signature::SignaturePrimitive::Double,
+            ) => 2,
+            _ => 1,
+        };
+    }
+    Ok(names)
 }
 
 fn class_signature(

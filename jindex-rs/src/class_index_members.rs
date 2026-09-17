@@ -232,19 +232,26 @@ pub struct IndexedMethod {
     name_index: u32,
     access_flags: u16,
     method_signature: IndexedMethodSignature,
+    parameter_names: Vec<Option<Vec<u16>>>,
 }
 
 impl IndexedMethod {
     pub(crate) fn new(
         name_index: u32,
         access_flags: u16,
+        parameter_names: Vec<Option<Vec<u16>>>,
         method_signature: IndexedMethodSignature,
     ) -> Self {
         Self {
             name_index,
             access_flags,
             method_signature,
+            parameter_names,
         }
+    }
+
+    pub fn parameter_names(&self) -> &[Option<Vec<u16>>] {
+        &self.parameter_names
     }
 
     pub fn method_name<'b>(&self, constant_pool: &'b ClassIndexConstantPool) -> &'b AsciiStr {

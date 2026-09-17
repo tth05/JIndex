@@ -220,6 +220,7 @@ impl ClassIndexBuilder {
                 indexed_methods.push(IndexedMethod::new(
                     method_name_index,
                     method_info.access_flags,
+                    method_info.parameter_names.clone(),
                     method_info.signature.to_indexed_type(
                         &mut constant_pool,
                         &mut constant_pool_map,
@@ -409,6 +410,7 @@ struct MethodInfo {
     pub jvm_descriptor: CompactString,
     pub signature: RawMethodSignature,
     pub access_flags: u16,
+    pub parameter_names: Vec<Option<Vec<u16>>>,
 }
 
 #[derive(Debug, Default)]

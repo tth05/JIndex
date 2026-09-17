@@ -2,8 +2,11 @@ use crate::class_index::ClassIndex;
 use crate::class_index_members::IndexedClass;
 use crate::signature::{IndexedSignatureType, IndexedTypeParameterData, SignatureType};
 use ascii::AsAsciiStr;
-use jni::objects::JObject;
+use jni::objects::{JObject, JString};
+use jni::strings::JNIString;
 use jni::{jni_sig, jni_str, Env};
+use jvmti_bindings::mutf8;
+use std::ffi::CString;
 
 const ACC_STATIC: u16 = 0x0008;
 
@@ -98,4 +101,14 @@ fn collect_type_parameters<'a>(
     if let Some(enclosing_class) = current_class.enclosing_class(class_index) {
         collect_type_parameters(enclosing_class, class_index, type_parameters);
     }
+}
+
+fn new_java_string_from_utf16<'local>(
+    env: &mut Env<'local>,
+    value: &[u16],
+) -> jni::errors::Result<JString<'local>> {
+    let encoded = mutf8::encode_utf16(value);
+    let encoded = CString::new(encoded).expect("Modified UTF-8 contains no zero bytes");
+    let encoded = unsafe { JNIString::from_cstring(encoded) };
+    JString::from_jni_str(env, &encoded)
 }

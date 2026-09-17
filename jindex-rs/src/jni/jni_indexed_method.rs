@@ -1,7 +1,9 @@
 use crate::class_index::{ClassIndex, MethodWithClass};
 use crate::class_index_members::{IndexedClass, IndexedMethod};
 use crate::jni::cache::{cached_field_ids, get_class_index, get_field_with_id};
-use crate::jni::{collect_type_parameters, is_basic_signature_type, member_position};
+use crate::jni::{
+    collect_type_parameters, is_basic_signature_type, member_position, new_java_string_from_utf16,
+};
 use crate::semantic_index::SymbolKind;
 use crate::signature::indexed_signature::ToSignatureIndexedType;
 use crate::signature::{IndexedMethodSignature, IndexedSignatureType, TypeParameterData};
@@ -109,6 +111,41 @@ pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getDesc
         ))
         .expect("Unable to create descriptor String")
         .into_raw()
+    })
+}
+
+#[no_mangle]
+/// # Safety
+/// The pointer field has to be valid.
+pub unsafe extern "system" fn Java_com_github_tth05_jindex_IndexedMethod_getParameterNamesNative(
+    mut env: EnvUnowned<'_>,
+    this: JObject,
+) -> jobjectArray {
+    with_jni_env!(env, {
+        let method = get_field_with_id::<IndexedMethod>(
+            env,
+            &this,
+            &cached_field_ids().class_index_child_self_pointer,
+        );
+        let string_class = env
+            .find_class(jni_str!("java/lang/String"))
+            .expect("String class");
+        let result = env
+            .new_object_array(
+                method.parameter_names().len() as jsize,
+                &string_class,
+                JObject::null(),
+            )
+            .expect("Parameter name array");
+        for (index, name) in method.parameter_names().iter().enumerate() {
+            if let Some(name) = name {
+                let value = new_java_string_from_utf16(env, name).expect("Parameter name");
+                result
+                    .set_element(env, index, &value)
+                    .expect("Parameter name element");
+            }
+        }
+        result.into_raw()
     })
 }
 
